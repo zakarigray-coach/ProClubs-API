@@ -1,0 +1,10 @@
+{
+  "default": {
+    "pace": 28,
+    "shooting": 34,
+    "passing": 24,
+    "dribbling": 30,
+    "defending": 20,
+    "physical": 26
+  }
+}

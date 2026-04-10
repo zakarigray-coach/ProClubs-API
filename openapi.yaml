@@ -1,0 +1,142 @@
+openapi: 3.1.0
+info:
+  title: Pro Clubs Custom Builder API
+  version: 1.0.0
+  description: API for EA FC Pro Clubs archetype discovery and AP optimization.
+servers:
+  - url: https://YOUR-RENDER-URL.onrender.com
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+  /archetypes:
+    get:
+      operationId: listArchetypes
+      summary: List supported archetypes
+      responses:
+        '200':
+          description: Archetypes returned
+  /cost-models/default:
+    get:
+      operationId: getDefaultCostModel
+      summary: Get the default AP cost model
+      responses:
+        '200':
+          description: Cost model returned
+  /optimize-build:
+    post:
+      operationId: optimizeBuild
+      summary: Create an optimized build using an archetype, AP total, and cost model
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [archetype, position, goal, totalAP]
+              properties:
+                archetype:
+                  type: string
+                  example: magician
+                position:
+                  type: string
+                  example: CAM
+                goal:
+                  type: string
+                  example: performance
+                totalAP:
+                  type: integer
+                  example: 2231
+                height:
+                  type: string
+                  example: 5'8"
+                weight:
+                  type: string
+                  example: 152 lbs
+                preferredFoot:
+                  type: string
+                  example: Right
+                playstyle:
+                  type: string
+                  example: agile_creator
+                categoryCosts:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                  example:
+                    pace: 28
+                    shooting: 34
+                    passing: 24
+                    dribbling: 30
+                    physical: 26
+                    defending: 20
+                categoryCaps:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                lockedSpend:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                minimumSpend:
+                  type: object
+                  additionalProperties:
+                    type: integer
+      responses:
+        '200':
+          description: Optimized build returned
+  /calculate-build:
+    post:
+      operationId: calculateBuild
+      summary: Alias for optimize-build
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildRequest'
+      responses:
+        '200':
+          description: Calculated build returned
+components:
+  schemas:
+    BuildRequest:
+      type: object
+      required: [archetype, position, goal, totalAP]
+      properties:
+        archetype:
+          type: string
+        position:
+          type: string
+        goal:
+          type: string
+        totalAP:
+          type: integer
+        height:
+          type: string
+        weight:
+          type: string
+        preferredFoot:
+          type: string
+        playstyle:
+          type: string
+        categoryCosts:
+          type: object
+          additionalProperties:
+            type: integer
+        categoryCaps:
+          type: object
+          additionalProperties:
+            type: integer
+        lockedSpend:
+          type: object
+          additionalProperties:
+            type: integer
+        minimumSpend:
+          type: object
+          additionalProperties:
+            type: integer

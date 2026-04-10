@@ -1,0 +1,14 @@
+{
+  "name": "proclubs-custom-api",
+  "version": "1.0.0",
+  "description": "Custom API for EA FC Pro Clubs archetype building and GPT Actions integration",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  }
+}

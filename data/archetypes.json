@@ -1,0 +1,62 @@
+{
+  "Magician": {
+    "positionFocus": [
+      "CAM",
+      "ST",
+      "Winger"
+    ],
+    "strengths": [
+      "dribbling",
+      "agility",
+      "balance",
+      "reactions"
+    ],
+    "weaknesses": [
+      "strength",
+      "defending"
+    ]
+  },
+  "Target": {
+    "positionFocus": [
+      "ST"
+    ],
+    "strengths": [
+      "strength",
+      "finishing",
+      "heading"
+    ],
+    "weaknesses": [
+      "agility",
+      "balance"
+    ]
+  },
+  "Spark": {
+    "positionFocus": [
+      "CAM",
+      "Winger"
+    ],
+    "strengths": [
+      "pace",
+      "dribbling",
+      "passing"
+    ],
+    "weaknesses": [
+      "physical"
+    ]
+  },
+  "Maestro": {
+    "positionFocus": [
+      "CM",
+      "CAM"
+    ],
+    "strengths": [
+      "passing",
+      "vision",
+      "control"
+    ],
+    "weaknesses": [
+      "pace",
+      "strength"
+    ]
+  }
+}
