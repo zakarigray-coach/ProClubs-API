@@ -18,6 +18,21 @@ let OpenAI;
 try { OpenAI = require('openai'); } catch { OpenAI = null; }
 
 const pendingAudits = new Map();
+const SIGNING_ANGLES = [
+  'earning a starting place through competition',
+  'tactical fit and understanding the club’s playing style',
+  'leadership and standards inside the dressing room',
+  'versatility and helping the squad in multiple situations',
+  'club culture, trust, and becoming part of the group',
+  'development, improvement, and learning from teammates',
+  'ambition, trophies, and competing at the highest level',
+  'handling pressure and delivering in important matches',
+];
+const LEADERSHIP_ROLES = ['Head Coach', 'Assistant Manager', 'Sporting Director', 'Club Owner'];
+
+function randomChoice(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
 
 const TEAMS = {
   birmingham: {
@@ -47,8 +62,8 @@ const match = clubOption(new SlashCommandBuilder().setName('match').setDescripti
 const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescription('Announce a player signing'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('position').setDescription('Position(s)').setRequired(true))
-  .addStringOption(o => o.setName('quote_one').setDescription('Optional real comment from the player'))
-  .addStringOption(o => o.setName('quote_two').setDescription('Optional second real comment from the player'))
+  .addStringOption(o => o.setName('player_comment').setDescription('Optional real player comment; otherwise the bot creates a simulated one'))
+  .addStringOption(o => o.setName('club_comment').setDescription('Optional real coach/owner comment; otherwise the bot creates a simulated one'))
   .addStringOption(o => o.setName('details').setDescription('Experience or additional signing details'))
   .addAttachmentOption(o => o.setName('graphic').setDescription('Optional signing graphic'));
 
@@ -80,9 +95,15 @@ function clean(value, max) {
 async function aiArticle(team, type, facts, graphic) {
   if (!process.env.OPENAI_API_KEY || !OpenAI) return null;
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const signingDirection = type === 'signing' ? {
+    angle: randomChoice(SIGNING_ANGLES),
+    leadershipRole: randomChoice(LEADERSHIP_ROLES),
+  } : null;
   const userContent = [{
     type: 'input_text',
     text: 'Story type: ' + type + '\nSupplied facts: ' + JSON.stringify(facts) +
+      (signingDirection ? '\nSigning angle and management voice to use this time: ' +
+        JSON.stringify(signingDirection) : '') +
       '\nRead every legible fact in the attached graphic. If something is unclear, omit it.',
   }];
   if (graphic) userContent.push({ type: 'input_image', image_url: graphic.url, detail: 'high' });
@@ -96,11 +117,15 @@ async function aiArticle(team, type, facts, graphic) {
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
           team.label + ' in ' + team.league + '. Your distinct writing voice: ' + team.voice + ' Analyze the supplied graphic according to the story type. ' +
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
-          'For a signing, identify the visible player name, club branding, and announcement wording. If the supplied ' +
-          'context includes genuine player comments, include up to two as short attributed quotations. Omit quotations ' +
-          'when none are supplied. Do not replace missing comments with invented ones. Write an energetic social-media ' +
-          'sports post using only visible or supplied facts. Never invent a stat, quote, player, position, or result. ' +
-          'Start with a short all-caps headline, then write one or two short paragraphs.',
+          'For a signing, identify the visible player name, club branding, and announcement wording. Include exactly ' +
+          'one player comment and one club-leadership comment. Use genuine supplied comments verbatim when available. ' +
+          'When comments are not supplied, create natural simulated press-conference-style comments tied to the provided ' +
+          'signing angle. Attribute the player comment to the player, and attribute the leadership comment only to the ' +
+          'provided role—Head Coach, Assistant Manager, Sporting Director, or Club Owner—never invent a real person’s name. ' +
+          'Vary sentence structure and substance; avoid stock lines such as “excited to be here” unless supported by context. ' +
+          'Do not invent career history, statistics, promises, or personal facts. End generated-comment signing posts with ' +
+          'the italic line “Simulated press-conference comments.” Write an energetic social-media post using only visible ' +
+          'or supplied facts outside those clearly disclosed simulated comments. Start with a short all-caps headline.',
       },
       { role: 'user', content: userContent },
     ],
@@ -114,12 +139,16 @@ function fallbackArticle(team, type, facts) {
       (facts.context ? facts.context : 'Add OPENAI_API_KEY to let the reporter read the score and stats automatically.');
   }
   if (type === 'signing') {
-    const quotes = [facts.quoteOne, facts.quoteTwo].filter(Boolean)
-      .map(quote => '“' + quote.replace(/^["“]|["”]$/g, '') + '” — ' + facts.player)
-      .join('\n\n');
+    const playerComment = facts.playerComment
+      ? '“' + facts.playerComment.replace(/^["“]|["”]$/g, '') + '” — ' + facts.player
+      : '';
+    const clubComment = facts.clubComment
+      ? '“' + facts.clubComment.replace(/^["“]|["”]$/g, '') + '” — Club representative'
+      : '';
+    const comments = [playerComment, clubComment].filter(Boolean).join('\n\n');
     return team.label + ' has officially added ' + facts.player + ' to the squad ahead of its ' +
       team.league + ' campaign.' + (facts.details ? ' ' + facts.details : '') +
-      (quotes ? '\n\n' + quotes : '') + '\n\nWelcome to the club, ' + facts.player + '.';
+      (comments ? '\n\n' + comments : '') + '\n\nWelcome to the club, ' + facts.player + '.';
   }
   return team.label + ' confirms that ' + facts.player + ' has departed the club.' +
     (facts.details ? ' ' + facts.details : '') + '\n\nThe club thanks ' + facts.player +
@@ -454,8 +483,8 @@ async function startBot() {
       facts = {
         player: clean(interaction.options.getString('player'), 100),
         position: clean(interaction.options.getString('position'), 100),
-        quoteOne: clean(interaction.options.getString('quote_one'), 400),
-        quoteTwo: clean(interaction.options.getString('quote_two'), 400),
+        playerComment: clean(interaction.options.getString('player_comment'), 400),
+        clubComment: clean(interaction.options.getString('club_comment'), 400),
         details: clean(interaction.options.getString('details'), 700),
       };
       title = team.emoji + ' OFFICIAL: ' + facts.player + ' SIGNS';
