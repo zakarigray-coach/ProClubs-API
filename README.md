@@ -17,11 +17,12 @@ The bot publishes match reports, player signings, and departures as polished Dis
 
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create an application named **RT Football Media**.
 2. Open **Bot**, create the bot, and copy/reset its token.
-3. Open **OAuth2 → URL Generator**.
-4. Select scopes `bot` and `applications.commands`.
-5. Select permissions: **View Channels**, **Send Messages**, **Embed Links**, **Attach Files**, and **Read Message History**.
-6. Use the generated URL to invite the bot to your server.
-7. Turn on Discord Developer Mode, then copy your application ID and server ID.
+3. Under **Bot → Privileged Gateway Intents**, enable **Message Content Intent**.
+4. Open **OAuth2 → URL Generator**.
+5. Select scopes `bot` and `applications.commands`.
+6. Select permissions: **View Channels**, **Send Messages**, **Embed Links**, **Attach Files**, and **Read Message History**.
+7. Use the generated URL to invite the bot to your server.
+8. Turn on Discord Developer Mode, then copy your application ID and server ID.
 
 ## Environment variables
 
@@ -51,3 +52,14 @@ Use `/match`, select Birmingham City or CrownFC, and upload the OurProClubs imag
 ## Hosting
 
 The process must remain online for the bot to respond. It can run on Railway, Render, Fly.io, a VPS, or a home computer. Add secrets through the host’s environment-variable settings—never place them directly in GitHub.
+
+## Automatic channel watching
+
+The bot automatically watches the existing league channels shown in your Discord layout:
+
+- `mlpc-match-results` → Teagan reports for CrownFC
+- `mlpc-signing-announcements` → Teagan posts for CrownFC
+- `mpl-match-results` → Raine reports for Birmingham City
+- `mpl-signing-announcements` → Raine posts for Birmingham City
+
+Post a graphic normally, or let another bot post it. RT Football Media reads image attachments and embedded images, then publishes the reporter post in the same channel. It ignores its own messages to prevent loops. The bot role needs View Channel, Read Message History, Send Messages, and Embed Links in each watched channel.
