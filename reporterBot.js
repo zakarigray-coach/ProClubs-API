@@ -29,12 +29,9 @@ function clubOption(command) {
     ));
 }
 
-const match = clubOption(new SlashCommandBuilder().setName('match').setDescription('Publish an AI-style match report'))
-  .addStringOption(o => o.setName('opponent').setDescription('Opponent').setRequired(true))
-  .addIntegerOption(o => o.setName('our_score').setDescription('Your score').setRequired(true).setMinValue(0))
-  .addIntegerOption(o => o.setName('their_score').setDescription('Opponent score').setRequired(true).setMinValue(0))
-  .addStringOption(o => o.setName('details').setDescription('Scorers, assists, saves, MVP, and key moments').setRequired(true))
-  .addAttachmentOption(o => o.setName('graphic').setDescription('Optional OurProClubs/result graphic'));
+const match = clubOption(new SlashCommandBuilder().setName('match').setDescription('Turn a match graphic into a news article'))
+  .addAttachmentOption(o => o.setName('graphic').setDescription('OurProClubs or match-stat graphic').setRequired(true))
+  .addStringOption(o => o.setName('context').setDescription('Optional facts not visible in the graphic'));
 
 const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescription('Announce a player signing'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
@@ -52,32 +49,38 @@ function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
 }
 
-async function aiArticle(team, type, facts) {
+async function aiArticle(team, type, facts, graphic) {
   if (!process.env.OPENAI_API_KEY || !OpenAI) return null;
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const userContent = [{
+    type: 'input_text',
+    text: 'Story type: ' + type + '\nSupplied facts: ' + JSON.stringify(facts) +
+      '\nRead every legible fact in the attached graphic. If something is unclear, omit it.',
+  }];
+  if (graphic) userContent.push({ type: 'input_image', image_url: graphic.url, detail: 'high' });
+
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    max_output_tokens: 350,
+    max_output_tokens: 500,
     input: [
       {
         role: 'system',
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
-          team.label + ' in ' + team.league + '. Write energetic, credible Discord sports copy. ' +
-          'Use only supplied facts. Never invent stats, quotes, or results. Return exactly two short paragraphs.',
+          team.label + ' in ' + team.league + '. Analyze the supplied match graphic, identify the visible ' +
+          'teams, final score, player ratings, goals, assists, saves, cards, and other legible stats, then ' +
+          'write an energetic, credible Discord sports article. Use only visible or supplied facts. Never ' +
+          'invent a stat, quote, player, or result. Start with a short all-caps headline, then write two short paragraphs.',
       },
-      { role: 'user', content: 'Story type: ' + type + '\nFacts: ' + JSON.stringify(facts) },
+      { role: 'user', content: userContent },
     ],
   });
-  return clean(response.output_text, 1800) || null;
+  return clean(response.output_text, 2000) || null;
 }
 
 function fallbackArticle(team, type, facts) {
   if (type === 'match') {
-    const result = facts.ourScore > facts.theirScore ? 'victory' :
-      facts.ourScore < facts.theirScore ? 'defeat' : 'draw';
-    return team.label + ' finished with a ' + facts.ourScore + '-' + facts.theirScore + ' ' + result +
-      ' against ' + facts.opponent + '. ' + facts.details + '\n\nThe final whistle is in, and ' +
-      team.reporter + ' has the story for RT Football Media.';
+    return 'The match graphic was received, but image analysis requires an OpenAI API key. ' +
+      (facts.context ? facts.context : 'Add OPENAI_API_KEY to let the reporter read the score and stats automatically.');
   }
   if (type === 'signing') {
     return team.label + ' has officially added ' + facts.player + ' to the squad. The ' + facts.position +
@@ -89,8 +92,8 @@ function fallbackArticle(team, type, facts) {
     ' for their time and wishes them the best moving forward.';
 }
 
-async function buildStory(team, type, facts) {
-  try { return (await aiArticle(team, type, facts)) || fallbackArticle(team, type, facts); }
+async function buildStory(team, type, facts, graphic) {
+  try { return (await aiArticle(team, type, facts, graphic)) || fallbackArticle(team, type, facts); }
   catch (error) {
     console.error('AI generation failed; using built-in copy:', error.message);
     return fallbackArticle(team, type, facts);
@@ -139,14 +142,8 @@ async function startBot() {
     let facts;
     let title;
     if (interaction.commandName === 'match') {
-      facts = {
-        opponent: clean(interaction.options.getString('opponent'), 100),
-        ourScore: interaction.options.getInteger('our_score'),
-        theirScore: interaction.options.getInteger('their_score'),
-        details: clean(interaction.options.getString('details'), 1000),
-      };
-      title = team.emoji + ' FULL TIME | ' + team.label + ' ' + facts.ourScore + '-' +
-        facts.theirScore + ' ' + facts.opponent;
+      facts = { context: clean(interaction.options.getString('context'), 1000) };
+      title = team.emoji + ' MATCH REPORT | ' + team.label;
     } else if (interaction.commandName === 'signing') {
       facts = {
         player: clean(interaction.options.getString('player'), 100),
@@ -163,7 +160,7 @@ async function startBot() {
     }
 
     const graphic = interaction.options.getAttachment('graphic');
-    const story = await buildStory(team, interaction.commandName, facts);
+    const story = await buildStory(team, interaction.commandName, facts, graphic);
     await interaction.editReply({ embeds: [makeEmbed(team, title, story, graphic)] });
   });
 
