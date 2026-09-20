@@ -88,12 +88,12 @@ The audit makes no changes by itself. It provides **Approve Safe Cleanup** and *
 
 Set `RT_MEDIA_LOGO_URL` in Railway to a direct public URL for the official RT Football Media logo. Reporter embeds then use the logo as the author/footer icon instead of spelling out the network name.
 
-For an automatic signing post, include genuine player comments in the caption accompanying the graphic, for example:
+Signing posts use one player comment and one club-leadership comment. You may provide genuine comments in the caption accompanying the graphic:
 
 ```text
 Player: Tru
-Quote 1: I'm excited to join Birmingham City and compete in MPL.
-Quote 2: I believe this group has everything needed to challenge for trophies.
+Player Comment: I want to earn my place and help the group compete every match.
+Club Comment: His composure and willingness to do the work fit the standards we are building.
 ```
 
-The reporter may use up to two supplied comments and will omit quotes when none are provided. It is instructed never to invent player comments.
+When comments are not supplied, the bot creates clearly disclosed simulated press-conference-style comments. It varies the signing angle and rotates the leadership attribution among Head Coach, Assistant Manager, Sporting Director, and Club Owner. It never invents a real person’s name, career history, statistics, or personal facts.
