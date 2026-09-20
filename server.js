@@ -1,6 +1,8 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
+const { startBot } = require('./reporterBot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,4 +44,9 @@ app.post('/calculate-build', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`proclubs-custom-api running on port ${PORT}`);
+});
+
+startBot().catch(err => {
+  console.error('Discord bot failed to start:', err);
+  process.exitCode = 1;
 });
