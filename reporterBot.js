@@ -66,10 +66,11 @@ async function aiArticle(team, type, facts, graphic) {
       {
         role: 'system',
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
-          team.label + ' in ' + team.league + '. Analyze the supplied match graphic, identify the visible ' +
-          'teams, final score, player ratings, goals, assists, saves, cards, and other legible stats, then ' +
-          'write an energetic, credible Discord sports article. Use only visible or supplied facts. Never ' +
-          'invent a stat, quote, player, or result. Start with a short all-caps headline, then write two short paragraphs.',
+          team.label + ' in ' + team.league + '. Analyze the supplied graphic according to the story type. ' +
+          'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
+          'For a signing, identify the visible player name, position, club branding, and announcement wording. ' +
+          'Write an energetic social-media sports post using only visible or supplied facts. Never invent a stat, ' +
+          'quote, player, position, or result. Start with a short all-caps headline, then write one or two short paragraphs.',
       },
       { role: 'user', content: userContent },
     ],
@@ -128,8 +129,54 @@ async function startBot() {
   }
 
   await registerCommands(token, clientId, process.env.DISCORD_GUILD_ID);
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
+  });
   client.once('ready', () => console.log('RT Football Media logged in as ' + client.user.tag));
+
+  client.on('messageCreate', async message => {
+    if (!message.guild || message.author.id === client.user.id) return;
+
+    const channelName = String(message.channel.name || '').toLowerCase();
+    const categoryName = String(message.channel.parent && message.channel.parent.name || '').toLowerCase();
+    const location = categoryName + ' ' + channelName;
+
+    let team = null;
+    if (location.includes('mlpc')) team = TEAMS.crownfc;
+    else if (location.includes('mpl')) team = TEAMS.birmingham;
+    if (!team) return;
+
+    let type = null;
+    if (channelName.includes('match-results')) type = 'match';
+    else if (channelName.includes('signing-announcements')) type = 'signing';
+    if (!type) return;
+
+    const attachment = message.attachments.find(item =>
+      (item.contentType && item.contentType.startsWith('image/')) ||
+      /\.(png|jpe?g|webp|gif)$/i.test(item.url)
+    );
+    const embeddedUrl = message.embeds.find(item => item.image && item.image.url)?.image?.url ||
+      message.embeds.find(item => item.thumbnail && item.thumbnail.url)?.thumbnail?.url;
+    const imageUrl = attachment ? attachment.url : embeddedUrl;
+    if (!imageUrl) return;
+
+    try {
+      await message.channel.sendTyping();
+      const graphic = { url: imageUrl, contentType: attachment && attachment.contentType || 'image/unknown' };
+      const facts = { context: clean(message.content, 1000) };
+      const story = await buildStory(team, type, facts, graphic);
+      const title = type === 'match'
+        ? team.emoji + ' MATCH REPORT | ' + team.label
+        : team.emoji + ' OFFICIAL SIGNING | ' + team.label;
+      await message.channel.send({ embeds: [makeEmbed(team, title, story, graphic)] });
+    } catch (error) {
+      console.error('Automatic reporter post failed:', error);
+    }
+  });
 
   client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
