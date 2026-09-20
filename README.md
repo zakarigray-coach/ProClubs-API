@@ -97,3 +97,7 @@ Club Comment: His composure and willingness to do the work fit the standards we 
 ```
 
 When comments are not supplied, the bot creates clearly disclosed simulated press-conference-style comments. It varies the signing angle and rotates the leadership attribution among Head Coach, Assistant Manager, Sporting Director, and Club Owner. It never invents a real person’s name, career history, statistics, or personal facts.
+
+## Targeted role alerts
+
+Reporter posts can notify only the relevant club role instead of using `@everyone`. Add `BIRMINGHAM_ROLE_ID` and `MLPC_ROLE_ID` in Railway. Raine’s posts mention only the Birmingham role; Teagan’s posts mention only the MLPC role. The role must be mentionable, or the bot must have permission to mention roles.
