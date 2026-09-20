@@ -23,10 +23,12 @@ const TEAMS = {
   birmingham: {
     label: 'Birmingham City', league: 'MPL', reporter: 'Raine',
     outlet: 'Raine at St. Andrew’s', color: 0x00a1e4, emoji: '🔵',
+    voice: 'Polished and observant football journalism with a grounded matchday tone. Connect the signing to Birmingham City, St. Andrew’s, and the MPL challenge without overhyping it.',
   },
   crownfc: {
     label: 'CrownFC', league: 'MLPC', reporter: 'Teagan',
     outlet: 'Teagan Behind the Crown', color: 0x7bafd4, emoji: '👑',
+    voice: 'Confident, energetic, and personality-driven football reporting. Connect the signing to CrownFC ambition, competition, and what it means behind the Crown without becoming unrealistic.',
   },
 };
 
@@ -92,7 +94,7 @@ async function aiArticle(team, type, facts, graphic) {
       {
         role: 'system',
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
-          team.label + ' in ' + team.league + '. Analyze the supplied graphic according to the story type. ' +
+          team.label + ' in ' + team.league + '. Your distinct writing voice: ' + team.voice + ' Analyze the supplied graphic according to the story type. ' +
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
           'For a signing, identify the visible player name, club branding, and announcement wording. If the supplied ' +
           'context includes genuine player comments, include up to two as short attributed quotations. Omit quotations ' +
