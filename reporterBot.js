@@ -43,11 +43,13 @@ const TEAMS = {
     label: 'Birmingham City', league: 'MPL', reporter: 'Raine',
     outlet: 'Raine at St. Andrew’s', color: 0x00a1e4, emoji: '🔵',
     voice: 'Polished and observant football journalism with a grounded matchday tone. Connect the signing to Birmingham City, St. Andrew’s, and the MPL challenge without overhyping it.',
+    alertRoleEnv: 'BIRMINGHAM_ROLE_ID',
   },
   crownfc: {
     label: 'CrownFC', league: 'MLPC', reporter: 'Teagan',
     outlet: 'Teagan Behind the Crown', color: 0x7bafd4, emoji: '👑',
     voice: 'Confident, energetic, and personality-driven football reporting. Connect the signing to CrownFC ambition, competition, and what it means behind the Crown without becoming unrealistic.',
+    alertRoleEnv: 'MLPC_ROLE_ID',
   },
 };
 
@@ -263,7 +265,13 @@ async function startBot() {
         reporterKeys.some(key => String(channel.name || '').toLowerCase().includes(key))
       );
       const destination = reporterChannel || message.channel;
-      await destination.send({ embeds: [makeEmbed(team, title, story, graphic)] });
+      const alertRoleId = process.env[team.alertRoleEnv];
+      const post = { embeds: [makeEmbed(team, title, story, graphic)] };
+      if (alertRoleId) {
+        post.content = '<@&' + alertRoleId + '>';
+        post.allowedMentions = { parse: [], roles: [alertRoleId] };
+      }
+      await destination.send(post);
     } catch (error) {
       console.error('Automatic reporter post failed:', error);
       try {
