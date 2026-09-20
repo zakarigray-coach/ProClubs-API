@@ -8,10 +8,16 @@ const {
   ChannelType,
   PermissionFlagsBits,
   MessageFlags,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  SnowflakeUtil,
 } = require('discord.js');
 
 let OpenAI;
 try { OpenAI = require('openai'); } catch { OpenAI = null; }
+
+const pendingAudits = new Map();
 
 const TEAMS = {
   birmingham: {
@@ -51,7 +57,17 @@ const setupServer = new SlashCommandBuilder()
   .setDescription('Create the RT Football Media category and reporter channels')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
-const commands = [match, signing, release, setupServer].map(command => command.toJSON());
+const auditServer = new SlashCommandBuilder()
+  .setName('audit-server')
+  .setDescription('Privately review cleanup opportunities before approving any changes')
+  .addIntegerOption(option => option
+    .setName('inactive_days')
+    .setDescription('Flag text channels inactive for this many days (default 45)')
+    .setMinValue(7)
+    .setMaxValue(365))
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
+
+const commands = [match, signing, release, setupServer, auditServer].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -193,9 +209,160 @@ async function startBot() {
   });
 
   client.on('interactionCreate', async interaction => {
+    if (interaction.isButton() && interaction.customId.startsWith('server_audit:')) {
+      const [, action, auditId] = interaction.customId.split(':');
+      const audit = pendingAudits.get(auditId);
+      if (!audit || audit.expiresAt < Date.now()) {
+        pendingAudits.delete(auditId);
+        return interaction.reply({ content: 'This audit approval has expired. Run /audit-server again.', flags: MessageFlags.Ephemeral });
+      }
+      if (interaction.user.id !== audit.ownerId) {
+        return interaction.reply({ content: 'Only the person who requested this audit can approve it.', flags: MessageFlags.Ephemeral });
+      }
+      if (action === 'cancel') {
+        pendingAudits.delete(auditId);
+        return interaction.update({ content: 'Cleanup cancelled. No server changes were made.', embeds: [], components: [] });
+      }
+
+      const deleted = [];
+      const skipped = [];
+      for (const channelId of audit.emptyCategoryIds) {
+        const category = interaction.guild.channels.cache.get(channelId);
+        if (!category || category.type !== ChannelType.GuildCategory) {
+          skipped.push(channelId + ' (missing)');
+          continue;
+        }
+        const stillEmpty = !interaction.guild.channels.cache.some(channel => channel.parentId === category.id);
+        if (!stillEmpty) {
+          skipped.push(category.name + ' (no longer empty)');
+          continue;
+        }
+        try {
+          const name = category.name;
+          await category.delete('Approved RT Football Media server cleanup');
+          deleted.push(name);
+        } catch {
+          skipped.push(category.name + ' (permission error)');
+        }
+      }
+      pendingAudits.delete(auditId);
+      return interaction.update({
+        content: 'Approved cleanup finished.\nDeleted empty categories: ' +
+          (deleted.length ? deleted.join(', ') : 'none') +
+          '\nSkipped: ' + (skipped.length ? skipped.join(', ') : 'none') +
+          '\nNo channels, messages, or roles were deleted.',
+        embeds: [],
+        components: [],
+      });
+    }
+
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'signing', 'release', 'setup-server'].includes(interaction.commandName)) return;
-    await interaction.deferReply(interaction.commandName === 'setup-server' ? { flags: MessageFlags.Ephemeral } : {});
+    if (!['match', 'signing', 'release', 'setup-server', 'audit-server'].includes(interaction.commandName)) return;
+    const privateCommand = ['setup-server', 'audit-server'].includes(interaction.commandName);
+    await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
+
+    if (interaction.commandName === 'audit-server') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.editReply('You need the Manage Channels permission to run a server audit.');
+      }
+
+      const inactiveDays = interaction.options.getInteger('inactive_days') || 45;
+      const cutoff = Date.now() - inactiveDays * 24 * 60 * 60 * 1000;
+      const channels = [...interaction.guild.channels.cache.values()];
+      const categories = channels.filter(channel => channel.type === ChannelType.GuildCategory);
+      const textChannels = channels.filter(channel =>
+        [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(channel.type)
+      );
+
+      const emptyCategories = categories.filter(category =>
+        !channels.some(channel => channel.parentId === category.id)
+      );
+      const uncategorized = channels.filter(channel =>
+        channel.type !== ChannelType.GuildCategory && channel.parentId === null
+      );
+      const inactive = textChannels.filter(channel => {
+        if (!channel.lastMessageId) return true;
+        return SnowflakeUtil.timestampFrom(channel.lastMessageId) < cutoff;
+      });
+
+      const nameGroups = new Map();
+      for (const channel of channels.filter(item => item.type !== ChannelType.GuildCategory)) {
+        const key = String(channel.name || '').toLowerCase();
+        if (!nameGroups.has(key)) nameGroups.set(key, []);
+        nameGroups.get(key).push(channel);
+      }
+      const duplicates = [...nameGroups.values()].filter(group => group.length > 1);
+
+      const unusedRoles = [...interaction.guild.roles.cache.values()].filter(role =>
+        role.id !== interaction.guild.id && !role.managed && role.members.size === 0
+      );
+      const adminRoles = [...interaction.guild.roles.cache.values()].filter(role =>
+        role.id !== interaction.guild.id && role.permissions.has(PermissionFlagsBits.Administrator)
+      );
+
+      const list = (items, render) => {
+        if (!items.length) return 'None found';
+        const shown = items.slice(0, 12).map(render);
+        if (items.length > 12) shown.push('…and ' + (items.length - 12) + ' more');
+        return shown.join('\n').slice(0, 1024);
+      };
+
+      const report = new EmbedBuilder()
+        .setColor(0x7BAFD4)
+        .setTitle('RT Football Media • Server Cleanup Audit')
+        .setDescription(
+          'Review only—nothing has been changed. The approval button deletes only categories that are empty at approval time.'
+        )
+        .addFields(
+          {
+            name: 'Safe cleanup: empty categories (' + emptyCategories.length + ')',
+            value: list(emptyCategories, item => '• ' + item.name),
+          },
+          {
+            name: 'Inactive text channels, ' + inactiveDays + '+ days (' + inactive.length + ')',
+            value: list(inactive, item => '• #' + item.name),
+          },
+          {
+            name: 'Uncategorized channels (' + uncategorized.length + ')',
+            value: list(uncategorized, item => '• ' + item.name),
+          },
+          {
+            name: 'Duplicate channel names (' + duplicates.length + ' groups)',
+            value: list(duplicates, group => '• ' + group[0].name + ' ×' + group.length),
+          },
+          {
+            name: 'Unused roles—review manually (' + unusedRoles.length + ')',
+            value: list(unusedRoles, item => '• ' + item.name),
+          },
+          {
+            name: 'Administrator roles—security review (' + adminRoles.length + ')',
+            value: list(adminRoles, item => '• ' + item.name),
+          }
+        )
+        .setFooter({ text: 'Approval expires in 15 minutes • No messages, channels, or roles are auto-deleted' })
+        .setTimestamp();
+
+      const auditId = interaction.id;
+      pendingAudits.set(auditId, {
+        ownerId: interaction.user.id,
+        emptyCategoryIds: emptyCategories.map(item => item.id),
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      });
+      setTimeout(() => pendingAudits.delete(auditId), 15 * 60 * 1000);
+
+      const buttons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('server_audit:apply:' + auditId)
+          .setLabel('Approve Safe Cleanup')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(emptyCategories.length === 0),
+        new ButtonBuilder()
+          .setCustomId('server_audit:cancel:' + auditId)
+          .setLabel('Cancel')
+          .setStyle(ButtonStyle.Secondary)
+      );
+      return interaction.editReply({ embeds: [report], components: [buttons] });
+    }
 
     if (interaction.commandName === 'setup-server') {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
