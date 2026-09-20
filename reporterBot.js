@@ -18,6 +18,10 @@ let OpenAI;
 try { OpenAI = require('openai'); } catch { OpenAI = null; }
 
 const pendingAudits = new Map();
+const SOURCE_CHANNELS = {
+  '1549837450854142002': { teamKey: 'birmingham', type: 'signing' },
+  '1549837405761052853': { teamKey: 'crownfc', type: 'signing' },
+};
 const SIGNING_ANGLES = [
   'earning a starting place through competition',
   'tactical fit and understanding the club’s playing style',
@@ -214,19 +218,29 @@ async function startBot() {
     const categoryName = String(message.channel.parent && message.channel.parent.name || '').toLowerCase();
     const location = categoryName + ' ' + channelName;
 
-    let team = null;
-    if (location.includes('mlpc')) team = TEAMS.crownfc;
-    else if (location.includes('mpl')) team = TEAMS.birmingham;
+    const configuredSource = SOURCE_CHANNELS[message.channel.id];
+    let team = configuredSource ? TEAMS[configuredSource.teamKey] : null;
+    if (!team && location.includes('mlpc')) team = TEAMS.crownfc;
+    else if (!team && (location.includes('mpl') || location.includes('ml1'))) team = TEAMS.birmingham;
     if (!team) return;
 
-    let type = null;
-    if (channelName.includes('match-results')) type = 'match';
-    else if (channelName.includes('signing-announcements')) type = 'signing';
+    let type = configuredSource ? configuredSource.type : null;
+    if (!type && channelName.includes('match-results')) type = 'match';
+    else if (!type && channelName.includes('signing-announcements')) type = 'signing';
     if (!type) return;
+
+    console.log('Media graphic detected:', {
+      channelId: message.channel.id,
+      channelName,
+      team: team.label,
+      type,
+      attachments: message.attachments.size,
+      embeds: message.embeds.length,
+    });
 
     const attachment = message.attachments.find(item =>
       (item.contentType && item.contentType.startsWith('image/')) ||
-      /\.(png|jpe?g|webp|gif)$/i.test(item.url)
+      /\.(png|jpe?g|webp|gif)(?:\?|$)/i.test(item.url)
     );
     const embeddedUrl = message.embeds.find(item => item.image && item.image.url)?.image?.url ||
       message.embeds.find(item => item.thumbnail && item.thumbnail.url)?.thumbnail?.url;
@@ -252,6 +266,9 @@ async function startBot() {
       await destination.send({ embeds: [makeEmbed(team, title, story, graphic)] });
     } catch (error) {
       console.error('Automatic reporter post failed:', error);
+      try {
+        await message.channel.send('⚠️ RT Football Media detected this graphic but could not create the reporter post. Check the Railway logs for the error.');
+      } catch {}
     }
   });
 
