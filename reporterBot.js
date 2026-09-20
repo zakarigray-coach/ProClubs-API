@@ -26,7 +26,7 @@ const TEAMS = {
   },
   crownfc: {
     label: 'CrownFC', league: 'MLPC', reporter: 'Teagan',
-    outlet: 'Teagan Behind the Crown', color: 0x00b140, emoji: '👑',
+    outlet: 'Teagan Behind the Crown', color: 0x7bafd4, emoji: '👑',
   },
 };
 
