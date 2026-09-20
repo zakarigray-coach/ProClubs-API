@@ -110,7 +110,9 @@ async function aiArticle(team, type, facts, graphic) {
     text: 'Story type: ' + type + '\nSupplied facts: ' + JSON.stringify(facts) +
       (signingDirection ? '\nSigning angle and management voice to use this time: ' +
         JSON.stringify(signingDirection) : '') +
-      '\nRead every legible fact in the attached graphic. If something is unclear, omit it.',
+      '\nThe supplied facts include the Discord message caption. Treat clear caption facts as authoritative. ' +
+      'Read every legible fact in the attached graphic. If graphic text is unclear but the caption identifies the player, ' +
+      'club, league, position, or number, use the caption and still write the complete story. Omit only details missing from both.',
   }];
   if (graphic) userContent.push({ type: 'input_image', image_url: graphic.url, detail: 'high' });
 
@@ -123,7 +125,8 @@ async function aiArticle(team, type, facts, graphic) {
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
           team.label + ' in ' + team.league + '. Your distinct writing voice: ' + team.voice + ' Analyze the supplied graphic according to the story type. ' +
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
-          'For a signing, first read the player name, visible shirt number, club branding, league branding, and any other ' +
+          'For a signing, first use any player name, position, number, club, league, and signing angle supplied in the Discord caption, ' +
+          'then read the player name, visible shirt number, club branding, league branding, and any other ' +
           'legible announcement details. If the player name is Tru, the all-caps headline must be exactly “A SIGNING THAT ' +
           'CHANGES EVERYTHING”. If the player name is Trap, the all-caps headline must be exactly “THE OFFENSIVE GAME-CHANGER ' +
           'ARRIVES” and the story must frame him as a major playmaking addition who can bring creativity and improve the attack, ' +
