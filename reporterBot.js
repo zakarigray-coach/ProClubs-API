@@ -7,6 +7,7 @@ const {
   Routes,
   ChannelType,
   PermissionFlagsBits,
+  MessageFlags,
 } = require('discord.js');
 
 let OpenAI;
@@ -194,7 +195,7 @@ async function startBot() {
   client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
     if (!['match', 'signing', 'release', 'setup-server'].includes(interaction.commandName)) return;
-    await interaction.deferReply({ ephemeral: interaction.commandName === 'setup-server' });
+    await interaction.deferReply(interaction.commandName === 'setup-server' ? { flags: MessageFlags.Ephemeral } : {});
 
     if (interaction.commandName === 'setup-server') {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
