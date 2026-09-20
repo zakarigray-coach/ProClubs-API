@@ -138,7 +138,7 @@ async function aiArticle(team, type, facts, graphic) {
       { role: 'user', content: userContent },
     ],
   });
-  return clean(response.output_text, 2000) || null;
+  return clean(response.output_text, 3800) || null;
 }
 
 function fallbackArticle(team, type, facts) {
@@ -147,17 +147,17 @@ function fallbackArticle(team, type, facts) {
       (facts.context ? facts.context : 'Add OPENAI_API_KEY to let the reporter read the score and stats automatically.');
   }
   if (type === 'signing') {
+    const playerName = facts.player || 'the club’s newest signing';
     const playerComment = facts.playerComment
-      ? '“' + facts.playerComment.replace(/^["“]|["”]$/g, '') + '” — ' + facts.player
+      ? '“' + facts.playerComment.replace(/^["“]|["”]$/g, '') + '” — ' + playerName
       : '';
     const clubComment = facts.clubComment
       ? '“' + facts.clubComment.replace(/^["“]|["”]$/g, '') + '” — Club representative'
       : '';
     const comments = [playerComment, clubComment].filter(Boolean).join('\n\n');
-    const playerName = facts.player || 'the club’s newest signing';
     return team.label + ' has officially added ' + playerName + ' to the squad ahead of its ' +
       team.league + ' campaign.' + (facts.details ? ' ' + facts.details : '') +
-      (comments ? '\n\n' + comments : '') + '\n\nWelcome to the club, ' + facts.player + '.';
+      (comments ? '\n\n' + comments : '') + '\n\nWelcome to the club, ' + playerName + '.';
   }
   return team.label + ' confirms that ' + facts.player + ' has departed the club.' +
     (facts.details ? ' ' + facts.details : '') + '\n\nThe club thanks ' + facts.player +
