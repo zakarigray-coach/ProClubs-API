@@ -5,11 +5,11 @@ A Discord sports desk for two FC 27 Pro Clubs teams:
 - **Raine at St. Andrew’s** covers Birmingham City in MPL.
 - **Teagan Behind the Crown** covers CrownFC in MLPC.
 
-The bot publishes match reports, player signings, and departures as polished Discord news embeds. An uploaded OurProClubs/result image can be attached to a match report. The image supplies the visual; enter the verified score and stats in the command so the reporter never guesses details from a graphic.
+The bot publishes match reports, player signings, and departures as polished Discord news embeds. Upload an OurProClubs or match-stat graphic and the selected reporter reads the visible score and player stats, then turns them into a polished Discord news article. You can add optional context for anything the image does not show.
 
 ## Commands
 
-- `/match` — score, opponent, match details, and optional graphic
+- `/match` — required match graphic plus optional extra context
 - `/signing` — player, position, details, and optional graphic
 - `/release` — player and farewell details
 
@@ -33,7 +33,7 @@ Copy `.env.example` to `.env` locally, or add the same values in your hosting se
 - `OPENAI_API_KEY` — optional; produces original AI-written articles
 - `OPENAI_MODEL` — optional; defaults to `gpt-5-mini`
 
-Without an OpenAI key, all commands still work using built-in sports copy.
+An OpenAI key is required for reading match graphics. Signing and release commands still have built-in fallback copy.
 
 ## Run
 
@@ -46,7 +46,7 @@ When `DISCORD_GUILD_ID` is set, commands normally appear in that server quickly.
 
 ## OurProClubs graphics
 
-Use `/match`, enter the verified result and match details, then upload the OurProClubs result image in the `graphic` field. The bot adds it to the published recap.
+Use `/match`, select Birmingham City or CrownFC, and upload the OurProClubs image in `graphic`. The bot reads visible results and stats and writes the article in Raine’s or Teagan’s voice. Use `context` only for facts the image cannot show, such as a late comeback or a manager quote.
 
 ## Hosting
 
