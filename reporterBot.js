@@ -116,22 +116,24 @@ async function aiArticle(team, type, facts, graphic) {
 
   const response = await client.responses.create({
     model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    max_output_tokens: 500,
+    max_output_tokens: 900,
     input: [
       {
         role: 'system',
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
           team.label + ' in ' + team.league + '. Your distinct writing voice: ' + team.voice + ' Analyze the supplied graphic according to the story type. ' +
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
-          'For a signing, identify the visible player name, club branding, and announcement wording. Include exactly ' +
-          'one player comment and one club-leadership comment. Use genuine supplied comments verbatim when available. ' +
-          'When comments are not supplied, create natural simulated press-conference-style comments tied to the provided ' +
-          'signing angle. Attribute the player comment to the player, and attribute the leadership comment only to the ' +
-          'provided role—Head Coach, Assistant Manager, Sporting Director, or Club Owner—never invent a real person’s name. ' +
-          'Vary sentence structure and substance; avoid stock lines such as “excited to be here” unless supported by context. ' +
-          'Do not invent career history, statistics, promises, or personal facts. End generated-comment signing posts with ' +
-          'the italic line “Simulated press-conference comments.” Write an energetic social-media post using only visible ' +
-          'or supplied facts outside those clearly disclosed simulated comments. Start with a short all-caps headline.',
+          'For a signing, first read the player name, visible shirt number, club branding, league branding, and any other ' +
+          'legible announcement details. Write a complete football-reporter article—not a generic club caption. Use this ' +
+          'structure: (1) a sharp all-caps headline, (2) a strong news lead announcing the move, (3) a paragraph explaining ' +
+          'what the addition could mean for the squad using only visible/supplied facts, (4) exactly one natural player ' +
+          'comment, (5) exactly one club-leadership comment, and (6) a final reporter-analysis sentence in your distinct voice. ' +
+          'Use genuine supplied comments verbatim when available. Otherwise create varied simulated press-conference-style ' +
+          'comments tied to the provided signing angle. Attribute the player comment to the visible player name. Attribute ' +
+          'the leadership comment only to the provided role—Head Coach, Assistant Manager, Sporting Director, or Club Owner—' +
+          'never invent a real person’s name. Each comment should sound conversational and specific, with one or two sentences. ' +
+          'Avoid repeated stock phrases, invented career history, statistics, promises, or personal facts. Aim for 220–350 ' +
+          'words and finish with the italic line “Simulated press-conference comments.”',
       },
       { role: 'user', content: userContent },
     ],
@@ -152,7 +154,8 @@ function fallbackArticle(team, type, facts) {
       ? '“' + facts.clubComment.replace(/^["“]|["”]$/g, '') + '” — Club representative'
       : '';
     const comments = [playerComment, clubComment].filter(Boolean).join('\n\n');
-    return team.label + ' has officially added ' + facts.player + ' to the squad ahead of its ' +
+    const playerName = facts.player || 'the club’s newest signing';
+    return team.label + ' has officially added ' + playerName + ' to the squad ahead of its ' +
       team.league + ' campaign.' + (facts.details ? ' ' + facts.details : '') +
       (comments ? '\n\n' + comments : '') + '\n\nWelcome to the club, ' + facts.player + '.';
   }
@@ -162,9 +165,19 @@ function fallbackArticle(team, type, facts) {
 }
 
 async function buildStory(team, type, facts, graphic) {
-  try { return (await aiArticle(team, type, facts, graphic)) || fallbackArticle(team, type, facts); }
-  catch (error) {
-    console.error('AI generation failed; using built-in copy:', error.message);
+  try {
+    const article = await aiArticle(team, type, facts, graphic);
+    if (article) return article;
+    if (graphic) throw new Error('AI article generation is unavailable. Check OPENAI_API_KEY and API billing.');
+    return fallbackArticle(team, type, facts);
+  } catch (error) {
+    console.error('AI article generation failed:', {
+      status: error.status,
+      code: error.code,
+      type: error.type,
+      message: error.message,
+    });
+    if (graphic) throw error;
     return fallbackArticle(team, type, facts);
   }
 }
@@ -274,8 +287,12 @@ async function startBot() {
       await destination.send(post);
     } catch (error) {
       console.error('Automatic reporter post failed:', error);
+      const diagnostic = error.status || error.code || 'unknown error';
       try {
-        await message.channel.send('⚠️ RT Football Media detected this graphic but could not create the reporter post. Check the Railway logs for the error.');
+        await message.channel.send(
+          '⚠️ RT Football Media detected this graphic, but the AI article request failed (' +
+          diagnostic + '). Check Railway logs. No incomplete reporter post was published.'
+        );
       } catch {}
     }
   });
