@@ -63,3 +63,17 @@ The bot automatically watches the existing league channels shown in your Discord
 - `mpl-signing-announcements` → Raine posts for Birmingham City
 
 Post a graphic normally, or let another bot post it. RT Football Media reads image attachments and embedded images, then publishes the reporter post in the same channel. It ignores its own messages to prevent loops. The bot role needs View Channel, Read Message History, Send Messages, and Embed Links in each watched channel.
+
+## One-command media setup
+
+After the bot is online and invited with **Manage Channels**, run:
+
+`/setup-server`
+
+It safely creates or reuses:
+
+- `𓊆 📰 𓊇 RT FOOTBALL MEDIA`
+- `🔵・raine-reports` for Birmingham City/MPL
+- `👑・teagan-reports` for CrownFC/MLPC
+
+Running the command again does not duplicate the category or channels. Automatic posts from MPL source channels are routed to Raine, and MLPC source channels are routed to Teagan. You may remove **Manage Channels** from the bot after setup; retain View Channel, Read Message History, Send Messages, Embed Links, and Attach Files.
