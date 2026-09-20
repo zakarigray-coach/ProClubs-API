@@ -83,3 +83,17 @@ Running the command again does not duplicate the category or channels. Automatic
 Run `/audit-server` to receive a private report covering empty categories, inactive text channels, uncategorized channels, duplicate channel names, role cleanup candidates, and roles with Administrator permission.
 
 The audit makes no changes by itself. It provides **Approve Safe Cleanup** and **Cancel** buttons. Approval is tied to the person who ran the command, expires after 15 minutes, and deletes only categories that are still empty at approval time. It never automatically deletes channels, messages, or roles.
+
+## Logo-branded posts and genuine player comments
+
+Set `RT_MEDIA_LOGO_URL` in Railway to a direct public URL for the official RT Football Media logo. Reporter embeds then use the logo as the author/footer icon instead of spelling out the network name.
+
+For an automatic signing post, include genuine player comments in the caption accompanying the graphic, for example:
+
+```text
+Player: Tru
+Quote 1: I'm excited to join Birmingham City and compete in MPL.
+Quote 2: I believe this group has everything needed to challenge for trophies.
+```
+
+The reporter may use up to two supplied comments and will omit quotes when none are provided. It is instructed never to invent player comments.
