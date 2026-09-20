@@ -196,10 +196,12 @@ async function startBot() {
       const title = type === 'match'
         ? team.emoji + ' MATCH REPORT | ' + team.label
         : team.emoji + ' OFFICIAL SIGNING | ' + team.label;
-      const reporterKey = team === TEAMS.crownfc ? 'teagan-reports' : 'raine-reports';
+      const reporterKeys = team === TEAMS.crownfc
+        ? ['teagan-behind-the-crown', 'teagan-reports']
+        : ['raine-at-st-andrews', 'raine-reports'];
       const reporterChannel = message.guild.channels.cache.find(channel =>
         channel.type === ChannelType.GuildText &&
-        String(channel.name || '').toLowerCase().includes(reporterKey)
+        reporterKeys.some(key => String(channel.name || '').toLowerCase().includes(key))
       );
       const destination = reporterChannel || message.channel;
       await destination.send({ embeds: [makeEmbed(team, title, story, graphic)] });
@@ -384,14 +386,14 @@ async function startBot() {
 
       const reporterChannels = [
         {
-          key: 'raine-reports',
-          name: '🔵・raine-reports',
-          topic: 'Raine reporting on Birmingham City in MPL for RT Football Media.',
+          key: 'raine-at-st-andrews',
+          name: '🔵・raine-at-st-andrews',
+          topic: 'Raine at St. Andrew’s reporting on Birmingham City in MPL for RT Football Media.',
         },
         {
-          key: 'teagan-reports',
-          name: '👑・teagan-reports',
-          topic: 'Teagan reporting on CrownFC in MLPC for RT Football Media.',
+          key: 'teagan-behind-the-crown',
+          name: '👑・teagan-behind-the-crown',
+          topic: 'Teagan Behind the Crown reporting on CrownFC in MLPC for RT Football Media.',
         },
       ];
 
