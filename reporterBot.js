@@ -5,6 +5,8 @@ const {
   SlashCommandBuilder,
   REST,
   Routes,
+  ChannelType,
+  PermissionFlagsBits,
 } = require('discord.js');
 
 let OpenAI;
@@ -43,7 +45,12 @@ const release = clubOption(new SlashCommandBuilder().setName('release').setDescr
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('details').setDescription('Optional farewell note'));
 
-const commands = [match, signing, release].map(command => command.toJSON());
+const setupServer = new SlashCommandBuilder()
+  .setName('setup-server')
+  .setDescription('Create the RT Football Media category and reporter channels')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
+
+const commands = [match, signing, release, setupServer].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -172,7 +179,13 @@ async function startBot() {
       const title = type === 'match'
         ? team.emoji + ' MATCH REPORT | ' + team.label
         : team.emoji + ' OFFICIAL SIGNING | ' + team.label;
-      await message.channel.send({ embeds: [makeEmbed(team, title, story, graphic)] });
+      const reporterKey = team === TEAMS.crownfc ? 'teagan-reports' : 'raine-reports';
+      const reporterChannel = message.guild.channels.cache.find(channel =>
+        channel.type === ChannelType.GuildText &&
+        String(channel.name || '').toLowerCase().includes(reporterKey)
+      );
+      const destination = reporterChannel || message.channel;
+      await destination.send({ embeds: [makeEmbed(team, title, story, graphic)] });
     } catch (error) {
       console.error('Automatic reporter post failed:', error);
     }
@@ -180,8 +193,68 @@ async function startBot() {
 
   client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'signing', 'release'].includes(interaction.commandName)) return;
-    await interaction.deferReply();
+    if (!['match', 'signing', 'release', 'setup-server'].includes(interaction.commandName)) return;
+    await interaction.deferReply({ ephemeral: interaction.commandName === 'setup-server' });
+
+    if (interaction.commandName === 'setup-server') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.editReply('You need the Manage Channels permission to run this setup.');
+      }
+
+      const categoryName = '𓊆 📰 𓊇 RT FOOTBALL MEDIA';
+      let category = interaction.guild.channels.cache.find(channel =>
+        channel.type === ChannelType.GuildCategory &&
+        String(channel.name || '').toLowerCase().includes('rt football media')
+      );
+      if (!category) {
+        category = await interaction.guild.channels.create({
+          name: categoryName,
+          type: ChannelType.GuildCategory,
+          reason: 'RT Football Media automatic setup',
+        });
+      }
+
+      const reporterChannels = [
+        {
+          key: 'raine-reports',
+          name: '🔵・raine-reports',
+          topic: 'Raine reporting on Birmingham City in MPL for RT Football Media.',
+        },
+        {
+          key: 'teagan-reports',
+          name: '👑・teagan-reports',
+          topic: 'Teagan reporting on CrownFC in MLPC for RT Football Media.',
+        },
+      ];
+
+      const created = [];
+      const existing = [];
+      for (const reporter of reporterChannels) {
+        let channel = interaction.guild.channels.cache.find(item =>
+          item.type === ChannelType.GuildText &&
+          String(item.name || '').toLowerCase().includes(reporter.key)
+        );
+        if (channel) {
+          existing.push(channel.toString());
+          if (channel.parentId !== category.id) await channel.setParent(category);
+        } else {
+          channel = await interaction.guild.channels.create({
+            name: reporter.name,
+            type: ChannelType.GuildText,
+            parent: category.id,
+            topic: reporter.topic,
+            reason: 'RT Football Media automatic setup',
+          });
+          created.push(channel.toString());
+        }
+      }
+
+      return interaction.editReply(
+        'RT Football Media setup complete.\nCreated: ' +
+        (created.length ? created.join(', ') : 'none') +
+        '\nAlready available: ' + (existing.length ? existing.join(', ') : 'none')
+      );
+    }
 
     const team = TEAMS[interaction.options.getString('club')];
     if (!team) return interaction.editReply('That club is not configured.');
