@@ -45,7 +45,9 @@ const match = clubOption(new SlashCommandBuilder().setName('match').setDescripti
 const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescription('Announce a player signing'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('position').setDescription('Position(s)').setRequired(true))
-  .addStringOption(o => o.setName('details').setDescription('Experience, strengths, or quote'))
+  .addStringOption(o => o.setName('quote_one').setDescription('Optional real comment from the player'))
+  .addStringOption(o => o.setName('quote_two').setDescription('Optional second real comment from the player'))
+  .addStringOption(o => o.setName('details').setDescription('Experience or additional signing details'))
   .addAttachmentOption(o => o.setName('graphic').setDescription('Optional signing graphic'));
 
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
@@ -92,9 +94,11 @@ async function aiArticle(team, type, facts, graphic) {
         content: 'You are ' + team.reporter + ', a football reporter for RT Football Media covering ' +
           team.label + ' in ' + team.league + '. Analyze the supplied graphic according to the story type. ' +
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
-          'For a signing, identify the visible player name, position, club branding, and announcement wording. ' +
-          'Write an energetic social-media sports post using only visible or supplied facts. Never invent a stat, ' +
-          'quote, player, position, or result. Start with a short all-caps headline, then write one or two short paragraphs.',
+          'For a signing, identify the visible player name, club branding, and announcement wording. If the supplied ' +
+          'context includes genuine player comments, include up to two as short attributed quotations. Omit quotations ' +
+          'when none are supplied. Do not replace missing comments with invented ones. Write an energetic social-media ' +
+          'sports post using only visible or supplied facts. Never invent a stat, quote, player, position, or result. ' +
+          'Start with a short all-caps headline, then write one or two short paragraphs.',
       },
       { role: 'user', content: userContent },
     ],
@@ -108,9 +112,12 @@ function fallbackArticle(team, type, facts) {
       (facts.context ? facts.context : 'Add OPENAI_API_KEY to let the reporter read the score and stats automatically.');
   }
   if (type === 'signing') {
-    return team.label + ' has officially added ' + facts.player + ' to the squad. The ' + facts.position +
-      ' joins the club ahead of its ' + team.league + ' campaign.' +
-      (facts.details ? ' ' + facts.details : '') + '\n\nWelcome to the club, ' + facts.player + '.';
+    const quotes = [facts.quoteOne, facts.quoteTwo].filter(Boolean)
+      .map(quote => '“' + quote.replace(/^["“]|["”]$/g, '') + '” — ' + facts.player)
+      .join('\n\n');
+    return team.label + ' has officially added ' + facts.player + ' to the squad ahead of its ' +
+      team.league + ' campaign.' + (facts.details ? ' ' + facts.details : '') +
+      (quotes ? '\n\n' + quotes : '') + '\n\nWelcome to the club, ' + facts.player + '.';
   }
   return team.label + ' confirms that ' + facts.player + ' has departed the club.' +
     (facts.details ? ' ' + facts.details : '') + '\n\nThe club thanks ' + facts.player +
@@ -126,12 +133,19 @@ async function buildStory(team, type, facts, graphic) {
 }
 
 function makeEmbed(team, title, story, graphic) {
+  const logoUrl = process.env.RT_MEDIA_LOGO_URL;
+  const author = { name: team.outlet };
+  const footer = { text: team.reporter + ' • ' + team.league };
+  if (logoUrl) {
+    author.iconURL = logoUrl;
+    footer.iconURL = logoUrl;
+  }
   const embed = new EmbedBuilder()
     .setColor(team.color)
-    .setAuthor({ name: 'RT Football Media • ' + team.outlet })
+    .setAuthor(author)
     .setTitle(title)
     .setDescription(story)
-    .setFooter({ text: 'Reported by ' + team.reporter + ' • ' + team.league })
+    .setFooter(footer)
     .setTimestamp();
   if (graphic && graphic.contentType && graphic.contentType.startsWith('image/')) embed.setImage(graphic.url);
   return embed;
@@ -438,6 +452,8 @@ async function startBot() {
       facts = {
         player: clean(interaction.options.getString('player'), 100),
         position: clean(interaction.options.getString('position'), 100),
+        quoteOne: clean(interaction.options.getString('quote_one'), 400),
+        quoteTwo: clean(interaction.options.getString('quote_two'), 400),
         details: clean(interaction.options.getString('details'), 700),
       };
       title = team.emoji + ' OFFICIAL: ' + facts.player + ' SIGNS';
