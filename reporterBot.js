@@ -125,8 +125,10 @@ async function aiArticle(team, type, facts, graphic) {
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
           'For a signing, first read the player name, visible shirt number, club branding, league branding, and any other ' +
           'legible announcement details. If the player name is Tru, the all-caps headline must be exactly “A SIGNING THAT ' +
-          'CHANGES EVERYTHING”. For every other player, create a fresh headline suited to that particular signing and do not ' +
-          'reuse “Marquee Signing” as a generic label. Write a complete football-reporter article—not a generic club caption. Use this ' +
+          'CHANGES EVERYTHING”. If the player name is Trap, the all-caps headline must be exactly “THE OFFENSIVE GAME-CHANGER ' +
+          'ARRIVES” and the story must frame him as a major playmaking addition who can bring creativity and improve the attack, ' +
+          'without inventing statistics or career history. For every other player, create a fresh headline suited to that particular ' +
+          'signing and do not reuse “Marquee Signing” as a generic label. Write a complete football-reporter article—not a generic club caption. Use this ' +
           'structure: (1) a sharp all-caps headline, (2) a strong news lead announcing the move, (3) a paragraph explaining ' +
           'what the addition could mean for the squad using only visible/supplied facts, (4) exactly one natural player ' +
           'comment, (5) exactly one club-leadership comment, and (6) a final reporter-analysis sentence in your distinct voice. ' +
