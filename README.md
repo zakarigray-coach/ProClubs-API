@@ -77,3 +77,9 @@ It safely creates or reuses:
 - `👑・teagan-reports` for CrownFC/MLPC
 
 Running the command again does not duplicate the category or channels. Automatic posts from MPL source channels are routed to Raine, and MLPC source channels are routed to Teagan. You may remove **Manage Channels** from the bot after setup; retain View Channel, Read Message History, Send Messages, Embed Links, and Attach Files.
+
+## Approval-gated server cleanup audit
+
+Run `/audit-server` to receive a private report covering empty categories, inactive text channels, uncategorized channels, duplicate channel names, role cleanup candidates, and roles with Administrator permission.
+
+The audit makes no changes by itself. It provides **Approve Safe Cleanup** and **Cancel** buttons. Approval is tied to the person who ran the command, expires after 15 minutes, and deletes only categories that are still empty at approval time. It never automatically deletes channels, messages, or roles.
