@@ -12,6 +12,8 @@ The bot publishes match reports, player signings, weekly recaps, Player Spotligh
 ## Commands
 
 - `/match` — required match graphic plus optional extra context
+- `/sign` — one-player reporter-led signing workflow
+- `/sign-batch` — one combined announcement for two to four signings
 - `/signing` — player, position, details, and optional graphic
 - `/release` — player and farewell details
 - `/correct-stats` — preview and approve a match-by-match correction
@@ -93,6 +95,8 @@ Post an OurProClubs text recap, graphic recap, or both, or let another bot post 
 Only matches explicitly labeled **Friendly/Friendlies**, **Cup**, or **Tournament** are eligible. Friendlies represent the clubs’ competitive league fixtures in this workflow, and Cup/Tournament games receive equal editorial importance. Playoff and unclassified games are ignored. If a recap contains multiple eligible games, the bot privately sends `BOT_OWNER_ID` a multi-select dropdown. The owner can choose one or several matches for a single article. After selection, the match edition is privately sent with **Publish**, **Edit**, **Regenerate**, and **Cancel** controls before anything appears publicly.
 
 For signings, the owner privately selects a player from the correct club role or chooses **Player not listed** and supplies verified football facts—never the squad number. The player sees all squad numbers 1–99 across four selectors; taken numbers remain visible with the assigned player and `TAKEN`, and selecting one is rejected. The reporter collects the player’s genuine quote and optional photo. If no photo is supplied, the bot generates club-themed artwork without inventing a player likeness. Tru’s configured user ID applies his saved #22 and quote without contacting him again, but still sends the owner a private preview before publication.
+
+`/sign-batch` selects two to four unsigned players from one club. Management enters each player as `position | previous club`; each non-Tru player privately selects their own protected number and supplies their own genuine quote and optional photo. Only after every player is ready does the owner receive one combined approval package. One approval creates one transactions post containing the player graphics, one RT Football Media signing-class newspaper and one club-role mention. Cancelling publishes nothing and assigns no numbers.
 
 Active roster limits are enforced from published squad-number assignments: Birmingham City/MPL allows 18 players and CrownFC/MLPC allows 16. A duplicate signing for an active player is blocked, and an approved release frees the player’s number and roster spot.
 

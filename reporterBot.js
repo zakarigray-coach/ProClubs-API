@@ -155,6 +155,9 @@ const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescr
 const sign = clubOption(new SlashCommandBuilder().setName('sign').setDescription('Start the automated player signing workflow'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+const signBatch = clubOption(new SlashCommandBuilder().setName('sign-batch').setDescription('Prepare one combined announcement for 2–4 signings'))
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('details').setDescription('Optional farewell note'))
@@ -227,7 +230,7 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
   .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const commands = [match, sign, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
+const commands = [match, sign, signBatch, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar].map(command => command.toJSON());
 
 function clean(value, max) {
@@ -757,6 +760,28 @@ function signingFactsModal(id, manual, story) {
     })
   );
   return modal.addComponents(...rows.slice(0, 5));
+}
+
+function signingBatchFactsModal(batchId, players) {
+  const modal = new ModalBuilder()
+    .setCustomId('signing_batch_facts:' + batchId)
+    .setTitle('Batch signing facts');
+  for (const [index, player] of players.slice(0, 4).entries()) {
+    modal.addComponents(textInput('player_' + index, clean(player.name, 32) + ': position | previous club', {
+      required: true,
+      max: 160,
+      placeholder: 'Example: CDM / CB | Previous Club',
+    }));
+  }
+  return modal;
+}
+
+function batchApprovalButtons(id) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('signing_batch:publish:' + id).setLabel('Publish Batch').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('signing_batch:regenerate:' + id).setLabel('Regenerate Newspaper').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('signing_batch:cancel:' + id).setLabel('Cancel Batch').setStyle(ButtonStyle.Danger)
+  );
 }
 
 function playerSigningModal(id, decline = false, record = null) {
@@ -1760,7 +1785,9 @@ async function startBot() {
     });
     const rendered = await renderEdition(record, { freshHero: options.freshHero !== false, variationKey: Date.now() });
     record = rendered.record;
-    if (options.sendApproval !== false) {
+    if (record.batchId) {
+      await maybePrepareSigningBatch(record.batchId);
+    } else if (options.sendApproval !== false) {
       await sendApprovalPreview(record, 'Private RT Football Media preview for ' + team.label +
         '. Check every fact, quote, and image before publishing. The final front page will use the actual Eastern-Time publication date.');
     }
@@ -1977,6 +2004,110 @@ async function startBot() {
     });
     const row = new ActionRowBuilder().addComponents(menu);
     await interaction.editReply({ content:'Select the ' + team.label + ' player. ' + team.reporter + ' will DM them for their quote and full-body FC27 Pro screenshot.', components:[row] });
+  }
+
+  async function startSignBatchCommand(interaction, team, teamKey) {
+    const capacity = rosterCapacity(teamKey);
+    if (capacity.available < 2) throw new Error(`${team.label} needs at least two open roster spots for a batch signing.`);
+    const guild = interaction.guild;
+    const roleId = process.env[team.alertRoleEnv];
+    const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
+    await guild.members.fetch().catch(() => {});
+    const members = role ? [...role.members.values()].filter(member => !member.user.bot)
+      .filter(member => !existingSquadAssignmentForPlayer(teamKey, member.id, member.displayName))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)).slice(0, 25) : [];
+    if (members.length < 2) throw new Error(`Fewer than two unsigned players were found in the configured ${team.label} role.`);
+    const batchId = storyId();
+    stateStore.setMetadata(`signingBatch:${batchId}`, {
+      id: batchId, guildId: guild.id, teamKey, requesterUserId: process.env.BOT_OWNER_ID || interaction.user.id,
+      state: 'selecting', roleId, createdAt: new Date().toISOString(),
+    });
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('signing_batch_players:' + batchId)
+      .setPlaceholder('Select 2–4 players for one announcement')
+      .setMinValues(2)
+      .setMaxValues(Math.min(4, members.length, capacity.available))
+      .addOptions(members.map(member => ({ label: clean(member.displayName, 100), description: clean('@' + member.user.username, 100), value: member.id })));
+    await interaction.editReply({
+      content: `Select 2–${Math.min(4, capacity.available)} ${team.label} players. Each player will privately choose their own number and provide their own quote/photo; publication is combined and owner-approved.`,
+      components: [new ActionRowBuilder().addComponents(menu)],
+    });
+  }
+
+  async function maybePrepareSigningBatch(batchId) {
+    const batch = stateStore.getMetadata(`signingBatch:${batchId}`);
+    if (!batch || !['collecting', 'ready'].includes(batch.state)) return false;
+    const children = (batch.childIds || []).map(id => pendingSignings.get(id) || stateStore.getStory(id)).filter(Boolean);
+    if (!children.length || children.some(record => record.state !== 'draft_ready')) return false;
+    const team = TEAMS[batch.teamKey];
+    const playerLines = children.map(record => {
+      const quote = record.playerQuote && !/No player comment/i.test(record.playerQuote) ? ` “${record.playerQuote}”` : '';
+      return `${record.selectedPlayerName} (#${record.playerNumber}, ${record.position || 'position not listed'})${record.previousClub ? ` joins from ${record.previousClub}` : ' joins the squad'}.${quote}`;
+    });
+    const facts = {
+      context: `Write one professional signing-class article covering all ${children.length} players equally. Do not invent facts or quotes. Players:\n${playerLines.join('\n')}`,
+      player: children.map(record => record.selectedPlayerName).join(', '),
+      details: playerLines.join(' '),
+    };
+    const story = await buildStory(team, 'signing', facts, null);
+    story.headline = `${team.label.toUpperCase()} WELCOMES ${children.length} NEW SIGNINGS`;
+    story.subheadline = `One announcement. ${children.length} additions. A stronger ${team.label} squad.`;
+    story.playerName = children.map(record => record.selectedPlayerName).join(' • ');
+    story.playerNumber = children.map(record => `#${record.playerNumber}`).join(' • ');
+    const parentId = batch.parentStoryId || storyId();
+    let parent = remember({
+      id: parentId, type: 'signing_batch', teamKey: batch.teamKey, guildId: batch.guildId,
+      requesterUserId: batch.requesterUserId, destinationChannelId: children[0].destinationChannelId,
+      transactionChannelId: children[0].transactionChannelId, alertRoleId: batch.roleId,
+      childStoryIds: children.map(record => record.id), story, state: 'draft_ready',
+      approvalExpiresAt: Date.now() + APPROVAL_WAIT_MS, createdAt: batch.createdAt,
+    });
+    parent = (await renderEdition(parent, { freshHero: true, variationKey: batchId })).record;
+    stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'ready', parentStoryId: parent.id });
+    const owner = await ownerFor(parent);
+    if (!owner) throw new Error('The configured bot owner could not be contacted for batch approval.');
+    const files = [];
+    for (const child of children) {
+      if (child.posterPath && fs.existsSync(child.posterPath)) {
+        files.push(new AttachmentBuilder(fs.readFileSync(child.posterPath), { name: `${clean(child.selectedPlayerName, 30).replace(/[^a-z0-9]+/gi, '-')}-signing.png` }));
+      }
+    }
+    const rendered = await renderEdition(parent, { freshHero: false });
+    files.push(newspaperAttachment(rendered.newspaper, team, 'signing-batch'));
+    await owner.send({
+      content: `Private ${team.reporter} batch preview for ${children.length} signings. One approval publishes one transaction post and one newspaper edition.`,
+      files, components: [batchApprovalButtons(batchId)], allowedMentions: { parse: [] },
+    });
+    return true;
+  }
+
+  async function publishSigningBatch(batchId) {
+    const batch = stateStore.getMetadata(`signingBatch:${batchId}`);
+    if (!batch || batch.state !== 'ready') throw new Error('This batch is not ready for publication.');
+    let parent = pendingSignings.get(batch.parentStoryId) || stateStore.getStory(batch.parentStoryId);
+    const children = (batch.childIds || []).map(id => pendingSignings.get(id) || stateStore.getStory(id)).filter(Boolean);
+    if (!parent || children.length !== (batch.childIds || []).length) throw new Error('The batch signing records are incomplete.');
+    const guild = await client.guilds.fetch(batch.guildId);
+    const team = TEAMS[batch.teamKey];
+    const transaction = await guild.channels.fetch(parent.transactionChannelId);
+    const reporter = await guild.channels.fetch(parent.destinationChannelId);
+    const posterFiles = children.filter(record => record.posterPath && fs.existsSync(record.posterPath)).map(record =>
+      new AttachmentBuilder(fs.readFileSync(record.posterPath), { name: `${clean(record.selectedPlayerName, 30).replace(/[^a-z0-9]+/gi, '-')}-signing.png` })
+    );
+    const mention = parent.alertRoleId ? `<@&${parent.alertRoleId}>` : undefined;
+    const allowedMentions = parent.alertRoleId ? { parse: [], roles: [parent.alertRoleId] } : { parse: [] };
+    await transaction.send({ files: posterFiles, allowedMentions: { parse: [] } });
+    const publishedAt = new Date().toISOString();
+    const rendered = await renderEdition(parent, { freshHero: false, publishedAt });
+    const articlePost = await reporter.send({ content: mention, files: [newspaperAttachment(rendered.newspaper, team, 'signing-batch')], allowedMentions });
+    for (const child of children) {
+      stateStore.assignSquadNumber(child.teamKey, child.playerNumber, { playerName: child.selectedPlayerName, userId: child.selectedUserId, storyId: child.id });
+      remember({ ...child, state: 'published', publishedAt });
+    }
+    parent = remember({ ...parent, state: 'published', publishedAt, publishedMessageId: articlePost.id });
+    stateStore.putMediaPost({ id: articlePost.id, storyId: parent.id, teamKey: parent.teamKey, reporter: team.reporter, headline: parent.story.headline, channelId: reporter.id, guildId: guild.id, state: 'published', managedBy: 'rt-media', publishedAt });
+    stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'published', publishedAt });
+    stateStore.addManagementLog({ action: 'signing_batch_published', batchId, teamKey: batch.teamKey, players: children.map(record => record.selectedPlayerName) });
   }
 
   async function askForSigningPlayer(message, team, teamKey, destination, graphic, alertRoleId) {
@@ -2431,6 +2562,91 @@ async function startBot() {
         selected.length + ' selected game' + (selected.length === 1 ? '' : 's') +
         '. Verify every score and statistic before publishing.');
       return interaction.editReply('The private friendly-edition preview has been sent.');
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('signing_batch_players:')) {
+      const batchId = interaction.customId.split(':')[1];
+      const batch = stateStore.getMetadata(`signingBatch:${batchId}`);
+      if (!batch || batch.state !== 'selecting') return interaction.reply({ content: 'This batch selection is no longer active.', flags: MessageFlags.Ephemeral });
+      if (interaction.user.id !== batch.requesterUserId) return interaction.reply({ content: 'Only the configured owner can select this signing class.', flags: MessageFlags.Ephemeral });
+      const guild = interaction.guild;
+      const players = [];
+      for (const id of interaction.values.slice(0, 4)) {
+        const member = await guild.members.fetch(id).catch(() => null);
+        if (!member || member.user.bot) continue;
+        if (existingSquadAssignmentForPlayer(batch.teamKey, member.id, member.displayName)) continue;
+        players.push({ id: member.id, name: member.displayName });
+      }
+      if (players.length < 2) return interaction.reply({ content: 'At least two unsigned players must remain in the batch.', flags: MessageFlags.Ephemeral });
+      stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'collecting_facts', players });
+      return interaction.showModal(signingBatchFactsModal(batchId, players));
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('signing_batch_facts:')) {
+      const batchId = interaction.customId.split(':')[1];
+      let batch = stateStore.getMetadata(`signingBatch:${batchId}`);
+      if (!batch || batch.state !== 'collecting_facts') return interaction.reply('This batch signing request is no longer active.');
+      if (interaction.user.id !== batch.requesterUserId) return interaction.reply('Only the configured owner can submit batch signing facts.');
+      await interaction.deferReply();
+      const guild = await client.guilds.fetch(batch.guildId);
+      const team = TEAMS[batch.teamKey];
+      const reporter = reporterChannelFor(guild, team);
+      const transaction = transactionChannelFor(guild, batch.teamKey);
+      if (!reporter || !transaction) return interaction.editReply('The club reporter or transactions channel is unavailable. Nothing was started.');
+      const childIds = [];
+      for (const [index, selected] of batch.players.entries()) {
+        const member = await guild.members.fetch(selected.id).catch(() => null);
+        if (!member) continue;
+        const raw = safePublicText(interaction.fields.getTextInputValue('player_' + index), 160);
+        const [positionRaw, ...previousParts] = raw.split('|');
+        const id = storyId();
+        let record = remember({
+          id, batchId, requesterUserId: batch.requesterUserId, guildId: batch.guildId,
+          sourceMessageId: `batch-${batchId}-${member.id}`, sourceChannelId: interaction.channelId,
+          destinationChannelId: reporter.id, transactionChannelId: transaction.id,
+          teamKey: batch.teamKey, type: 'signing', alertRoleId: batch.roleId,
+          selectedUserId: member.id, selectedPlayerName: safePublicText(member.displayName, 40),
+          position: safePublicText(positionRaw, 60), previousClub: safePublicText(previousParts.join('|'), 100),
+          playerNumber: exactTru(member.id, member.displayName) ? '22' : '',
+          state: 'waiting_for_package', createdAt: new Date().toISOString(),
+        });
+        childIds.push(id);
+        if (exactTru(record.selectedUserId, record.selectedPlayerName)) {
+          record = remember({ ...record, playerQuote: 'because I’m a baller' });
+        }
+      }
+      if (childIds.length < 2) return interaction.editReply('Fewer than two selected players remain available. Nothing was sent.');
+      batch = { ...batch, state: 'collecting', childIds };
+      stateStore.setMetadata(`signingBatch:${batchId}`, batch);
+      for (const id of childIds) {
+        const record = pendingSignings.get(id) || stateStore.getStory(id);
+        const member = await guild.members.fetch(record.selectedUserId).catch(() => null);
+        if (exactTru(record.selectedUserId, record.selectedPlayerName)) await prepareDraft(id, 'because I’m a baller', { freshHero: true });
+        else if (member) await contactPlayer(record, member);
+      }
+      return interaction.editReply(`${team.reporter} started a combined ${childIds.length}-player signing class. Each player was contacted separately; you will receive one approval package after every player responds.`);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('signing_batch:')) {
+      const [, action, batchId] = interaction.customId.split(':');
+      let batch = stateStore.getMetadata(`signingBatch:${batchId}`);
+      if (!batch) return interaction.reply('This signing batch is no longer active.');
+      if (interaction.user.id !== batch.requesterUserId) return interaction.reply('Only the configured owner can approve this signing batch.');
+      if (action === 'cancel') {
+        for (const id of batch.childIds || []) forget(id);
+        if (batch.parentStoryId) forget(batch.parentStoryId);
+        stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'cancelled', cancelledAt: new Date().toISOString() });
+        return interaction.update({ content: 'Batch cancelled. Nothing was published and no squad numbers were assigned.', components: [], attachments: [] });
+      }
+      if (action === 'publish') {
+        await interaction.update({ content: 'Publishing the approved signing class with one club mention…', components: [] });
+        await publishSigningBatch(batchId);
+        return interaction.editReply('Batch signing class published successfully.');
+      }
+      await interaction.update({ content: 'Regenerating the combined newspaper edition…', components: [], attachments: [] });
+      stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'collecting' });
+      await maybePrepareSigningBatch(batchId);
+      return interaction.editReply('A regenerated combined preview has been sent.');
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('signing_player:')) {
@@ -3440,12 +3656,12 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
-    const privateCommand = ['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
+    if (!['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
+    const privateCommand = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
-    if (['match', 'sign', 'signing', 'release'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
+    if (['match', 'sign', 'sign-batch', 'signing', 'release'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
       return interaction.editReply('Only the Castle & Crown Collective owner can start an RT Football Media publication workflow.');
     }
     if (['correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
@@ -3883,6 +4099,11 @@ async function startBot() {
     if (interaction.commandName === 'sign') {
       const teamKey = interaction.options.getString('club');
       await startSignCommand(interaction, team, teamKey);
+      return;
+    }
+    if (interaction.commandName === 'sign-batch') {
+      const teamKey = interaction.options.getString('club');
+      await startSignBatchCommand(interaction, team, teamKey);
       return;
     }
 
