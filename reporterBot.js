@@ -998,6 +998,42 @@ async function startBot() {
         console.error('Team access role lock failed:', error.message);
       }
     }
+
+    const rolePanelScanVersion = 'team-role-panel-scan-2026-09-21-v1';
+    if (stateStore.getMetadata('rolePanelScanVersion') !== rolePanelScanVersion) {
+      try {
+        const guild = process.env.DISCORD_GUILD_ID
+          ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID)
+          : client.guilds.cache.first();
+        if (!guild) throw new Error('The configured Discord server could not be found.');
+        await guild.channels.fetch();
+        const likelyChannels = [...guild.channels.cache.values()].filter(channel =>
+          channel.isTextBased() && /role|welcome|start|register|registration|verify|verification/i.test(String(channel.name || ''))
+        );
+        const candidates = [];
+        for (const channel of likelyChannels) {
+          const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+          if (!messages) continue;
+          for (const message of messages.values()) {
+            if (!message.author.bot || message.author.id === client.user.id || !message.components.length) continue;
+            const componentText = JSON.stringify(message.components.map(component => component.toJSON()));
+            if (!/birmingham|crown\s?fc|mlpc\s?roster/i.test(componentText)) continue;
+            candidates.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              messageId: message.id,
+              authorId: message.author.id,
+              authorName: message.author.username,
+              componentText: componentText.slice(0, 1500),
+            });
+          }
+        }
+        console.log('Team role panel scan result:', JSON.stringify(candidates));
+        stateStore.setMetadata('rolePanelScanVersion', rolePanelScanVersion);
+      } catch (error) {
+        console.error('Team role panel scan failed:', error.message);
+      }
+    }
   });
 
   function reporterChannelFor(guild, team) {
