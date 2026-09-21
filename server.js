@@ -2,20 +2,18 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
-require('./rtReporterVoicePatch');
-require('./rtNewspaperPatch');
 const { startBot } = require('./reporterBot');
-const { startPlayerSpotlights } = require('./playerSpotlight');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const SERVER_BRAND_NAME = process.env.SERVER_BRAND_NAME || 'Castle & Crown Collective';
+const botHealth = { status: 'starting', checkedAt: new Date().toISOString(), error: null };
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'proclubs-custom-api', serverBrandName: SERVER_BRAND_NAME });
+  const ok = botHealth.status !== 'error';
+  res.status(ok ? 200 : 503).json({ ok, service: 'proclubs-custom-api', bot: botHealth.status, checkedAt: botHealth.checkedAt });
 });
 
 app.get('/archetypes', (req, res) => {
@@ -50,21 +48,13 @@ app.listen(PORT, () => {
   console.log(`proclubs-custom-api running on port ${PORT}`);
 });
 
-(async () => {
-  try {
-    const client = await startBot();
-    if (!client) return;
-    startPlayerSpotlights(client);
-    const guild = process.env.DISCORD_GUILD_ID
-      ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null)
-      : client.guilds.cache.first();
-    if (!guild) return;
-    if (guild.name !== SERVER_BRAND_NAME) {
-      await guild.setName(SERVER_BRAND_NAME, 'Approved Castle & Crown Collective server rebrand');
-      console.log('Discord server renamed to ' + SERVER_BRAND_NAME);
-    }
-  } catch (err) {
-    console.error('Discord bot failed to start:', err);
-    process.exitCode = 1;
-  }
-})();
+startBot().then(client => {
+  botHealth.status = client ? 'ready' : 'disabled';
+  botHealth.checkedAt = new Date().toISOString();
+}).catch(err => {
+  botHealth.status = 'error';
+  botHealth.error = err.message;
+  botHealth.checkedAt = new Date().toISOString();
+  console.error('Discord bot failed to start:', err);
+  process.exitCode = 1;
+});

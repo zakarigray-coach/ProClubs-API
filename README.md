@@ -1,17 +1,24 @@
-# RT Football Media Discord Bot
+# Castle & Crown Collective Bot
+
+**Castle & Crown Collective** (short form **C&C Collective**) is the umbrella organization for Birmingham City in MPL League 1 and CrownFC in MLPC. **RT Football Media** is the official internal media division; it is not the server name.
 
 A Discord sports desk for two FC 27 Pro Clubs teams:
 
 - **Raine at St. Andrew’s** covers Birmingham City in Masters Premier League, League 1.
 - **Teagan Behind the Crown** covers CrownFC in MLPC.
 
-The bot publishes match reports, player signings, and departures as dated RT Football News front pages. Each story receives fresh AI-generated hero artwork, while the newspaper text and exact Eastern-Time publication date are rendered separately for accuracy. Public posts contain the finished newspaper cover (plus the configured role ping) without repeating the full article in a Discord embed.
+The bot publishes match reports, player signings, weekly recaps, Player Spotlights, awards, and departures as dated RT Football Media front pages. Each story receives fresh AI-generated hero artwork, while exact typography and the Eastern-Time publication date are rendered separately. Public posts contain the finished front page without repeating the full article as a long Discord embed.
 
 ## Commands
 
 - `/match` — required match graphic plus optional extra context
 - `/signing` — player, position, details, and optional graphic
 - `/release` — player and farewell details
+- `/correct-stats` — preview and approve a match-by-match correction
+- `/award-shortlists` — evidence-based suggestions; the owner chooses every winner
+- `/award-presentation` — owner-approved 10-second MP4 for a saved winner
+- `/archive-media` — preview posts eligible for the copy → verify → delete archive
+- `/run-schedules` — check due Eastern-Time jobs with restart-safe duplicate protection
 
 ## Discord setup
 
@@ -35,12 +42,17 @@ Copy `.env.example` to `.env` locally, or add the same values in your hosting se
 - `OPENAI_MODEL` — optional; defaults to `gpt-5-mini`
 - `OPENAI_IMAGE_MODEL` — image model; defaults to `gpt-image-2.5-sunburst`
 - `BOT_OWNER_ID` — Zak’s Discord user ID; all selections and approvals are sent here privately
-- `TRU_USER_ID` — Tru’s Discord user ID; applies “Because I’m a baller.” and bypasses the quote wait
+- `TRU_USER_ID` — Tru’s Discord user ID; applies his saved #22 and “because I’m a baller” package without asking him again, while preserving owner approval
+- `TRAP_USER_ID` — Trap’s Discord user ID; defaults to `764509653190180874` and displays his real Discord mention beside Coach Gray and Tru on stat-correction notices
+- `FOOTBALL_OPS_ROLE_ID` — stable ID for the role titled `Vice President of Football Operations`
+- `FC_SEASON` — season label for persistent match-by-match records; defaults to `FC27`
 - `NEWS_TIMEZONE` — defaults to `America/New_York`
 - `QUOTE_WAIT_HOURS` — defaults to 12 hours, with one reminder
 - `RT_DATA_DIR` — persistent state/graphics directory; use `/data` with a Railway volume
 
 The automatic graphic workflow intentionally stops and privately reports an error if AI writing or image generation fails. It never publishes an incomplete fallback story.
+
+All publishing commands are owner-only and private. Every route—including the legacy `/match`, `/signing`, and `/release` commands—creates a DM preview with **Publish**, **Edit**, **Regenerate**, and **Cancel** instead of posting immediately.
 
 ## Run
 
@@ -72,7 +84,30 @@ Post an OurProClubs text recap, graphic recap, or both, or let another bot post 
 
 Only matches explicitly labeled **Friendly/Friendlies**, **Cup**, or **Tournament** are eligible. Friendlies represent the clubs’ competitive league fixtures in this workflow, and Cup/Tournament games receive equal editorial importance. Playoff and unclassified games are ignored. If a recap contains multiple eligible games, the bot privately sends `BOT_OWNER_ID` a multi-select dropdown. The owner can choose one or several matches for a single article. After selection, the match edition is privately sent with **Publish**, **Edit**, **Regenerate**, and **Cancel** controls before anything appears publicly.
 
-For signings, the owner privately selects a player from the correct club role or chooses **Player not listed** and supplies the verified football facts—never the squad number. The correct reporter then privately asks the selected player to choose an available number and submit a genuine quote, with an optional player photo. Duplicate numbers are rejected in the player's DM. If no photo is supplied, the bot generates club-themed signing artwork without inventing a player likeness. The player can submit a quote or decline. A 12-hour timeout sends the owner options to continue without a quote, enter one manually, or cancel. Tru’s configured user ID keeps his saved number 22 and quote and publishes without waiting.
+For signings, the owner privately selects a player from the correct club role or chooses **Player not listed** and supplies verified football facts—never the squad number. The player sees all squad numbers 1–99 across four selectors; taken numbers remain visible with the assigned player and `TAKEN`, and selecting one is rejected. The reporter collects the player’s genuine quote and optional photo. If no photo is supplied, the bot generates club-themed artwork without inventing a player likeness. Tru’s configured user ID applies his saved #22 and quote without contacting him again, but still sends the owner a private preview before publication.
+
+Active roster limits are enforced from published squad-number assignments: Birmingham City/MPL allows 18 players and CrownFC/MLPC allows 16. A duplicate signing for an active player is blocked, and an approved release frees the player’s number and roster spot.
+
+Approved match editions save each selected fixture as a separate season record. Supplied appearances, goals, assists, goalkeeper data, cards and MOTM values remain attached to that match. Running totals are calculated from those records so corrections can safely recalculate the season.
+
+Each club’s read-only `stats` channel contains one pinned running board. After an approved recap or `/correct-stats` change, the bot updates team W-D-L, goals for/against, goal difference, clean sheets, recent form, individual appearances/goals/assists/cards/MOTM and goalkeeper saves/goals conceded/clean sheets. The board is visible only to that club’s authorized role and directs players to Coach Gray, Tru, or Trap if a figure looks incorrect.
+
+## Scheduled media operations
+
+The scheduler uses `America/New_York` and persistent run keys so a restart cannot duplicate a completed job:
+
+- Thursday: each reporter selects a player from the correct club role, never repeating a previous selection, and DMs 4–5 rotating questions.
+- Friday: one weekly recap draft per club summarizes only verified saved results and statistics.
+- Saturday at 10:00 AM Eastern: a Player Spotlight draft uses the saved signing photo only as an identity reference for a fresh scene. If the player did not respond, the cover clearly says so and invents no quote.
+- Daily: RT-managed posts at least 30 days old are offered to the owner for approval. The original is deleted only after its archive copy succeeds.
+
+## Private staging suite
+
+Run `/staging-suite` for an owner-only preview. After approval, the bot creates or reuses a hidden `PRIVATE STAGING` category, runs the full 27-point checklist against a separate TEST namespace, posts the private pass/fail report and clears only TEST data. It never sends real player DMs, publishes publicly, changes production squad numbers, deletes production articles or contaminates real statistics.
+
+## MPL Romano Times follower
+
+The Birmingham section includes read-only `romano-times-news` for the MPL Romano Times / Around the League announcement channel `1547269808909979729`. If the bot can access the source announcement channel it creates the follower connection. Otherwise, use Discord’s source-channel **Follow** button once and choose Castle & Crown Collective → `romano-times-news`. Discord then forwards future announcements automatically without the RT bot rewriting them.
 
 Squad numbers are normalized to 1–99 and locked separately for each club after publication. A duplicate is rejected with the name of the player who already owns it. Pending signing drafts also block their selected number, and Tru’s existing number 22 is protected for him on both Birmingham City and CrownFC. Publishing `/release` for a player frees that player's stored number for that club.
 
@@ -89,6 +124,7 @@ It safely creates or reuses:
 - `𓊆 📰 𓊇 RT FOOTBALL MEDIA`
 - `🔵・raine-reports` for Birmingham City/MPL
 - `👑・teagan-reports` for CrownFC/MLPC
+- `🗄️・media-archives` for verified 30-day archive copies
 
 Running the command again does not duplicate the category or channels. Automatic posts from MPL source channels are routed to Raine, and MLPC source channels are routed to Teagan. You may remove **Manage Channels** from the bot after setup; retain View Channel, Read Message History, Send Messages, Embed Links, and Attach Files.
 
@@ -112,8 +148,11 @@ The bot never invents or simulates a quote. Missing comments are shown as no-com
 
 ## Railway persistence
 
-Pending selections, quote requests, approvals, cached source graphics, and duplicate-message records must survive restarts. Add a Railway persistent volume mounted at `/data`, then set `RT_DATA_DIR=/data`. Without a volume, state survives a normal process restart only while the local filesystem remains available; a redeploy may erase it.
+Pending selections, quote requests, approvals, cached source graphics, statistics, schedules, spotlights, archive metadata, awards, and duplicate-message records survive restarts. Add a Railway persistent volume mounted at `/data` and set `RT_DATA_DIR=/data`; Railway deployments also default to `/data`. `nixpacks.toml` installs FFmpeg and Fontconfig for award videos and reliable newspaper typography.
+
+The exact owner-supplied CrownFC identity artwork is stored in `assets/crownfc-brand.jpg` with its production crest crop in `assets/crownfc-crest.png`. CrownFC media uses Carolina/cyan blue, deep navy, royal blue, white and silver—never gold.
 
 ## Targeted role alerts
 
 Reporter posts can notify only the relevant club role instead of using `@everyone`. Add `BIRMINGHAM_ROLE_ID` and `MLPC_ROLE_ID` in Railway. Raine’s posts mention only the Birmingham role; Teagan’s posts mention only the MLPC role. The role must be mentionable, or the bot must have permission to mention roles.
+The approved setup gives only the RT bot permission to mention non-mentionable club roles inside the controlled club/media channels, so players cannot use those roles themselves.

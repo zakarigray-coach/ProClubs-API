@@ -49,3 +49,39 @@ test('persists one-time audit metadata', () => {
   first.setMetadata('audit', { version: 'v2' });
   assert.equal(new StateStore(file).getMetadata('audit').version, 'v2');
 });
+
+test('keeps production and staging operations completely isolated', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-media-'));
+  const store = new StateStore(path.join(directory, 'state.json'));
+  store.putMatchRecord({ id: 'real-match', teamKey: 'birmingham' });
+  store.putMatchRecord({ id: 'test-match', teamKey: 'birmingham' }, { testMode: true });
+  store.recordSpotlightSelection({ id: 'test-spotlight', teamKey: 'crownfc', playerId: 'test-player' }, { testMode: true });
+  assert.deepEqual(store.listMatchRecords().map(item => item.id), ['real-match']);
+  assert.deepEqual(store.listMatchRecords({}, { testMode: true }).map(item => item.id), ['test-match']);
+  assert.equal(store.listSpotlightSelections('crownfc').length, 0);
+  store.clearTestData();
+  assert.equal(store.listMatchRecords({}, { testMode: true }).length, 0);
+  assert.equal(store.listMatchRecords().length, 1);
+});
+
+test('scheduled operations are idempotent across restarts', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-media-'));
+  const file = path.join(directory, 'state.json');
+  const first = new StateStore(file);
+  assert.equal(first.claimScheduleRun('2026-09-24:spotlight'), true);
+  assert.equal(first.claimScheduleRun('2026-09-24:spotlight'), false);
+  const second = new StateStore(file);
+  assert.equal(second.claimScheduleRun('2026-09-24:spotlight'), false);
+});
+
+test('management logs and media archive state persist', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-media-'));
+  const file = path.join(directory, 'state.json');
+  const first = new StateStore(file);
+  first.addManagementLog({ action: 'signing_published', storyId: 'story-1' });
+  first.putMediaPost({ id: 'message-1', state: 'published', managedBy: 'rt-media' });
+  first.patchMediaPost('message-1', { archivedAt: '2026-10-21T12:00:00.000Z' });
+  const second = new StateStore(file);
+  assert.equal(second.listManagementLogs()[0].action, 'signing_published');
+  assert.equal(second.listMediaPosts()[0].archivedAt, '2026-10-21T12:00:00.000Z');
+});

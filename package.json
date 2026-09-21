@@ -1,7 +1,7 @@
 {
   "name": "proclubs-custom-api",
   "version": "1.0.0",
-  "description": "RT Football Media Discord bot plus Pro Clubs API",
+  "description": "Castle & Crown Collective club operations and RT Football Media Discord bot",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

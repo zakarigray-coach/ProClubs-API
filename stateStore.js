@@ -8,8 +8,57 @@ function clone(value) {
 class StateStore {
   constructor(filePath) {
     this.filePath = filePath;
-    this.state = { stories: {}, processedMessages: {}, squadNumbers: {}, metadata: {} };
+    this.state = this.emptyState();
     this.load();
+  }
+
+  emptyState() {
+    return {
+      schemaVersion: 2,
+      stories: {},
+      processedMessages: {},
+      squadNumbers: {},
+      metadata: {},
+      operations: {
+        production: this.emptyOperationsScope(),
+        test: this.emptyOperationsScope(),
+      },
+    };
+  }
+
+  emptyOperationsScope() {
+    return {
+      matchRecords: {},
+      spotlightSelections: [],
+      managementLogs: [],
+      scheduleRuns: {},
+      mediaPosts: {},
+      awardShortlists: {},
+    };
+  }
+
+  ensureShape() {
+    this.state.schemaVersion = 2;
+    this.state.stories ||= {};
+    this.state.processedMessages ||= {};
+    this.state.squadNumbers ||= {};
+    this.state.metadata ||= {};
+    this.state.operations ||= {};
+    for (const name of ['production', 'test']) {
+      this.state.operations[name] ||= this.emptyOperationsScope();
+      const scope = this.state.operations[name];
+      scope.matchRecords ||= {};
+      scope.spotlightSelections ||= [];
+      scope.managementLogs ||= [];
+      scope.scheduleRuns ||= {};
+      scope.mediaPosts ||= {};
+      scope.awardShortlists ||= {};
+    }
+  }
+
+  operationsScope(options = {}) {
+    this.ensureShape();
+    return this.state.operations[options.testMode ? 'test' : 'production'];
   }
 
   load() {
@@ -20,6 +69,9 @@ class StateStore {
       this.state.processedMessages = parsed.processedMessages || {};
       this.state.squadNumbers = parsed.squadNumbers || {};
       this.state.metadata = parsed.metadata || {};
+      this.state.schemaVersion = parsed.schemaVersion || 1;
+      this.state.operations = parsed.operations || {};
+      this.ensureShape();
     } catch (error) {
       console.error('Could not load RT Football Media state:', error.message);
     }
@@ -101,6 +153,156 @@ class StateStore {
     this.state.metadata[key] = clone(value);
     this.persist();
     return this.getMetadata(key);
+  }
+
+  putMatchRecord(record, options = {}) {
+    const scope = this.operationsScope(options);
+    if (!record || !record.id) throw new Error('A match record requires an id.');
+    const next = {
+      ...record,
+      testMode: Boolean(options.testMode),
+      updatedAt: new Date().toISOString(),
+    };
+    scope.matchRecords[record.id] = clone(next);
+    this.persist();
+    return clone(next);
+  }
+
+  patchMatchRecord(id, values, options = {}) {
+    const scope = this.operationsScope(options);
+    const current = scope.matchRecords[id];
+    if (!current) return null;
+    return this.putMatchRecord({ ...current, ...values, id }, options);
+  }
+
+  getMatchRecord(id, options = {}) {
+    const value = this.operationsScope(options).matchRecords[id];
+    return value ? clone(value) : null;
+  }
+
+  listMatchRecords(filters = {}, options = {}) {
+    return Object.values(this.operationsScope(options).matchRecords)
+      .filter(record => !filters.teamKey || record.teamKey === filters.teamKey)
+      .filter(record => !filters.season || record.season === filters.season)
+      .sort((a, b) => String(a.playedAt || a.matchDate || '').localeCompare(String(b.playedAt || b.matchDate || '')))
+      .map(clone);
+  }
+
+  recordSpotlightSelection(selection, options = {}) {
+    const scope = this.operationsScope(options);
+    const next = {
+      ...selection,
+      testMode: Boolean(options.testMode),
+      selectedAt: selection.selectedAt || new Date().toISOString(),
+    };
+    scope.spotlightSelections.push(clone(next));
+    this.persist();
+    return clone(next);
+  }
+
+  listSpotlightSelections(teamKey, options = {}) {
+    return this.operationsScope(options).spotlightSelections
+      .filter(item => !teamKey || item.teamKey === teamKey)
+      .map(clone);
+  }
+
+  patchSpotlightSelection(id, values, options = {}) {
+    const scope = this.operationsScope(options);
+    const index = scope.spotlightSelections.findIndex(item => item.id === id);
+    if (index < 0) return null;
+    scope.spotlightSelections[index] = {
+      ...scope.spotlightSelections[index],
+      ...clone(values),
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    this.persist();
+    return clone(scope.spotlightSelections[index]);
+  }
+
+  addManagementLog(entry, options = {}) {
+    const scope = this.operationsScope(options);
+    const next = {
+      id: entry.id || `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+      ...entry,
+      testMode: Boolean(options.testMode),
+      createdAt: entry.createdAt || new Date().toISOString(),
+    };
+    scope.managementLogs.push(clone(next));
+    if (scope.managementLogs.length > 5000) scope.managementLogs.splice(0, scope.managementLogs.length - 5000);
+    this.persist();
+    return clone(next);
+  }
+
+  listManagementLogs(options = {}) {
+    return this.operationsScope(options).managementLogs.map(clone);
+  }
+
+  claimScheduleRun(key, details = {}, options = {}) {
+    const scope = this.operationsScope(options);
+    if (scope.scheduleRuns[key]) return false;
+    scope.scheduleRuns[key] = {
+      ...details,
+      key,
+      testMode: Boolean(options.testMode),
+      claimedAt: new Date().toISOString(),
+    };
+    this.persist();
+    return true;
+  }
+
+  getScheduleRun(key, options = {}) {
+    const value = this.operationsScope(options).scheduleRuns[key];
+    return value ? clone(value) : null;
+  }
+
+  releaseScheduleRun(key, options = {}) {
+    const scope = this.operationsScope(options);
+    if (!scope.scheduleRuns[key]) return false;
+    delete scope.scheduleRuns[key];
+    this.persist();
+    return true;
+  }
+
+  putMediaPost(post, options = {}) {
+    const scope = this.operationsScope(options);
+    if (!post || !post.id) throw new Error('A media post requires an id.');
+    const next = { ...post, testMode: Boolean(options.testMode), updatedAt: new Date().toISOString() };
+    scope.mediaPosts[post.id] = clone(next);
+    this.persist();
+    return clone(next);
+  }
+
+  patchMediaPost(id, values, options = {}) {
+    const scope = this.operationsScope(options);
+    if (!scope.mediaPosts[id]) return null;
+    return this.putMediaPost({ ...scope.mediaPosts[id], ...values, id }, options);
+  }
+
+  listMediaPosts(options = {}) {
+    return Object.values(this.operationsScope(options).mediaPosts).map(clone);
+  }
+
+  putAwardShortlist(shortlist, options = {}) {
+    const scope = this.operationsScope(options);
+    if (!shortlist || !shortlist.id) throw new Error('An award shortlist requires an id.');
+    scope.awardShortlists[shortlist.id] = clone({
+      ...shortlist,
+      testMode: Boolean(options.testMode),
+      updatedAt: new Date().toISOString(),
+    });
+    this.persist();
+    return clone(scope.awardShortlists[shortlist.id]);
+  }
+
+  listAwardShortlists(options = {}) {
+    return Object.values(this.operationsScope(options).awardShortlists).map(clone);
+  }
+
+  clearTestData() {
+    this.ensureShape();
+    this.state.operations.test = this.emptyOperationsScope();
+    this.persist();
   }
 
   isProcessed(messageId) {
