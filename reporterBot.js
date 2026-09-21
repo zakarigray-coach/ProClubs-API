@@ -3225,18 +3225,49 @@ async function startBot() {
       const archiveCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club archive/i.test(String(channel.name || '')));
       const birminghamCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /birmingham/i.test(String(channel.name || '')));
       const crownCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /crownfc|crown fc/i.test(String(channel.name || '')));
+      const communityCategories = (audit.communityCategoryIds || [])
+        .map(id => guildChannels.get(id))
+        .filter(channel => channel?.type === ChannelType.GuildCategory);
+      let collectiveCategory = communityCategories.find(channel => normalizeAuditName(channel.name) === 'community')
+        || communityCategories.find(channel => normalizeAuditName(channel.name) === 'c-c-collective')
+        || communityCategories[0];
+      if (collectiveCategory) {
+        try {
+          if (normalizeAuditName(collectiveCategory.name) !== 'c-c-collective') {
+            await collectiveCategory.setName('𓊆 💬 𓊇 C&C COLLECTIVE', 'Approved Collective category naming');
+          }
+        } catch {
+          skipped.push(`${collectiveCategory.name} (Collective category rename failed)`);
+        }
+        for (const duplicate of communityCategories.filter(channel => channel.id !== collectiveCategory.id)) {
+          for (const child of [...interaction.guild.channels.cache.values()].filter(channel => channel.parentId === duplicate.id)) {
+            try {
+              await child.setParent(collectiveCategory.id, { lockPermissions: false, reason: 'Approved duplicate community category consolidation' });
+              moved.push(`${child.name} → ${collectiveCategory.name}`);
+            } catch {
+              skipped.push(`${child.name} (duplicate community move failed)`);
+            }
+          }
+          if (![...interaction.guild.channels.cache.values()].some(channel => channel.parentId === duplicate.id)) {
+            try {
+              const name = duplicate.name;
+              await duplicate.delete('Approved duplicate community category cleanup');
+              deleted.push(name);
+            } catch {
+              skipped.push(`${duplicate.name} (duplicate category deletion failed)`);
+            }
+          }
+        }
+      }
       for (const channelId of audit.sharedCleanupChannelIds || []) {
         const channel = guildChannels.get(channelId);
         if (!channel || channel.type === ChannelType.GuildCategory) continue;
         const key = normalizeAuditName(channel.name);
         if (/^(locker-room-chat|collective-chat|collective-clubhouse|general-chat)$/.test(key)) {
-          let collectiveCategory = [...interaction.guild.channels.cache.values()].find(item =>
-            item.type === ChannelType.GuildCategory && /c&c community|collective community/i.test(String(item.name || ''))
-          );
           try {
             if (!collectiveCategory) {
               collectiveCategory = await interaction.guild.channels.create({
-                name: '𓊆 💬 𓊇 C&C COMMUNITY',
+                name: '𓊆 💬 𓊇 C&C COLLECTIVE',
                 type: ChannelType.GuildCategory,
                 reason: 'Approved shared Collective community cleanup',
               });
@@ -3573,6 +3604,9 @@ async function startBot() {
       const legacyClubCategories = categories.filter(category =>
         ['club', 'club-info', 'club-information', 'club-info-community', 'start-here'].includes(auditCategoryName(category.name))
       );
+      const communityCategories = categories.filter(category =>
+        ['community', 'c-c-community', 'c-c-collective'].includes(auditCategoryName(category.name))
+      );
       const uncategorized = channels.filter(channel =>
         channel.type !== ChannelType.GuildCategory && channel.parentId === null
       );
@@ -3650,6 +3684,10 @@ async function startBot() {
             value: list(sharedCleanupChannels, item => '• ' + item.name),
           },
           {
+            name: 'Community category consolidation (' + communityCategories.length + ')',
+            value: list(communityCategories, item => '• ' + item.name + ' → C&C COLLECTIVE'),
+          },
+          {
             name: 'Duplicate channel names (' + duplicates.length + ' groups)',
             value: list(duplicates, group => '• ' + group[0].name + ' ×' + group.length),
           },
@@ -3682,6 +3720,7 @@ async function startBot() {
         ownerId: interaction.user.id,
         legacyCategoryIds: legacyClubCategories.map(item => item.id),
         sharedCleanupChannelIds: sharedCleanupChannels.map(item => item.id),
+        communityCategoryIds: communityCategories.map(item => item.id),
         emptyCategoryIds: emptyCategories.filter(item => !legacyClubCategories.some(legacy => legacy.id === item.id)).map(item => item.id),
         expiresAt: Date.now() + 15 * 60 * 1000,
       });
@@ -3692,7 +3731,7 @@ async function startBot() {
           .setCustomId('server_audit:apply:' + auditId)
           .setLabel('Approve Consolidation & Cleanup')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0 && sharedCleanupChannels.length === 0),
+          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0 && sharedCleanupChannels.length === 0 && communityCategories.length === 0),
         new ButtonBuilder()
           .setCustomId('server_audit:cancel:' + auditId)
           .setLabel('Cancel')
