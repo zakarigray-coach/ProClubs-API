@@ -1701,10 +1701,84 @@ async function startBot() {
         results.created.push('CLUB ARCHIVE');
       }
 
-      // Welcome and Management Office are deliberately protected: this pass never moves or archives their channels.
+      // Welcome and Management Office are organized but never archived or deleted.
+      const welcomeCategory = await categoryFor('welcome', '𓊆 👋 𓊇 WELCOME', ['welcome']);
+      const managementCategory = await categoryFor('management', '𓊆 🛡️ 𓊇 MANAGEMENT OFFICE', ['management']);
+      const rtMediaCategory = await categoryFor('rt', '𓊆 📰 𓊇 RT FOOTBALL MEDIA', ['rt football media']);
       const ml1Category = await categoryFor('ml1', '𓊆 🔵 𓊇 BIRMINGHAM CITY • MPL', ['birmingham', 'masters league 1', 'masters premier league', ' ml1']);
       const mlpcCategory = await categoryFor('mlpc', '𓊆 👑 𓊇 CROWNFC • MLPC', ['crownfc', 'crown fc', ' mlpc']);
       const groundsCategory = await categoryFor('grounds', '𓊆 🎮 𓊇 THE GROUNDS / EA LEAGUE PLAY', ['the grounds', 'ea league']);
+
+      const clubhouseChannels = [
+        ['club-directory', '📌・club-directory', welcomeCategory, 'Official server directory for club information, registration, team areas, media coverage and management contacts.'],
+        ['welcome', '👋・welcome', welcomeCategory, 'Welcome to the professional home of Birmingham City MPL and CrownFC MLPC. Start here before accessing club areas.'],
+        ['rules', '📜・club-rules', welcomeCategory, 'Official clubhouse standards covering conduct, communication, competition and member expectations.'],
+        ['fc27-registration', '📝・fc27-registration', welcomeCategory, 'Complete all required player registration and league-verification steps before roster consideration.'],
+        ['verification', '✅・verification', welcomeCategory, 'Submit or confirm NACL and Virtual Leagues verification for competitive roster eligibility.'],
+        ['management-office', '🛡️・management-office', managementCategory, 'Private leadership office for ownership decisions, club planning, staffing and sensitive operations.'],
+        ['staff-room', '👔・staff-room', managementCategory, 'Private working room for club managers, coaches, recruitment staff and approved leadership.'],
+        ['transfer-requests', '🔄・transfer-requests', managementCategory, 'Private review queue for recruitment leads, transfer requests and roster-movement decisions.'],
+        ['approved-signings', '✅・approved-signings', managementCategory, 'Private record of approved player signings before official transaction and media publication.'],
+        ['modlogs', '📋・modlogs', managementCategory, 'Private moderation activity and accountability log for authorized server leadership.'],
+        ['wick-logs', '🛡️・wick-logs', managementCategory, 'Private Wick security events, anti-raid actions and server-protection records.'],
+        ['raine-at-st-andrews', '🔵・raine-at-st-andrews', rtMediaCategory, 'Official Birmingham City MPL coverage from Raine at St. Andrew’s: approved signings, match reports and dated RT Football News editions.'],
+        ['teagan-behind-the-crown', '👑・teagan-behind-the-crown', rtMediaCategory, 'Official CrownFC MLPC coverage from Teagan Behind the Crown: approved signings, match reports and dated RT Football News editions.'],
+      ];
+      for (const [key, wantedName, category, topic] of clubhouseChannels) {
+        let channel = all().find(item => normalize(item.name) === key || (key === 'rules' && normalize(item.name) === 'club-rules'));
+        try {
+          if (!channel && ['club-directory', 'raine-at-st-andrews', 'teagan-behind-the-crown'].includes(key)) {
+            channel = await guild.channels.create({ name: wantedName, type: ChannelType.GuildText, parent: category?.id, topic, reason: 'Approved professional clubhouse directory' });
+            results.created.push(key);
+          }
+          if (!channel) continue;
+          if (category && channel.parentId !== category.id) {
+            await channel.setParent(category.id, { lockPermissions: false, reason: 'Approved professional clubhouse organization' });
+            results.moved.push(key);
+          }
+          if ('setTopic' in channel && channel.topic !== topic) {
+            await channel.setTopic(topic, 'Professional clubhouse channel description');
+            results.topics.push(key);
+          }
+          if (key === 'club-directory') {
+            await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false, CreatePublicThreads: false, CreatePrivateThreads: false });
+            await channel.permissionOverwrites.edit(ownerId, { ViewChannel: true, SendMessages: true });
+            await channel.permissionOverwrites.edit(botId, { ViewChannel: true, SendMessages: true, ManageMessages: true });
+          }
+        } catch (error) {
+          results.warnings.push(key);
+          console.error('Could not organize clubhouse channel ' + key + ':', error.code, error.message);
+        }
+      }
+
+      const directoryChannel = all().find(item => normalize(item.name) === 'club-directory');
+      if (directoryChannel && directoryChannel.isTextBased()) {
+        try {
+          const directoryEmbed = new EmbedBuilder()
+            .setColor(0x7BAFD4)
+            .setTitle('Official Clubhouse Directory')
+            .setDescription('Welcome to the shared competitive home of Birmingham City in MPL and CrownFC in MLPC. Use the sections below to find official club information.')
+            .addFields(
+              { name: '👋 Welcome', value: 'Rules, FC27 registration, league verification and server access.' },
+              { name: '🔵 Birmingham City • MPL', value: 'Official announcements, squad room, match center, league information, transactions, statistics and highlights.' },
+              { name: '👑 CrownFC • MLPC', value: 'Official announcements, squad room, match center, league information, transactions, statistics and highlights.' },
+              { name: '📰 RT Football Media', value: 'Raine and Teagan’s approved signing stories, match reports and club newspaper editions.' },
+              { name: '🎮 The Grounds / EA League Play', value: 'Non-league club match scheduling, results and highlights when this section is active.' },
+              { name: '🛡️ Management Office', value: 'Restricted ownership, staff, recruitment, approval and security operations.' }
+            )
+            .setFooter({ text: 'Professional standards • Clear communication • One club community' });
+          const recent = await directoryChannel.messages.fetch({ limit: 25 });
+          const existingDirectory = recent.find(message => message.author.id === botId && message.embeds[0]?.title === 'Official Clubhouse Directory');
+          if (existingDirectory) await existingDirectory.edit({ embeds: [directoryEmbed] });
+          else {
+            const directoryMessage = await directoryChannel.send({ embeds: [directoryEmbed], allowedMentions: { parse: [] } });
+            await directoryMessage.pin('Official professional clubhouse directory').catch(() => {});
+          }
+        } catch (error) {
+          results.warnings.push('club-directory message');
+          console.error('Could not publish clubhouse directory:', error.code, error.message);
+        }
+      }
 
       const plans = [
         {
@@ -1714,7 +1788,7 @@ async function startBot() {
           channels: [
             ['ml1-announcements','🚨・ml1-announcements','Official Birmingham City MPL club announcements, deadlines and management updates.'],
             ['ml1-locker-room','⚽・ml1-locker-room','Birmingham City MPL squad room for players, staff, match discussion and team communication.'],
-            ['ml1-match-center','📅・ml1-match-center','Birmingham City MPL fixtures, lineups, matchday information, LIVE Twitch game streams and final results.'],
+            ['ml1-match-center','📅・ml1-match-center','Birmingham City MPL fixtures, confirmed lineups, matchday notices, live-match links and official results.'],
             ['ml1-league-center','🏆・ml1-league-center','Official MPL standings, league information and competition updates for Birmingham City.'],
             ['ml1-transactions','✍️・ml1-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
             ['ml1-stats','📊・ml1-stats','Birmingham City MPL team and player statistics, records and season performance.'],
@@ -1728,7 +1802,7 @@ async function startBot() {
           channels: [
             ['mlpc-announcements','🚨・mlpc-announcements','Official CrownFC MLPC club announcements, deadlines and management updates.'],
             ['mlpc-locker-room','⚽・mlpc-locker-room','CrownFC MLPC squad room for players, staff, match discussion and team communication.'],
-            ['mlpc-match-center','📅・mlpc-match-center','CrownFC MLPC fixtures, lineups, matchday information, LIVE Twitch game streams and final results.'],
+            ['mlpc-match-center','📅・mlpc-match-center','CrownFC MLPC fixtures, confirmed lineups, matchday notices, live-match links and official results.'],
             ['mlpc-league-center','🏆・mlpc-league-center','Official MLPC standings, league information and competition updates for CrownFC.'],
             ['mlpc-transactions','✍️・mlpc-transactions','CrownFC MLPC roster moves, signings, releases and official player transactions.'],
             ['mlpc-stats','📊・mlpc-stats','CrownFC MLPC team and player statistics, records and season performance.'],
@@ -1787,7 +1861,7 @@ async function startBot() {
 
       // The Grounds / EA League Play gets its own match center and highlights area.
       const groundsChannels = [
-        ['grounds-match-center','📅・grounds-match-center','EA SPORTS FC club league and The Grounds match scheduling, LIVE Twitch game streams, lineups and results.'],
+        ['grounds-match-center','📅・grounds-match-center','EA SPORTS FC club league and The Grounds scheduling, lineups, live-match links and official results.'],
         ['grounds-highlights','🎬・grounds-highlights','The Grounds and EA league play highlights, goals, saves and featured clips.']
       ];
       for (const [key,name,topic] of groundsChannels) {
@@ -1808,10 +1882,9 @@ async function startBot() {
 
       console.log('RT server cleanup result:', JSON.stringify(results));
       return interaction.editReply(
-        '✅ Professional club cleanup finished. Welcome and Management Office were protected. ' +
-        'Birmingham City/MPL, CrownFC/MLPC and The Grounds/EA League Play were organized; dedicated Highlights channels and professional channel descriptions were added. ' +
+        '✅ Professional club cleanup finished. Welcome and Management Office were organized without deleting their channels. ' +
+        'The official clubhouse directory, Birmingham City/MPL, CrownFC/MLPC and The Grounds/EA League Play were organized; dedicated Highlights channels and professional channel descriptions were added. ' +
         'Old duplicate competition channels were moved to CLUB ARCHIVE instead of deleted. ' +
-        'Twitch account daddy10420 is reserved for Match Center live posts; automatic Twitch detection requires TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET on Railway. ' +
         (results.warnings.length ? '⚠️ Review ' + results.warnings.length + ' item(s) that Discord would not let the bot change.' : 'No permission warnings were reported.')
       );
     }
@@ -1875,11 +1948,13 @@ async function startBot() {
       const preview = new EmbedBuilder()
         .setColor(0x7BAFD4)
         .setTitle('RT Football Media • Streamlined Club Layout')
-        .setDescription('Preview only. Nothing is deleted. Welcome and Management Office stay protected; redundant competition channels move to CLUB ARCHIVE.')
+        .setDescription('Preview only. Nothing is deleted. Every active channel receives a professional topic; Welcome and Management Office are organized, while redundant competition channels move to CLUB ARCHIVE.')
         .addFields(
-          { name: 'Protected', value: '👋 Welcome\\n🛡️ Management Office' },
+          { name: 'Welcome', value: '📌 club directory\\n👋 welcome\\n📜 rules\\n📝 registration\\n✅ verification' },
+          { name: 'Management Office', value: '🛡️ management office\\n👔 staff room\\n🔄 transfer requests\\n✅ approved signings\\n📋 security/mod logs' },
           { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
           { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
+          { name: 'RT Football Media', value: '🔵 Raine at St. Andrew’s\\n👑 Teagan Behind the Crown' },
           { name: 'The Grounds / EA League Play', value: '📅 match center\\n🎬 highlights' },
           { name: 'Archived, not deleted', value: 'duplicate signups • schedules • lineups • old live-stream channels • separate player-stats channels' }
         );
@@ -2024,12 +2099,12 @@ async function startBot() {
         {
           key: 'raine-at-st-andrews',
           name: '🔵・raine-at-st-andrews',
-          topic: 'Raine at St. Andrew’s reporting on Birmingham City in MPL for RT Football Media.',
+          topic: 'Official Birmingham City MPL coverage from Raine at St. Andrew’s: approved signings, match reports and dated RT Football News editions.',
         },
         {
           key: 'teagan-behind-the-crown',
           name: '👑・teagan-behind-the-crown',
-          topic: 'Teagan Behind the Crown reporting on CrownFC in MLPC for RT Football Media.',
+          topic: 'Official CrownFC MLPC coverage from Teagan Behind the Crown: approved signings, match reports and dated RT Football News editions.',
         },
       ];
 
@@ -2042,6 +2117,7 @@ async function startBot() {
         );        if (channel) {
           existing.push(channel.toString());
           if (channel.parentId !== category.id) await channel.setParent(category);
+          if (channel.topic !== reporter.topic) await channel.setTopic(reporter.topic, 'Accurate RT Football Media channel description');
         } else {
           channel = await interaction.guild.channels.create({
             name: reporter.name,
