@@ -1296,14 +1296,56 @@ async function startBot() {
       for (const plan of plans) {
         for (const [oldName,newName] of Object.entries(plan.renames)) {
           const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
-          if (ch && ch.name!==newName) { await ch.setName(newName,'Approved RT Football Media streamlining'); renamed.push(oldName); }
+          if (ch && ch.name!==newName) {
+            try { await ch.setName(newName,'Approved RT Football Media streamlining'); renamed.push(oldName); }
+            catch (error) { console.error('Could not rename channel ' + ch.id + ':', error.code, error.message); }
+          }
         }
         for (const oldName of plan.archive) {
           const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
-          if (ch) { await ch.setParent(archive.id,{lockPermissions:false,reason:'Approved RT Football Media streamlining'}); archived.push(oldName); }
+          if (ch) {
+            try { await ch.setParent(archive.id,{lockPermissions:false,reason:'Approved RT Football Media streamlining'}); archived.push(oldName); }
+            catch (error) { console.error('Could not archive channel ' + ch.id + ':', error.code, error.message); }
+          }
         }
       }
-      return interaction.editReply('✅ Streamlining complete. Kept/renamed ' + renamed.length + ' primary channels and moved ' + archived.length + ' redundant channels to CLUB ARCHIVE. No message history was deleted.');
+      const ownerId = interaction.user.id;
+      const botId = interaction.client.user.id;
+      const birminghamRoleId = process.env.BIRMINGHAM_ROLE_ID;
+      const crownRoleId = process.env.MLPC_ROLE_ID;
+      const permissionResults = [];
+      for (const ch of [...guild.channels.cache.values()]) {
+        const key = normalize(ch.name);
+        const isMl1 = key.startsWith('ml1-');
+        const isMlpc = key.startsWith('mlpc-');
+        if (!isMl1 && !isMlpc) continue;
+        if (![ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(ch.type)) continue;
+        const isLocker = key.includes('locker-room');
+        try {
+          const overwrites = [
+            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.SendMessagesInThreads] },
+            { id: ownerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads] },
+            { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.ManageMessages] },
+          ];
+          if (isLocker) {
+            const clubRoleId = isMl1 ? birminghamRoleId : crownRoleId;
+            if (clubRoleId && guild.roles.cache.has(clubRoleId)) {
+              overwrites.push({ id: clubRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads] });
+            }
+          }
+          await ch.permissionOverwrites.edit(guild.roles.everyone.id, overwrites[0]);
+          await ch.permissionOverwrites.edit(ownerId, overwrites[1]);
+          await ch.permissionOverwrites.edit(botId, overwrites[2]);
+          if (isLocker && overwrites[3]) await ch.permissionOverwrites.edit(overwrites[3].id, overwrites[3]);
+          permissionResults.push('✓ ' + ch.name);
+        } catch (error) {
+          console.error('Could not set channel permissions ' + ch.id + ':', error.code, error.message);
+          permissionResults.push('⚠ ' + ch.name);
+        }
+      }
+      return interaction.editReply('✅ Streamlining pass finished. Renamed ' + renamed.length + ' primary channels, archived ' + archived.length +
+        ', and applied owner-only posting rules where Discord allowed access. Locker rooms remain open to their configured club role. ' +
+        'No history or roles were deleted. Channels marked by a Railway Missing Access error require the RT Football Media bot role to have View Channel + Manage Channels on that category.');
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('server_audit:')) {
@@ -1416,6 +1458,14 @@ async function startBot() {
       const adminRoles = [...interaction.guild.roles.cache.values()].filter(role =>
         role.id !== interaction.guild.id && role.permissions.has(PermissionFlagsBits.Administrator)
       );
+      const roleSignature = role => role.permissions.bitfield.toString() + '|' + role.color + '|' + role.hoist + '|' + role.mentionable;
+      const roleGroups = new Map();
+      for (const role of [...interaction.guild.roles.cache.values()].filter(role => role.id !== interaction.guild.id && !role.managed)) {
+        const sig = roleSignature(role);
+        if (!roleGroups.has(sig)) roleGroups.set(sig, []);
+        roleGroups.get(sig).push(role);
+      }
+      const overlappingRoles = [...roleGroups.values()].filter(group => group.length > 1);
 
       const list = (items, render) => {
         if (!items.length) return 'None found';
@@ -1450,6 +1500,10 @@ async function startBot() {
           {
             name: 'Unused roles—review manually (' + unusedRoles.length + ')',
             value: list(unusedRoles, item => '• ' + item.name),
+          },
+          {
+            name: 'Overlapping roles—same permissions (' + overlappingRoles.length + ' groups)',
+            value: list(overlappingRoles, group => '• ' + group.map(role => role.name).join(' / ')),
           },
           {
             name: 'Administrator roles—security review (' + adminRoles.length + ')',
