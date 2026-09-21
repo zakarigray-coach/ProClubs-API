@@ -127,7 +127,7 @@ const setupServer = new SlashCommandBuilder()
 
 const streamlineServer = new SlashCommandBuilder()
   .setName('streamline-server')
-  .setDescription('Preview and apply the streamlined ML1/MLPC channel layout')
+  .setDescription('Preview and apply the professional five-section club layout')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
 const auditServer = new SlashCommandBuilder()
@@ -1283,69 +1283,157 @@ async function startBot() {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
         return interaction.reply({ content: 'You need Manage Channels permission.', flags: MessageFlags.Ephemeral });
       }
-      await interaction.update({ content: 'Applying the approved streamlined layout…', embeds: [], components: [] });
+      await interaction.update({ content: 'Applying the approved professional club layout…', embeds: [], components: [] });
       const guild = interaction.guild;
       const normalize = n => String(n || '').toLowerCase().replace(/^[^a-z0-9]+/,'');
-      let archive = [...guild.channels.cache.values()].find(c => c.type === ChannelType.GuildCategory && c.name.includes('CLUB ARCHIVE'));
-      if (!archive) archive = await guild.channels.create({ name: '𓊆 📦 𓊇 CLUB ARCHIVE', type: ChannelType.GuildCategory, reason: 'Approved RT Football Media streamlining' });
+      const all = () => [...guild.channels.cache.values()];
+      const botId = interaction.client.user.id;
+      const ownerId = process.env.BOT_OWNER_ID || guild.ownerId;
+      const birminghamRoleId = process.env.BIRMINGHAM_ROLE_ID;
+      const crownRoleId = process.env.MLPC_ROLE_ID;
+      const results = { created: [], renamed: [], moved: [], archived: [], topics: [], warnings: [] };
+
+      async function categoryFor(prefix, wantedName, aliases) {
+        let category = all().find(ch => ch.type === ChannelType.GuildCategory &&
+          aliases.some(alias => String(ch.name || '').toLowerCase().includes(alias)));
+        if (!category) {
+          const child = all().find(ch => ch.parentId && normalize(ch.name).startsWith(prefix + '-'));
+          if (child) category = guild.channels.cache.get(child.parentId);
+        }
+        try {
+          if (!category) {
+            category = await guild.channels.create({ name: wantedName, type: ChannelType.GuildCategory, reason: 'Approved professional club cleanup' });
+            results.created.push(wantedName);
+          } else if (category.name !== wantedName) {
+            await category.setName(wantedName, 'Approved professional club cleanup');
+            results.renamed.push(wantedName);
+          }
+        } catch (error) {
+          results.warnings.push(wantedName + ' category');
+          console.error('Could not prepare category:', wantedName, error.code, error.message);
+        }
+        return category;
+      }
+
+      let archive = all().find(ch => ch.type === ChannelType.GuildCategory && String(ch.name || '').toLowerCase().includes('club archive'));
+      if (!archive) {
+        archive = await guild.channels.create({ name: '𓊆 📦 𓊇 CLUB ARCHIVE', type: ChannelType.GuildCategory, reason: 'Approved professional club cleanup' });
+        results.created.push('CLUB ARCHIVE');
+      }
+
+      // Welcome and Management Office are deliberately protected: this pass never moves or archives their channels.
+      const ml1Category = await categoryFor('ml1', '𓊆 🔵 𓊇 BIRMINGHAM CITY • MPL', ['birmingham', 'masters league 1', 'masters premier league', ' ml1']);
+      const mlpcCategory = await categoryFor('mlpc', '𓊆 👑 𓊇 CROWNFC • MLPC', ['crownfc', 'crown fc', ' mlpc']);
+      const groundsCategory = await categoryFor('grounds', '𓊆 🎮 𓊇 THE GROUNDS / EA LEAGUE PLAY', ['the grounds', 'ea league']);
+
       const plans = [
-        { renames: {'ml1-announcements':'🚨・ml1-announcements','ml1-locker-room':'⚽・ml1-locker-room','ml1-match-results':'📅・ml1-match-center','ml1-standings-table':'🏆・ml1-league-center','ml1-signing-announcements':'✍️・ml1-transactions','ml1-team-stats':'📊・ml1-stats'}, archive:['ml1-signups','ml1-schedule','ml1-lineups','ml1-game-live-streams','ml1-player-stats'] },
-        { renames: {'mlpc-announcements':'🚨・mlpc-announcements','mlpc-locker-room':'⚽・mlpc-locker-room','mlpc-match-results':'📅・mlpc-match-center','mlpc-standings-table':'🏆・mlpc-league-center','mlpc-signing-announcements':'✍️・mlpc-transactions','mlpc-team-stats':'📊・mlpc-stats'}, archive:['mlpc-signups','mlpc-schedule','mlpc-lineups','mlpc-game-live-streams','mlpc-player-stats'] }
+        {
+          prefix: 'ml1', category: ml1Category, roleId: birminghamRoleId,
+          renames: {'ml1-announcements':'🚨・ml1-announcements','ml1-locker-room':'⚽・ml1-locker-room','ml1-match-results':'📅・ml1-match-center','ml1-standings-table':'🏆・ml1-league-center','ml1-signing-announcements':'✍️・ml1-transactions','ml1-team-stats':'📊・ml1-stats'},
+          archive: ['ml1-signups','ml1-schedule','ml1-lineups','ml1-game-live-streams','ml1-player-stats'],
+          channels: [
+            ['ml1-announcements','🚨・ml1-announcements','Official Birmingham City MPL club announcements, deadlines and management updates.'],
+            ['ml1-locker-room','⚽・ml1-locker-room','Birmingham City MPL squad room for players, staff, match discussion and team communication.'],
+            ['ml1-match-center','📅・ml1-match-center','Birmingham City MPL fixtures, lineups, matchday information, LIVE Twitch game streams and final results.'],
+            ['ml1-league-center','🏆・ml1-league-center','Official MPL standings, league information and competition updates for Birmingham City.'],
+            ['ml1-transactions','✍️・ml1-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
+            ['ml1-stats','📊・ml1-stats','Birmingham City MPL team and player statistics, records and season performance.'],
+            ['ml1-highlights','🎬・ml1-highlights','Birmingham City MPL match highlights, goals, saves and featured game clips.']
+          ]
+        },
+        {
+          prefix: 'mlpc', category: mlpcCategory, roleId: crownRoleId,
+          renames: {'mlpc-announcements':'🚨・mlpc-announcements','mlpc-locker-room':'⚽・mlpc-locker-room','mlpc-match-results':'📅・mlpc-match-center','mlpc-standings-table':'🏆・mlpc-league-center','mlpc-signing-announcements':'✍️・mlpc-transactions','mlpc-team-stats':'📊・mlpc-stats'},
+          archive: ['mlpc-signups','mlpc-schedule','mlpc-lineups','mlpc-game-live-streams','mlpc-player-stats'],
+          channels: [
+            ['mlpc-announcements','🚨・mlpc-announcements','Official CrownFC MLPC club announcements, deadlines and management updates.'],
+            ['mlpc-locker-room','⚽・mlpc-locker-room','CrownFC MLPC squad room for players, staff, match discussion and team communication.'],
+            ['mlpc-match-center','📅・mlpc-match-center','CrownFC MLPC fixtures, lineups, matchday information, LIVE Twitch game streams and final results.'],
+            ['mlpc-league-center','🏆・mlpc-league-center','Official MLPC standings, league information and competition updates for CrownFC.'],
+            ['mlpc-transactions','✍️・mlpc-transactions','CrownFC MLPC roster moves, signings, releases and official player transactions.'],
+            ['mlpc-stats','📊・mlpc-stats','CrownFC MLPC team and player statistics, records and season performance.'],
+            ['mlpc-highlights','🎬・mlpc-highlights','CrownFC MLPC match highlights, goals, saves and featured game clips.']
+          ]
+        }
       ];
-      const renamed=[], archived=[];
+
       for (const plan of plans) {
         for (const [oldName,newName] of Object.entries(plan.renames)) {
-          const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
+          const ch=all().find(item=>normalize(item.name)===oldName);
           if (ch && ch.name!==newName) {
-            try { await ch.setName(newName,'Approved RT Football Media streamlining'); renamed.push(oldName); }
-            catch (error) { console.error('Could not rename channel ' + ch.id + ':', error.code, error.message); }
+            try { await ch.setName(newName,'Approved professional club cleanup'); results.renamed.push(oldName); }
+            catch (error) { results.warnings.push(oldName); console.error('Could not rename channel ' + ch.id + ':', error.code, error.message); }
           }
         }
         for (const oldName of plan.archive) {
-          const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
-          if (ch) {
-            try { await ch.setParent(archive.id,{lockPermissions:false,reason:'Approved RT Football Media streamlining'}); archived.push(oldName); }
-            catch (error) { console.error('Could not archive channel ' + ch.id + ':', error.code, error.message); }
+          const ch=all().find(item=>normalize(item.name)===oldName);
+          if (ch && archive && ch.parentId !== archive.id) {
+            try { await ch.setParent(archive.id,{lockPermissions:false,reason:'Approved professional club cleanup'}); results.archived.push(oldName); }
+            catch (error) { results.warnings.push(oldName); console.error('Could not archive channel ' + ch.id + ':', error.code, error.message); }
           }
         }
-      }
-      const ownerId = interaction.user.id;
-      const botId = interaction.client.user.id;
-      const birminghamRoleId = process.env.BIRMINGHAM_ROLE_ID;
-      const crownRoleId = process.env.MLPC_ROLE_ID;
-      const permissionResults = [];
-      for (const ch of [...guild.channels.cache.values()]) {
-        const key = normalize(ch.name);
-        const isMl1 = key.startsWith('ml1-');
-        const isMlpc = key.startsWith('mlpc-');
-        if (!isMl1 && !isMlpc) continue;
-        if (![ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(ch.type)) continue;
-        const isLocker = key.includes('locker-room');
-        try {
-          const overwrites = [
-            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.SendMessagesInThreads] },
-            { id: ownerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads] },
-            { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.ManageMessages] },
-          ];
-          if (isLocker) {
-            const clubRoleId = isMl1 ? birminghamRoleId : crownRoleId;
-            if (clubRoleId && guild.roles.cache.has(clubRoleId)) {
-              overwrites.push({ id: clubRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads] });
+        for (const [key,name,topic] of plan.channels) {
+          let ch=all().find(item=>normalize(item.name)===key);
+          try {
+            if (!ch) {
+              ch=await guild.channels.create({ name, type: ChannelType.GuildText, parent: plan.category?.id, topic, reason:'Approved professional club cleanup' });
+              results.created.push(key);
+            } else {
+              if (plan.category && ch.parentId!==plan.category.id) { await ch.setParent(plan.category.id,{lockPermissions:false,reason:'Approved professional club cleanup'}); results.moved.push(key); }
+              if ('setTopic' in ch && ch.topic!==topic) { await ch.setTopic(topic,'Professional club channel description'); results.topics.push(key); }
             }
+            if ([ChannelType.GuildText,ChannelType.GuildAnnouncement,ChannelType.GuildForum].includes(ch.type)) {
+              const isLocker=key.endsWith('locker-room');
+              await ch.permissionOverwrites.edit(guild.roles.everyone,{SendMessages:false,CreatePublicThreads:false,CreatePrivateThreads:false,SendMessagesInThreads:false});
+              await ch.permissionOverwrites.edit(ownerId,{ViewChannel:true,SendMessages:true,SendMessagesInThreads:true});
+              await ch.permissionOverwrites.edit(botId,{ViewChannel:true,SendMessages:true,SendMessagesInThreads:true,ManageMessages:true});
+              if (isLocker && plan.roleId && guild.roles.cache.has(plan.roleId)) {
+                await ch.permissionOverwrites.edit(plan.roleId,{ViewChannel:true,SendMessages:true,SendMessagesInThreads:true});
+              }
+            }
+          } catch (error) {
+            results.warnings.push(key);
+            console.error('Could not configure channel ' + key + ':', error.code, error.message);
           }
-          await ch.permissionOverwrites.edit(guild.roles.everyone.id, overwrites[0]);
-          await ch.permissionOverwrites.edit(ownerId, overwrites[1]);
-          await ch.permissionOverwrites.edit(botId, overwrites[2]);
-          if (isLocker && overwrites[3]) await ch.permissionOverwrites.edit(overwrites[3].id, overwrites[3]);
-          permissionResults.push('✓ ' + ch.name);
-        } catch (error) {
-          console.error('Could not set channel permissions ' + ch.id + ':', error.code, error.message);
-          permissionResults.push('⚠ ' + ch.name);
+        }
+        // Keep any remaining active ML1/MLPC channels together under the correct club category unless they were archived.
+        for (const ch of all().filter(item=>normalize(item.name).startsWith(plan.prefix+'-') && item.parentId!==archive.id)) {
+          if (plan.category && ch.parentId!==plan.category.id) {
+            try { await ch.setParent(plan.category.id,{lockPermissions:false,reason:'Keep club channels in one competition category'}); results.moved.push(normalize(ch.name)); }
+            catch (error) { results.warnings.push(ch.name); }
+          }
         }
       }
-      return interaction.editReply('✅ Streamlining pass finished. Renamed ' + renamed.length + ' primary channels, archived ' + archived.length +
-        ', and applied owner-only posting rules where Discord allowed access. Locker rooms remain open to their configured club role. ' +
-        'No history or roles were deleted. Channels marked by a Railway Missing Access error require the RT Football Media bot role to have View Channel + Manage Channels on that category.');
+
+      // The Grounds / EA League Play gets its own match center and highlights area.
+      const groundsChannels = [
+        ['grounds-match-center','📅・grounds-match-center','EA SPORTS FC club league and The Grounds match scheduling, LIVE Twitch game streams, lineups and results.'],
+        ['grounds-highlights','🎬・grounds-highlights','The Grounds and EA league play highlights, goals, saves and featured clips.']
+      ];
+      for (const [key,name,topic] of groundsChannels) {
+        let ch=all().find(item=>normalize(item.name)===key);
+        try {
+          if (!ch) {
+            ch=await guild.channels.create({name,type:ChannelType.GuildText,parent:groundsCategory?.id,topic,reason:'Approved professional club cleanup'});
+            results.created.push(key);
+          } else {
+            if (groundsCategory && ch.parentId!==groundsCategory.id) await ch.setParent(groundsCategory.id,{lockPermissions:false,reason:'Approved professional club cleanup'});
+            if (ch.topic!==topic) await ch.setTopic(topic,'Professional club channel description');
+          }
+        } catch (error) {
+          results.warnings.push(key);
+          console.error('Could not configure Grounds channel ' + key + ':', error.code, error.message);
+        }
+      }
+
+      console.log('RT server cleanup result:', JSON.stringify(results));
+      return interaction.editReply(
+        '✅ Professional club cleanup finished. Welcome and Management Office were protected. ' +
+        'Birmingham City/MPL, CrownFC/MLPC and The Grounds/EA League Play were organized; dedicated Highlights channels and professional channel descriptions were added. ' +
+        'Old duplicate competition channels were moved to CLUB ARCHIVE instead of deleted. ' +
+        'Twitch account daddy10420 is reserved for Match Center live posts; automatic Twitch detection requires TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET on Railway. ' +
+        (results.warnings.length ? '⚠️ Review ' + results.warnings.length + ' item(s) that Discord would not let the bot change.' : 'No permission warnings were reported.')
+      );
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('server_audit:')) {
@@ -1407,11 +1495,13 @@ async function startBot() {
       const preview = new EmbedBuilder()
         .setColor(0x7BAFD4)
         .setTitle('RT Football Media • Streamlined Club Layout')
-        .setDescription('Preview only. Nothing is deleted. Extra channels will be moved to a CLUB ARCHIVE.')
+        .setDescription('Preview only. Nothing is deleted. Welcome and Management Office stay protected; redundant competition channels move to CLUB ARCHIVE.')
         .addFields(
-          { name: 'Birmingham City / ML1', value: '🚨 ml1-announcements\\n⚽ ml1-locker-room\\n📅 ml1-match-center\\n🏆 ml1-league-center\\n✍️ ml1-transactions\\n📊 ml1-stats' },
-          { name: 'CrownFC / MLPC', value: '🚨 mlpc-announcements\\n⚽ mlpc-locker-room\\n📅 mlpc-match-center\\n🏆 mlpc-league-center\\n✍️ mlpc-transactions\\n📊 mlpc-stats' },
-          { name: 'Archived, not deleted', value: 'signups • schedule • lineups • live streams • separate player-stats channels' }
+          { name: 'Protected', value: '👋 Welcome\\n🛡️ Management Office' },
+          { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center + Twitch live posts\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
+          { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center + Twitch live posts\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
+          { name: 'The Grounds / EA League Play', value: '📅 match center + Twitch live posts\\n🎬 highlights' },
+          { name: 'Archived, not deleted', value: 'duplicate signups • schedules • lineups • old live-stream channels • separate player-stats channels' }
         );
       const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
