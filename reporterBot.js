@@ -1034,6 +1034,104 @@ async function startBot() {
         console.error('Team role panel scan failed:', error.message);
       }
     }
+
+    const rolePanelCleanupVersion = 'team-role-panel-cleanup-2026-09-21-v2';
+    if (stateStore.getMetadata('rolePanelCleanupVersion') !== rolePanelCleanupVersion) {
+      try {
+        const guild = process.env.DISCORD_GUILD_ID
+          ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID)
+          : client.guilds.cache.first();
+        if (!guild) throw new Error('The configured Discord server could not be found.');
+        await guild.channels.fetch();
+        const teamRoleIds = new Set([process.env.BIRMINGHAM_ROLE_ID, process.env.MLPC_ROLE_ID].filter(Boolean));
+        const teamPattern = /birmingham|crown\s?fc|mlpc\s?roster/i;
+        const positionPattern = /goalkeeper|keeper|defender|back|midfielder|winger|forward|striker|\bgk\b|\bcb\b|\blb\b|\brb\b|\bcdm\b|\bcm\b|\bcam\b|\blw\b|\brw\b|\bst\b/i;
+        const result = { onboardingOptionsRemoved: [], deletedPanels: [], mixedPanelsPreserved: [] };
+
+        // Discord's built-in Onboarding / Channels & Roles screen is not a
+        // message, so clean its team choices through the onboarding endpoint.
+        try {
+          const onboarding = await client.rest.get(Routes.guildOnboarding(guild.id));
+          const prompts = [];
+          for (const prompt of onboarding.prompts || []) {
+            const options = (prompt.options || []).filter(option => {
+              const usesTeamRole = (option.role_ids || []).some(roleId => teamRoleIds.has(roleId));
+              const namesTeam = teamPattern.test(`${option.title || ''} ${option.description || ''}`);
+              if (usesTeamRole || namesTeam) {
+                result.onboardingOptionsRemoved.push({ prompt: prompt.title, option: option.title });
+                return false;
+              }
+              return true;
+            });
+            if (!options.length) continue;
+            prompts.push({
+              id: prompt.id,
+              title: prompt.title,
+              single_select: prompt.single_select,
+              required: prompt.required,
+              in_onboarding: prompt.in_onboarding,
+              type: prompt.type,
+              options: options.map(option => ({
+                id: option.id,
+                title: option.title,
+                description: option.description,
+                channel_ids: option.channel_ids || [],
+                role_ids: option.role_ids || [],
+                emoji_id: option.emoji?.id || null,
+                emoji_name: option.emoji?.name || null,
+                emoji_animated: Boolean(option.emoji?.animated),
+              })),
+            });
+          }
+          if (result.onboardingOptionsRemoved.length) {
+            await client.rest.put(Routes.guildOnboarding(guild.id), {
+              body: {
+                prompts,
+                default_channel_ids: onboarding.default_channel_ids || [],
+                enabled: onboarding.enabled,
+                mode: onboarding.mode,
+              },
+            });
+          }
+        } catch (error) {
+          // Servers without Community/Onboarding can return 404 here.
+          console.log('Onboarding team option cleanup skipped:', error.message);
+        }
+
+        // Also remove old message panels that contain only club-access choices.
+        // Mixed panels are preserved so position self-selection keeps working.
+        const likelyChannels = [...guild.channels.cache.values()].filter(channel =>
+          channel.isTextBased() && /role|welcome|start|register|registration|verify|verification/i.test(String(channel.name || ''))
+        );
+        for (const channel of likelyChannels) {
+          let before;
+          let examined = 0;
+          while (examined < 500) {
+            const messages = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) }).catch(() => null);
+            if (!messages?.size) break;
+            examined += messages.size;
+            for (const message of messages.values()) {
+              if (!message.author.bot || !message.components.length) continue;
+              const componentText = JSON.stringify(message.components.map(component => component.toJSON()));
+              if (!teamPattern.test(componentText)) continue;
+              const panel = { channelId: channel.id, channelName: channel.name, messageId: message.id, authorName: message.author.username };
+              if (positionPattern.test(componentText)) {
+                result.mixedPanelsPreserved.push(panel);
+                continue;
+              }
+              await message.delete();
+              result.deletedPanels.push(panel);
+            }
+            before = messages.last().id;
+            if (messages.size < 100) break;
+          }
+        }
+        console.log('Team role panel cleanup result:', JSON.stringify(result));
+        stateStore.setMetadata('rolePanelCleanupVersion', rolePanelCleanupVersion);
+      } catch (error) {
+        console.error('Team role panel cleanup failed:', error.message);
+      }
+    }
   });
 
   function reporterChannelFor(guild, team) {
