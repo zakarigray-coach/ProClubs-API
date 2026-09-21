@@ -116,6 +116,8 @@ const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescr
   .addStringOption(o => o.setName('details').setDescription('Experience or additional signing details'))
   .addAttachmentOption(o => o.setName('graphic').setDescription('Optional signing graphic'));
 
+const sign = clubOption(new SlashCommandBuilder().setName('sign').setDescription('Start the automated player signing workflow'));
+
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('details').setDescription('Optional farewell note'));
@@ -140,7 +142,7 @@ const auditServer = new SlashCommandBuilder()
     .setMaxValue(365))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
-const commands = [match, signing, release, setupServer, streamlineServer, auditServer].map(command => command.toJSON());
+const commands = [match, sign, signing, release, setupServer, streamlineServer, auditServer].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -298,7 +300,6 @@ function fallbackArticle(team, type, facts) {
     reporterNote: 'The squad now turns its attention toward the next stage of the campaign.',
   }, facts);
 }
-
 async function buildStory(team, type, facts, graphic) {
   try {
     const article = await aiArticle(team, type, facts, graphic);
@@ -427,7 +428,7 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
     'Club: ' + team.label + '. Palette: ' + team.visualPalette + '.',
     'Visual direction: ' + style + '.',
     type === 'signing'
-      ? 'Preserve the featured player’s recognizable appearance, pose, kit colors, and overall identity from the reference image while creating a distinctly new composition.'
+      ? 'Preserve the featured player’s recognizable face, hairstyle, skin tone, body build, footwear, and sleeve length from the reference image. If the reference has long sleeves keep long sleeves; if it has short sleeves keep short sleeves. Create a distinctly new pose and composition rather than copying the reference pose. Use the club color identity without inventing readable sponsor or crest text.'
       : 'Create an authentic matchday football scene inspired by the verified story without inventing a visible score or player identity.',
     'Do not add words, headlines, dates, numbers, watermarks, sponsor marks, league marks, or fabricated crests. Leave useful negative space for newspaper overlays.',
     'Unique edition key: ' + String(variationKey || Date.now()) + '.',
@@ -452,6 +453,52 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
   const encoded = response && response.data && response.data[0] && response.data[0].b64_json;
   if (!encoded) throw new Error('The image model did not return artwork.');
   return Buffer.from(encoded, 'base64');
+}
+
+
+async function signingPosterGraphic(team, story, graphic, variationKey) {
+  if (!graphic) throw new Error('A player reference photo is required for the signing poster.');
+  if (!process.env.OPENAI_API_KEY || !OpenAI || !toFile) throw new Error('Signing artwork requires OPENAI_API_KEY and image editing support.');
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const source = await fetchImage(graphic);
+  const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#101010' }).png().toBuffer();
+  const prompt = [
+    'Create a premium vertical professional football signing portrait using the supplied FC player screenshot as the identity reference.',
+    'Club: ' + team.label + '. Color identity: ' + team.visualPalette + '.',
+    'Preserve the player’s recognizable face, hairstyle, facial hair, skin tone, body build, footwear and especially sleeve length from the reference.',
+    'If the reference has long sleeves, keep long sleeves. If it has short sleeves, keep short sleeves.',
+    'Put the player in the correct club color identity and create a fresh confident signing-announcement pose. Do not simply copy the reference pose.',
+    'Do not render any words, names, numbers, sponsor text, league logos, watermarks, or fake readable crests. Exact typography will be added separately.',
+    'Use dramatic stadium/tunnel lighting and leave clean space near the top and bottom for graphic-design text.',
+    'Edition key: ' + String(variationKey || Date.now()) + '.'
+  ].join(' ');
+  const response = await client.images.edit({
+    model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst',
+    prompt,
+    size: '1024x1536',
+    quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
+    image: await toFile(normalized, 'player-reference.png', { type: 'image/png' }),
+  });
+  const encoded = response && response.data && response.data[0] && response.data[0].b64_json;
+  if (!encoded) throw new Error('The image model did not return signing artwork.');
+  const art = Buffer.from(encoded, 'base64');
+  const player = safePublicText(story.playerName || 'NEW SIGNING', 40).toUpperCase();
+  const svg = `<svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".12"/><stop offset=".68" stop-color="#000" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".82"/></linearGradient></defs>
+    <rect width="1080" height="1350" fill="url(#shade)"/>
+    <text x="58" y="92" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#fff" letter-spacing="4">RT FOOTBALL MEDIA</text>
+    <text x="58" y="1110" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#fff" letter-spacing="7">NEW SIGNING</text>
+    <text x="58" y="1210" font-family="Arial Black, Arial, sans-serif" font-size="92" font-weight="900" fill="#fff">SIGNED</text>
+    <text x="58" y="1270" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#fff">${escapeXml(player)}</text>
+    <text x="58" y="1315" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#fff">${escapeXml(team.label.toUpperCase())} • ${escapeXml(team.league)}</text>
+  </svg>`;
+  const photo = await sharp(art).rotate().resize(1080, 1350, { fit: 'cover', position: 'north' }).png().toBuffer();
+  return sharp(photo).composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).png({ compressionLevel: 9 }).toBuffer();
+}
+
+function signingPosterAttachment(buffer, team) {
+  const slug = (team.label + '-signed').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return new AttachmentBuilder(buffer, { name: slug + '.png' });
 }
 
 async function newspaperGraphic(team, type, story, graphic, options = {}) {
@@ -597,8 +644,7 @@ function editStoryModal(id, story) {
       textInput('headline', 'Headline', { required: true, max: 90, value: story.headline }),
       textInput('subheadline', 'Subheadline', { required: true, max: 140, value: story.subheadline }),
       textInput('article', 'Full article', { required: true, long: true, max: 4000, value: story.article || story.body }),
-      textInput('player_quote', 'Player quote / no-comment line', { long: true, max: 220, value: story.playerQuote }),
-      textInput('leadership_quote', 'Club leadership quote', { long: true, max: 220, value: story.leadershipQuote })
+      textInput('player_quote', 'Player quote / no-comment line', { long: true, max: 220, value: story.playerQuote }),      textInput('leadership_quote', 'Club leadership quote', { long: true, max: 220, value: story.leadershipQuote })
     );
 }
 
@@ -664,7 +710,7 @@ async function startBot() {
     for (const record of stateStore.listStories()) {
       if (['published', 'cancelled'].includes(record.state)) continue;
       pendingSignings.set(record.id, record);
-      if (record.state === 'waiting_for_quote' && record.selectedUserId) {
+      if (['waiting_for_quote', 'waiting_for_package'].includes(record.state) && record.selectedUserId) {
         pendingPlayerQuotes.set(record.selectedUserId, record.id);
         if (Number(record.quoteExpiresAt) <= Date.now()) {
           await requestOwnerDecisionWithoutQuote(record.id, 'The player quote window expired while the bot was offline.').catch(console.error);
@@ -686,10 +732,18 @@ async function startBot() {
     );
   }
 
+  function transactionChannelFor(guild, teamKey) {
+    const key = teamKey === 'crownfc' ? 'mlpc-transactions' : 'ml1-transactions';
+    return guild.channels.cache.find(channel =>
+      [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type) &&
+      String(channel.name || '').toLowerCase().includes(key)
+    );
+  }
+
   function remember(record) {
     const saved = stateStore.putStory(record);
     pendingSignings.set(saved.id, saved);
-    if (saved.selectedUserId && saved.state === 'waiting_for_quote') {
+    if (saved.selectedUserId && ['waiting_for_quote', 'waiting_for_package'].includes(saved.state)) {
       pendingPlayerQuotes.set(saved.selectedUserId, saved.id);
     }
     return saved;
@@ -719,7 +773,19 @@ async function startBot() {
       publishedAt: options.publishedAt,
       editionSeed: Number.parseInt(record.id.slice(-4), 16) || 8,
     });
-    return { record, newspaper };
+    let poster = null;
+    let posterPath = record.posterPath;
+    if (record.type === 'signing' && record.graphic) {
+      if (options.freshHero || !posterPath || !fs.existsSync(posterPath)) {
+        poster = await signingPosterGraphic(team, record.story, record.graphic, String(options.variationKey || Date.now()) + '-poster');
+        posterPath = storyPath(record.id, 'signing-poster-' + Date.now() + '.png');
+        fs.writeFileSync(posterPath, poster);
+        record = remember({ ...record, posterPath });
+      } else {
+        poster = fs.readFileSync(posterPath);
+      }
+    }
+    return { record, newspaper, poster };
   }
 
   async function sendApprovalPreview(record, message) {
@@ -730,7 +796,7 @@ async function startBot() {
     await owner.send({
       content: message || ('Private RT Football News preview for ' + team.label +
         '. Verify every fact before publishing. The final cover will use the actual Eastern-Time publication date.'),
-      files: [newspaperAttachment(rendered.newspaper, team, record.type)],
+      files: [ ...(rendered.poster ? [signingPosterAttachment(rendered.poster, team)] : []), newspaperAttachment(rendered.newspaper, team, record.type)],
       embeds: [storyEmbed(team, record.story, null, true)],
       components: [approvalButtons(record.id)],
       allowedMentions: { parse: [] },
@@ -793,6 +859,17 @@ async function startBot() {
         post.content = '<@&' + record.alertRoleId + '>';
         post.allowedMentions = { parse: [], roles: [record.alertRoleId] };
       }
+      if (record.type === 'signing' && rendered.poster && record.transactionChannelId) {
+        const transactionChannel = await guild.channels.fetch(record.transactionChannelId).catch(() => null);
+        if (transactionChannel && transactionChannel.isTextBased()) {
+          await transactionChannel.send({
+            content: record.alertRoleId ? '<@&' + record.alertRoleId + '>' : undefined,
+            files: [signingPosterAttachment(rendered.poster, team)],
+            allowedMentions: record.alertRoleId ? { parse: [], roles: [record.alertRoleId] } : { parse: [] },
+          });
+          console.log('Signing poster published to ' + transactionChannel.name);
+        }
+      }
       const published = await destination.send(post);
       stateStore.markProcessed(record.sourceMessageId, 'published');      record = remember({ ...record, state: 'published', publishedAt, publishedMessageId: published.id });
       const owner = await ownerFor(record);
@@ -823,7 +900,7 @@ async function startBot() {
     const reminderDelay = Math.max(1000, Math.min(QUOTE_REMINDER_MS, remaining - 1000));
     setTimeout(async () => {
       const latest = stateStore.getStory(record.id);
-      if (!latest || latest.state !== 'waiting_for_quote' || latest.reminderSent) return;
+      if (!latest || !['waiting_for_quote', 'waiting_for_package'].includes(latest.state) || latest.reminderSent) return;
       const player = await client.users.fetch(latest.selectedUserId).catch(() => null);
       if (player) {
         await player.send('Friendly reminder from RT Football News: your signing quote is still open. You may submit a quote or decline using the buttons in the original message.').catch(() => {});
@@ -832,7 +909,7 @@ async function startBot() {
     }, reminderDelay);
     setTimeout(async () => {
       const latest = stateStore.getStory(record.id);
-      if (!latest || latest.state !== 'waiting_for_quote') return;
+      if (!latest || !['waiting_for_quote', 'waiting_for_package'].includes(latest.state)) return;
       pendingPlayerQuotes.delete(latest.selectedUserId);
       const hours = Math.round(QUOTE_WAIT_MS / 3600000 * 10) / 10;
       await requestOwnerDecisionWithoutQuote(record.id, 'The ' + hours + '-hour player quote window closed without a response.').catch(console.error);
@@ -845,7 +922,7 @@ async function startBot() {
       ...record,
       selectedUserId: member.id,
       selectedPlayerName: member.displayName,
-      state: 'waiting_for_quote',
+      state: 'waiting_for_package',
       quoteExpiresAt: Date.now() + QUOTE_WAIT_MS,
       reminderSent: false,
     });
@@ -853,18 +930,45 @@ async function startBot() {
     try {
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football News, covering ' +
-          team.label + ' in ' + team.reporterCompetition + '. Your signing has been announced and I’m preparing the front page.\n\n' +
-          'Please submit a quick quote about joining ' + team.label + ' and what supporters can expect. Your response may be published exactly as written.',
-        components: [quoteButtons(record.id)],
+          team.label + ' in ' + team.reporterCompetition + '. We’re preparing your official signing announcement.\n\n' +
+          'Please reply here with BOTH:\n📸 one clear full-body screenshot of your FC27 Pro (head to boots, face visible)\n💬 a short genuine quote about joining ' + team.label + '.\n\n' +
+          'Your screenshot is only a private visual reference. The final graphics will use the correct club presentation, preserve details such as your sleeve length, and use different poses for the signing poster and newspaper. Your original screenshot will not be posted publicly.',
         allowedMentions: { parse: [] },
       });
       scheduleQuoteTimers(record);
       return true;
     } catch {
       pendingPlayerQuotes.delete(member.id);
-      await requestOwnerDecisionWithoutQuote(record.id, member.displayName + ' has DMs disabled, so the reporter could not request a quote.');
+      await requestOwnerDecisionWithoutQuote(record.id, member.displayName + ' has DMs disabled, so the reporter could not collect the signing photo and quote.');
       return false;
     }
+  }
+
+  async function startSignCommand(interaction, team, teamKey) {
+    const id = storyId();
+    const guild = interaction.guild;
+    const requesterUserId = process.env.BOT_OWNER_ID || interaction.user.id;
+    const roleId = process.env[team.alertRoleEnv];
+    const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
+    await guild.members.fetch().catch(() => {});
+    const members = role ? [...role.members.values()].filter(m => !m.user.bot).sort((a,b) => a.displayName.localeCompare(b.displayName)).slice(0,24) : [];
+    if (!members.length) throw new Error('No players were found in the configured ' + team.label + ' role.');
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('signing_player:' + id)
+      .setPlaceholder('Select the player who signed')
+      .addOptions(members.map(member => ({ label: clean(member.displayName,100), description: clean('@'+member.user.username,100), value: member.id })));
+    const reporter = reporterChannelFor(guild, team);
+    if (!reporter) throw new Error('The ' + team.reporter + ' reporter channel could not be found.');
+    const transaction = transactionChannelFor(guild, teamKey);
+    if (!transaction) throw new Error('The ' + team.label + ' transactions channel could not be found.');
+    remember({
+      id, requesterUserId, guildId:guild.id, sourceMessageId:'slash-'+interaction.id,
+      sourceChannelId:interaction.channelId, destinationChannelId:reporter.id, transactionChannelId:transaction.id,
+      teamKey, type:'signing', alertRoleId:roleId, state:'selecting', quickSign:true,
+      createdAt:new Date().toISOString(), selectionExpiresAt:Date.now()+APPROVAL_WAIT_MS,
+    });
+    const row = new ActionRowBuilder().addComponents(menu);
+    await interaction.editReply({ content:'Select the ' + team.label + ' player. ' + team.reporter + ' will DM them for their quote and full-body FC27 Pro screenshot.', components:[row] });
   }
 
   async function askForSigningPlayer(message, team, teamKey, destination, graphic, alertRoleId) {
@@ -897,8 +1001,7 @@ async function startBot() {
       sourceChannelId: message.channel.id,
       destinationChannelId: destination.id,
       teamKey,
-      type: 'signing',
-      context: safePublicText(message.content, 1000),
+      type: 'signing',      context: safePublicText(message.content, 1000),
       graphic: cachedGraphic,
       alertRoleId,
       state: 'selecting',
@@ -977,12 +1080,23 @@ async function startBot() {
 
     if (!message.guild) {
       const signingId = pendingPlayerQuotes.get(message.author.id);
-      if (!signingId || !message.content.trim()) return;
-      const pending = pendingSignings.get(signingId) || stateStore.getStory(signingId);
-      if (!pending || pending.state !== 'waiting_for_quote') return;
+      if (!signingId) return;
+      let pending = pendingSignings.get(signingId) || stateStore.getStory(signingId);
+      if (!pending || !['waiting_for_quote', 'waiting_for_package'].includes(pending.state)) return;
+      const image = message.attachments.find(item =>
+        (item.contentType && item.contentType.startsWith('image/')) || /\.(png|jpe?g|webp)(?:\?|$)/i.test(item.url)
+      );
+      let graphic = pending.graphic;
+      if (image) graphic = await cacheGraphic(signingId, { url: image.url, contentType: image.contentType || 'image/unknown' });
+      const quote = message.content.trim() ? safePublicText(message.content, 400) : pending.playerQuote;
+      pending = remember({ ...pending, graphic, playerQuote: quote, state: 'waiting_for_package' });
+      if (!graphic || !quote) {
+        await message.reply('Got it. I still need ' + (!graphic && !quote ? 'your full-body FC27 Pro screenshot and your quote' : !graphic ? 'your full-body FC27 Pro screenshot' : 'your short signing quote') + ' before I can build the graphics.').catch(() => {});
+        return;
+      }
       pendingPlayerQuotes.delete(message.author.id);
-      await message.reply('Thank you—your quote has been sent to RT Football News for the signing front page.').catch(() => {});
-      await prepareDraft(signingId, message.content, { freshHero: true });
+      await message.reply('Perfect—your photo and quote are in. RT Football News is generating two different signing graphics for club approval now.').catch(() => {});
+      await prepareDraft(signingId, quote, { freshHero: true });
       return;
     }
 
@@ -1050,6 +1164,8 @@ async function startBot() {
     }
   });
 
+  function teamForRecord(record) { return TEAMS[record.teamKey]; }
+
   async function handleInteraction(interaction) {
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('match_select:')) {
       const id = interaction.customId.split(':')[1];
@@ -1111,6 +1227,22 @@ async function startBot() {
       const member = await guild.members.fetch(selectedUserId).catch(() => null);
       if (!member || member.user.bot) {
         return interaction.update({ content: 'That player could not be found. Use “Player not listed” and enter them manually.', components: [] });
+      }
+      if (pending.quickSign) {
+        pending = remember({
+          ...pending,
+          selectedUserId: member.id,
+          selectedPlayerName: member.displayName,
+          position: '',
+          playerNumber: '',
+          previousClub: '',
+          details: '',
+          state: 'waiting_for_package',
+          manualPlayer: false,
+        });
+        await interaction.update({ content: teamForRecord(pending).reporter + ' is contacting ' + member.displayName + ' now for their photo and quote.', components: [] });
+        await contactPlayer(pending, member);
+        return;
       }
       pending = remember({
         ...pending,
@@ -1177,7 +1309,7 @@ async function startBot() {
     if (interaction.isButton() && interaction.customId.startsWith('quote:')) {
       const [, action, id] = interaction.customId.split(':');
       const record = pendingSignings.get(id) || stateStore.getStory(id);
-      if (!record || record.state !== 'waiting_for_quote') return interaction.reply('This quote request is no longer active.');
+      if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This quote request is no longer active.');
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This quote request belongs to the selected player.');
       if (action === 'submit') return interaction.showModal(quoteModal(id));
       pendingPlayerQuotes.delete(record.selectedUserId);
@@ -1189,7 +1321,7 @@ async function startBot() {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('quote_submit:')) {
       const id = interaction.customId.split(':')[1];
       const record = pendingSignings.get(id) || stateStore.getStory(id);
-      if (!record || record.state !== 'waiting_for_quote') return interaction.reply('This quote request is no longer active.');
+      if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This quote request is no longer active.');
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This quote request belongs to the selected player.');
       await interaction.deferReply();      const quote = safePublicText(interaction.fields.getTextInputValue('quote'), 400);
       pendingPlayerQuotes.delete(record.selectedUserId);
@@ -1197,8 +1329,7 @@ async function startBot() {
       return interaction.editReply('Thank you—your quote was sent to RT Football News for club approval.');
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith('quote_owner:')) {
-      const [, action, id] = interaction.customId.split(':');
+    if (interaction.isButton() && interaction.customId.startsWith('quote_owner:')) {      const [, action, id] = interaction.customId.split(':');
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || record.state !== 'quote_unavailable') return interaction.reply('This story is no longer waiting for a quote decision.');
       if (interaction.user.id !== record.requesterUserId) return interaction.reply('Only the RT Football Media owner can make this decision.');
@@ -1476,8 +1607,8 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName)) return;
-    const privateCommand = ['setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName);
+    if (!['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName)) return;
+    const privateCommand = ['sign', 'setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     if (interaction.commandName === 'streamline-server') {
@@ -1490,15 +1621,14 @@ async function startBot() {
         .setDescription('Preview only. Nothing is deleted. Welcome and Management Office stay protected; redundant competition channels move to CLUB ARCHIVE.')
         .addFields(
           { name: 'Protected', value: '👋 Welcome\\n🛡️ Management Office' },
-          { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center + Twitch live posts\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
-          { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center + Twitch live posts\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
-          { name: 'The Grounds / EA League Play', value: '📅 match center + Twitch live posts\\n🎬 highlights' },
+          { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
+          { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
+          { name: 'The Grounds / EA League Play', value: '📅 match center\\n🎬 highlights' },
           { name: 'Archived, not deleted', value: 'duplicate signups • schedules • lineups • old live-stream channels • separate player-stats channels' }
         );
       const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('server_streamline:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-      );
+        new ButtonBuilder().setCustomId('server_streamline:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)      );
       return interaction.editReply({ embeds: [preview], components: [buttons] });    }
 
     if (interaction.commandName === 'audit-server') {
@@ -1676,6 +1806,11 @@ async function startBot() {
 
     const team = TEAMS[interaction.options.getString('club')];
     if (!team) return interaction.editReply('That club is not configured.');
+    if (interaction.commandName === 'sign') {
+      const teamKey = interaction.options.getString('club');
+      await startSignCommand(interaction, team, teamKey);
+      return;
+    }
 
     let facts;
     if (interaction.commandName === 'match') {
