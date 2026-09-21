@@ -3215,23 +3215,57 @@ async function startBot() {
       }
 
       const deleted = [];
+      const deletedChannels = [];
       const moved = [];
       const skipped = [];
       const guildChannels = interaction.guild.channels.cache;
       const normalizeAuditName = value => String(value || '').toLowerCase().replace(/^[^a-z0-9]+/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const communityCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club info.*community|community/i.test(String(channel.name || '')));
+      const welcomeCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /\bwelcome\b/i.test(String(channel.name || '')));
       const archiveCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club archive/i.test(String(channel.name || '')));
       const birminghamCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /birmingham/i.test(String(channel.name || '')));
       const crownCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /crownfc|crown fc/i.test(String(channel.name || '')));
       for (const categoryId of audit.legacyCategoryIds || []) {
         const category = guildChannels.get(categoryId);
         if (!category || category.type !== ChannelType.GuildCategory) continue;
+        const sourceKey = normalizeAuditName(category.name);
+        let retainedCollectiveChat = false;
         for (const child of [...guildChannels.values()].filter(channel => channel.parentId === category.id)) {
           const key = normalizeAuditName(child.name);
           let destination = archiveCategory;
-          if (/^(general|community|introductions?|club-news|club-information|information|announcements?)$/.test(key)) destination = communityCategory || archiveCategory;
+          const welcomeKeys = /^(welcome|start-here|club-directory|club-rules|rules|fc27-registration|registration|verification)$/;
+          const obsoleteSharedKeys = /^(roster-polls?)$/;
+          const collectiveChatKeys = /^(locker-room-chat|collective-chat|collective-clubhouse|general-chat)$/;
+          if (sourceKey === 'club-info-community' && collectiveChatKeys.test(key)) {
+            try {
+              if (key !== 'collective-clubhouse') await child.setName('💬・collective-clubhouse', 'Approved professional community cleanup');
+              retainedCollectiveChat = true;
+              moved.push(`${child.name} retained as the shared C&C player chat`);
+            } catch {
+              skipped.push(`${child.name} (Collective chat rename failed)`);
+            }
+            continue;
+          }
+          if (sourceKey === 'start-here' && welcomeKeys.test(key)) destination = welcomeCategory || archiveCategory;
+          else if (sourceKey === 'club-info-community') destination = welcomeKeys.test(key) ? (welcomeCategory || archiveCategory) : archiveCategory;
+          else if (/^(general|community|introductions?|club-news|club-information|information|announcements?)$/.test(key)) destination = communityCategory || archiveCategory;
           else if (/^(ml1|birmingham)/.test(key)) destination = birminghamCategory || archiveCategory;
           else if (/^(mlpc|crownfc|crown-fc)/.test(key)) destination = crownCategory || archiveCategory;
+          const hasVisibleHistory = Boolean(child.lastMessageId);
+          if (!welcomeKeys.test(key) && !hasVisibleHistory) {
+            try {
+              const name = child.name;
+              await child.delete('Approved removal of empty redundant channel');
+              deletedChannels.push(name);
+            } catch {
+              skipped.push(`${child.name} (empty-channel deletion failed)`);
+            }
+            continue;
+          }
+          if (obsoleteSharedKeys.test(key) && hasVisibleHistory) {
+            // Preserve existing history privately; the per-club roster and locker-room channels replace it.
+            destination = archiveCategory;
+          }
           if (!destination) {
             skipped.push(`${child.name} (no safe destination)`);
             continue;
@@ -3244,6 +3278,14 @@ async function startBot() {
           }
         }
         const stillHasChildren = [...guildChannels.values()].some(channel => channel.parentId === category.id);
+        if (retainedCollectiveChat) {
+          try {
+            if (normalizeAuditName(category.name) !== 'cc-community') await category.setName('𓊆 💬 𓊇 C&C COMMUNITY', 'Approved professional community cleanup');
+          } catch {
+            skipped.push(`${category.name} (community category rename failed)`);
+          }
+          continue;
+        }
         if (!stillHasChildren) {
           try { const name = category.name; await category.delete('Approved redundant Club category cleanup'); deleted.push(name); }
           catch { skipped.push(`${category.name} (category deletion failed)`); }
@@ -3273,8 +3315,9 @@ async function startBot() {
         content: 'Approved cleanup finished.\nDeleted empty categories: ' +
           (deleted.length ? deleted.join(', ') : 'none') +
           '\nPreserved channel moves: ' + (moved.length ? moved.join(', ').slice(0, 1200) : 'none') +
+          '\nDeleted empty redundant channels: ' + (deletedChannels.length ? deletedChannels.join(', ') : 'none') +
           '\nSkipped: ' + (skipped.length ? skipped.join(', ') : 'none') +
-          '\nNo channels, messages, or roles were deleted; only approved empty category shells were removed.',
+          '\nNo channel containing visible message history and no roles were deleted.',
         embeds: [],
         components: [],
       });
@@ -3486,7 +3529,9 @@ async function startBot() {
         !channels.some(channel => channel.parentId === category.id)
       );
       const auditCategoryName = value => String(value || '').toLowerCase().replace(/^[^a-z0-9]+/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const legacyClubCategories = categories.filter(category => ['club', 'club-info', 'club-information'].includes(auditCategoryName(category.name)));
+      const legacyClubCategories = categories.filter(category =>
+        ['club', 'club-info', 'club-information', 'club-info-community', 'start-here'].includes(auditCategoryName(category.name))
+      );
       const uncategorized = channels.filter(channel =>
         channel.type !== ChannelType.GuildCategory && channel.parentId === null
       );
@@ -3537,12 +3582,12 @@ async function startBot() {
         .setColor(0x7BAFD4)
         .setTitle('RT Football Media • Server Cleanup Audit')
         .setDescription(
-          'Review only—nothing has been changed. Approval safely consolidates legacy Club/Club Info channels, preserves every message, then removes only empty category shells.'
+          'Review only—nothing has been changed. Approval moves essential entry channels, deletes empty redundant channels, privately archives history-bearing leftovers, then removes empty category shells.'
         )
         .addFields(
           {
-            name: 'Redundant legacy Club categories (' + legacyClubCategories.length + ')',
-            value: list(legacyClubCategories, item => '• ' + item.name + ' — useful channels will be moved; leftovers go to Club Archive'),
+            name: 'Redundant Start Here / Club categories (' + legacyClubCategories.length + ')',
+            value: list(legacyClubCategories, item => '• ' + item.name + ' — essentials move; empty leftovers delete; history-bearing leftovers archive'),
           },
           {
             name: 'Safe cleanup: empty categories (' + emptyCategories.length + ')',
