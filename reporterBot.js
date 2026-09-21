@@ -397,8 +397,7 @@ function wrapLines(value, maxChars, maxLines) {
 
 function excerptWords(value, maxWords = 70) {
   const words = String(value || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  const excerpt = words.slice(0, maxWords).join(' ');  return words.length > maxWords ? excerpt.replace(/[.,;:!?]?$/, '…') : excerpt;
-}
+  const excerpt = words.slice(0, maxWords).join(' ');  return words.length > maxWords ? excerpt.replace(/[.,;:!?]?$/, '…') : excerpt;}
 
 function tspans(lines, x, y, lineHeight, attrs) {
   return '<text x="' + x + '" y="' + y + '" ' + attrs + '>' + lines.map((line, index) =>
@@ -797,8 +796,7 @@ async function startBot() {
   }
 
   async function ownerFor(record) {
-    return client.users.fetch(record.requesterUserId).catch(() => null);
-  }
+    return client.users.fetch(record.requesterUserId).catch(() => null);  }
 
   async function renderEdition(record, options = {}) {
     const team = TEAMS[record.teamKey];
@@ -1198,7 +1196,6 @@ async function startBot() {
       if (interaction.user.id !== pending.requesterUserId) {
         return interaction.reply({ content: 'Only the configured RT Football Media owner can choose the player.', flags: MessageFlags.Ephemeral });
       }
-
       const selectedUserId = interaction.values[0];
       if (selectedUserId === 'manual') {
         pending = remember({ ...pending, state: 'collecting_facts', manualPlayer: true });
@@ -1597,8 +1594,7 @@ async function startBot() {
         new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('server_streamline:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
       );
-      return interaction.editReply({ embeds: [preview], components: [buttons] });
-    }
+      return interaction.editReply({ embeds: [preview], components: [buttons] });    }
 
     if (interaction.commandName === 'audit-server') {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
