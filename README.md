@@ -58,6 +58,8 @@ Use `/season-calendar action:start` with a unique season name and official start
 
 The registration panel collects a player’s EA ID, positions, availability, league-verification information and notes. It sends a private management card with **Approve Birmingham**, **Approve CrownFC**, **Approve Both**, **Trialist** and **Reject** controls. Only the owner or the persisted Vice President of Football Operations role can decide; roster limits and Discord role hierarchy are checked before access is granted.
 
+`/streamline-server` consolidates legacy sections into this top-to-bottom flow: Welcome; Club Info & Community; Management Office; Birmingham City; CrownFC; RT Football Media; The Grounds; active BYOT/External Competitions; Club Archive. Loose generic Standings Table, Team Stats and Player Stats channels are archived because each club has its own league center and combined live statistics board. Managers Only merges into Management Office and Matchday merges into The Grounds without deleting messages.
+
 ## Run
 
 ```bash

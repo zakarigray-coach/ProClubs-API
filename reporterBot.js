@@ -2816,11 +2816,21 @@ async function startBot() {
 
       // Welcome and Management Office are organized but never archived or deleted.
       const welcomeCategory = await categoryFor('welcome', '𓊆 👋 𓊇 WELCOME', ['welcome']);
+      const communityCategory = await categoryFor('community', '𓊆 🏰 𓊇 CLUB INFO & COMMUNITY', ['club information', 'community']);
       const managementCategory = await categoryFor('management', '𓊆 🛡️ 𓊇 MANAGEMENT OFFICE', ['management']);
       const rtMediaCategory = await categoryFor('rt', '𓊆 📰 𓊇 RT FOOTBALL MEDIA', ['rt football media']);
       const ml1Category = await categoryFor('ml1', '𓊆 🔵 𓊇 BIRMINGHAM CITY • MPL', ['birmingham', 'masters league 1', 'masters premier league', ' ml1']);
       const mlpcCategory = await categoryFor('mlpc', '𓊆 👑 𓊇 CROWNFC • MLPC', ['crownfc', 'crown fc', ' mlpc']);
       const groundsCategory = await categoryFor('grounds', '𓊆 🎮 𓊇 THE GROUNDS / EA LEAGUE PLAY', ['the grounds', 'ea league']);
+      let byotCategory = all().find(channel => channel.type === ChannelType.GuildCategory && /\bbyot\b/i.test(String(channel.name || '')));
+      if (byotCategory && byotCategory.name !== '𓊆 🧩 𓊇 BYOT / EXTERNAL COMPETITIONS') {
+        try {
+          await byotCategory.setName('𓊆 🧩 𓊇 BYOT / EXTERNAL COMPETITIONS', 'Approved professional category flow');
+          results.renamed.push('BYOT / EXTERNAL COMPETITIONS');
+        } catch (error) {
+          results.warnings.push('BYOT category');
+        }
+      }
 
       try {
         await managementCategory.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false });
@@ -2982,10 +2992,12 @@ async function startBot() {
             .setDescription('Welcome to the shared competitive home of Birmingham City in MPL and CrownFC in MLPC. Use the sections below to find official club information.')
             .addFields(
               { name: '👋 Welcome', value: 'Rules, FC27 registration, league verification and server access.' },
+              { name: '🏰 Club Info & Community', value: 'Organization news, public conversation, introductions and shared community activity.' },
               { name: '🔵 Birmingham City • MPL', value: 'Official announcements, squad room, match center, league information, transactions, statistics and highlights.' },
               { name: '👑 CrownFC • MLPC', value: 'Official announcements, squad room, match center, league information, transactions, statistics and highlights.' },
               { name: '📰 RT Football Media', value: 'Raine and Teagan’s approved signing stories, match reports and club newspaper editions.' },
               { name: '🎮 The Grounds / EA League Play', value: 'Non-league club match scheduling, results and highlights when this section is active.' },
+              { name: '🧩 BYOT / External Competitions', value: 'A compact section for active bring-your-own-team or outside competition activity.' },
               { name: '🛡️ Management Office', value: 'Restricted ownership, staff, recruitment, approval and security operations.' }
             )
             .setFooter({ text: 'Professional standards • Clear communication • One club community' });
@@ -3109,6 +3121,60 @@ async function startBot() {
         }
       }
 
+      // Consolidate legacy top-level sections into the professional flow. No messages are deleted.
+      const legacyManagersCategory = all().find(channel => channel.type === ChannelType.GuildCategory &&
+        /managers?\s*only/i.test(String(channel.name || '')));
+      const legacyMatchdayCategory = all().find(channel => channel.type === ChannelType.GuildCategory &&
+        /^\s*(?:[^a-z0-9]+\s*)?match\s*day\s*$/i.test(String(channel.name || '')));
+      const moveChildren = async (source, destination, label) => {
+        if (!source || !destination || source.id === destination.id) return;
+        for (const child of all().filter(channel => channel.parentId === source.id)) {
+          try {
+            await child.setParent(destination.id, { lockPermissions: false, reason: `Consolidate ${label} into professional clubhouse flow` });
+            results.moved.push(normalize(child.name));
+          } catch (error) {
+            results.warnings.push(child.name);
+          }
+        }
+        try {
+          if (!String(source.name).startsWith('ARCHIVED')) await source.setName(`ARCHIVED • ${String(source.name).replace(/^.*?・\s*/, '')}`, 'Legacy category retained without deleting content');
+        } catch (error) {
+          results.warnings.push(`${label} legacy category`);
+        }
+      };
+      await moveChildren(legacyManagersCategory, managementCategory, 'Managers Only');
+      await moveChildren(legacyMatchdayCategory, groundsCategory, 'Matchday');
+
+      const looseStats = ['standings-table', 'team-stats', 'player-stats'];
+      for (const key of looseStats) {
+        const channel = all().find(item => normalize(item.name) === key);
+        if (channel && archive && channel.parentId !== archive.id) {
+          try {
+            await channel.setParent(archive.id, { lockPermissions: false, reason: 'Replaced by each club’s league center and combined live statistics board' });
+            results.archived.push(key);
+          } catch (error) {
+            results.warnings.push(key);
+          }
+        }
+      }
+
+      for (const channel of all().filter(item => item.type !== ChannelType.GuildCategory && item.parentId === null)) {
+        const key = normalize(channel.name);
+        if (!/general|community|introductions?|clips?|media-share|lounge/.test(key)) continue;
+        try {
+          await channel.setParent(communityCategory.id, { lockPermissions: false, reason: 'Organize public community channels together' });
+          results.moved.push(key);
+        } catch (error) {
+          results.warnings.push(channel.name);
+        }
+      }
+
+      const orderedCategories = [welcomeCategory, communityCategory, managementCategory, ml1Category, mlpcCategory, rtMediaCategory, groundsCategory, byotCategory, archive].filter(Boolean);
+      for (const [index, category] of orderedCategories.entries()) {
+        try { await category.setPosition(index, { reason: 'Approved professional top-to-bottom clubhouse flow' }); }
+        catch (error) { results.warnings.push(`${category.name} position`); }
+      }
+
       console.log('RT server cleanup result:', JSON.stringify(results));
       stateStore.addManagementLog({ action: 'server_cleanup_applied', requesterUserId: interaction.user.id, results });
       await Promise.all(Object.keys(TEAMS).map(teamKey => refreshPublicStatsBoard(guild, teamKey).catch(error => {
@@ -3117,8 +3183,8 @@ async function startBot() {
       })));
       return interaction.editReply(
         '✅ Professional club cleanup finished. Welcome and Management Office were organized without deleting their channels. ' +
-        'The official clubhouse directory, Birmingham City/MPL, CrownFC/MLPC and The Grounds/EA League Play were organized; dedicated Highlights channels and professional channel descriptions were added. ' +
-        'Old duplicate competition channels were moved to CLUB ARCHIVE instead of deleted. ' +
+        'Welcome, Club Info & Community, Management Office, Birmingham City, CrownFC, RT Media, The Grounds and active BYOT sections were placed in a clean top-to-bottom flow. ' +
+        'Loose standings/team/player stats and old duplicate competition channels were moved to CLUB ARCHIVE instead of deleted. ' +
         (results.warnings.length ? '⚠️ Review ' + results.warnings.length + ' item(s) that Discord would not let the bot change.' : 'No permission warnings were reported.')
       );
     }
@@ -3341,15 +3407,17 @@ async function startBot() {
       const preview = new EmbedBuilder()
         .setColor(0x7BAFD4)
         .setTitle(`${ORGANIZATION.name} • Streamlined Club Layout`)
-        .setDescription('Preview only. Nothing is deleted. Every active channel receives a professional topic; Welcome and Management Office are organized, while redundant competition channels move to CLUB ARCHIVE.')
+        .setDescription('Preview only. Nothing is deleted. Categories are placed in a clean top-to-bottom flow; legacy duplicates move to CLUB ARCHIVE.')
         .addFields(
           { name: 'Welcome', value: '📌 club directory\\n👋 welcome\\n📜 rules\\n📝 registration\\n✅ verification' },
+          { name: 'Club Info & Community', value: 'Public organization information, general conversation, introductions, shared clips and community activity.' },
           { name: 'Management Office', value: '🛡️ management office\\n👔 staff room\\n🔄 transfer requests\\n✅ approved signings\\n📋 security/mod logs' },
           { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights\\n🗞️ Romano Times feed' },
           { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
           { name: 'RT Football Media', value: '🔵 Raine at St. Andrew’s\\n👑 Teagan Behind the Crown' },
           { name: 'The Grounds / EA League Play', value: '📅 match center\\n🎬 highlights' },
-          { name: 'Archived, not deleted', value: 'duplicate signups • schedules • lineups • old live-stream channels • separate player-stats channels' }
+          { name: 'BYOT / External Competitions', value: 'Retained as a compact section only when an existing BYOT category is active.' },
+          { name: 'Archived, not deleted', value: 'loose standings table • team stats • player stats • duplicate signups/schedules/lineups • old live-stream channels' }
         );
       const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
