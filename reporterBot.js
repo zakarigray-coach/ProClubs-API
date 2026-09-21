@@ -132,7 +132,6 @@ const match = clubOption(new SlashCommandBuilder().setName('match').setDescripti
 const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescription('Announce a player signing'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('position').setDescription('Position(s)').setRequired(true))
-  .addStringOption(o => o.setName('number').setDescription('Squad number (1–99, must be available)'))
   .addStringOption(o => o.setName('player_comment').setDescription('Optional genuine player comment'))
   .addStringOption(o => o.setName('club_comment').setDescription('Optional genuine coach/owner comment'))
   .addStringOption(o => o.setName('details').setDescription('Experience or additional signing details'))
@@ -681,7 +680,6 @@ function signingFactsModal(id, manual, story) {
   }
   rows.push(
     textInput('position', 'Position(s)', { required: true, max: 60, placeholder: 'Example: CDM / CB' }),
-    textInput('number', 'Squad number 1–99 (optional)', { max: 2, value: story && story.playerNumber }),
     textInput('previous_club', 'Previous club (optional)', { max: 100 }),
     textInput('details', manual ? 'Extra facts or club quote (optional)' : 'Extra facts / club quote (optional)', {
       long: true,
@@ -690,6 +688,26 @@ function signingFactsModal(id, manual, story) {
     })
   );
   return modal.addComponents(...rows.slice(0, 5));
+}
+
+function playerSigningModal(id, decline = false, record = null) {
+  const modal = new ModalBuilder()
+    .setCustomId('player_package:' + (decline ? 'decline' : 'quote') + ':' + id)
+    .setTitle(decline ? 'Choose your squad number' : 'Number and signing quote')
+    .addComponents(textInput('number', 'Your preferred squad number (1–99)', {
+      required: true,
+      max: 2,
+      value: record && record.playerNumber,
+    }));
+  if (!decline) {
+    modal.addComponents(textInput('quote', 'Your quote (one or two sentences)', {
+      required: true,
+      long: true,
+      max: 400,
+      value: record && record.playerQuote,
+    }));
+  }
+  return modal;
 }
 
 function quoteModal(id, ownerEntry = false) {
@@ -726,8 +744,8 @@ function approvalButtons(id) {
 
 function quoteButtons(id) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('quote:submit:' + id).setLabel('Submit Quote').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('quote:decline:' + id).setLabel('Decline Comment').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('quote:submit:' + id).setLabel('Choose Number & Submit Quote').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('quote:decline:' + id).setLabel('Choose Number • No Comment').setStyle(ButtonStyle.Secondary)
   );
 }
 
@@ -737,6 +755,119 @@ function noQuoteButtons(id) {
     new ButtonBuilder().setCustomId('quote_owner:manual:' + id).setLabel('Enter Quote Manually').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('story:cancel:' + id).setLabel('Cancel Story').setStyle(ButtonStyle.Danger)
   );
+}
+
+function professionalClubhouseAudit(guild, inactiveDays = 45) {
+  const cutoff = Date.now() - inactiveDays * 24 * 60 * 60 * 1000;
+  const channels = [...guild.channels.cache.values()];
+  const roles = [...guild.roles.cache.values()].filter(role => role.id !== guild.id);
+  const categories = channels.filter(channel => channel.type === ChannelType.GuildCategory);
+  const textChannels = channels.filter(channel =>
+    [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(channel.type)
+  );
+  const normalize = value => String(value || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
+  const emptyCategories = categories.filter(category => !channels.some(channel => channel.parentId === category.id));
+  const inactiveChannels = textChannels.filter(channel =>
+    !channel.lastMessageId || SnowflakeUtil.timestampFrom(channel.lastMessageId) < cutoff
+  );
+  const uncategorizedChannels = channels.filter(channel =>
+    channel.type !== ChannelType.GuildCategory && channel.parentId === null
+  );
+
+  const channelGroups = new Map();
+  for (const channel of channels.filter(item => item.type !== ChannelType.GuildCategory)) {
+    const key = normalize(channel.name);
+    if (!channelGroups.has(key)) channelGroups.set(key, []);
+    channelGroups.get(key).push(channel);
+  }
+  const duplicateChannels = [...channelGroups.values()].filter(group => group.length > 1);
+  const unusedRoles = roles.filter(role => !role.managed && role.members.size === 0);
+  const legacyRolePattern = /(?:^|\b)(fc\s?2[45-6]|nasl|old|legacy|test|temp|trial|tryout|twitch)(?:\b|$)/i;
+  const likelyLegacyRoles = unusedRoles.filter(role => legacyRolePattern.test(role.name));
+  const administratorRoles = roles.filter(role => role.permissions.has(PermissionFlagsBits.Administrator));
+  const membershipSignature = role => [...role.members.keys()].sort().join(',') + '|' + role.permissions.bitfield.toString();
+  const roleGroups = new Map();
+  for (const role of roles.filter(role => !role.managed && role.members.size > 0)) {
+    const signature = membershipSignature(role);
+    if (!roleGroups.has(signature)) roleGroups.set(signature, []);
+    roleGroups.get(signature).push(role);
+  }
+  const overlappingRoles = [...roleGroups.values()].filter(group => group.length > 1);
+
+  const requiredCategories = [
+    ['Welcome', ['welcome']],
+    ['Management Office', ['management']],
+    ['Birmingham City • MPL', ['birmingham']],
+    ['CrownFC • MLPC', ['crownfc', 'crown fc']],
+    ['RT Football Media', ['rt football media']],
+    ['The Grounds / EA League Play', ['the grounds', 'ea league']],
+    ['Club Archive', ['club archive']],
+  ];
+  const missingCategories = requiredCategories.filter(([, aliases]) =>
+    !categories.some(category => aliases.some(alias => String(category.name || '').toLowerCase().includes(alias)))
+  ).map(([name]) => name);
+  const requiredChannels = [
+    'ml1-announcements', 'ml1-locker-room', 'ml1-match-center', 'ml1-league-center', 'ml1-transactions', 'ml1-stats', 'ml1-highlights',
+    'mlpc-announcements', 'mlpc-locker-room', 'mlpc-match-center', 'mlpc-league-center', 'mlpc-transactions', 'mlpc-stats', 'mlpc-highlights',
+    'grounds-match-center', 'grounds-highlights',
+  ];
+  const channelNames = new Set(channels.map(channel => normalize(channel.name)));
+  const missingChannels = requiredChannels.filter(name => !channelNames.has(name));
+  const configuredRoleChecks = [
+    ['Birmingham player role', process.env.BIRMINGHAM_ROLE_ID],
+    ['CrownFC player role', process.env.MLPC_ROLE_ID],
+  ];
+  const missingConfiguredRoles = configuredRoleChecks.filter(([, id]) => !id || !guild.roles.cache.has(id)).map(([name]) => name);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    inactiveDays,
+    counts: {
+      categories: categories.length,
+      channels: channels.length,
+      roles: roles.length,
+      members: guild.memberCount,
+    },
+    emptyCategories: emptyCategories.map(item => ({ id: item.id, name: item.name })),
+    inactiveChannels: inactiveChannels.map(item => item.name),
+    uncategorizedChannels: uncategorizedChannels.map(item => item.name),
+    duplicateChannels: duplicateChannels.map(group => group.map(item => item.name)),
+    unusedRoles: unusedRoles.map(item => item.name),
+    likelyLegacyRoles: likelyLegacyRoles.map(item => item.name),
+    overlappingRoles: overlappingRoles.map(group => group.map(item => item.name)),
+    administratorRoles: administratorRoles.map(item => item.name),
+    missingCategories,
+    missingChannels,
+    missingConfiguredRoles,
+  };
+}
+
+function auditList(items, render = item => '• ' + item) {
+  if (!items.length) return 'None found';
+  const lines = items.slice(0, 12).map(render);
+  if (items.length > 12) lines.push('…and ' + (items.length - 12) + ' more');
+  return lines.join('\n').slice(0, 500);
+}
+
+function professionalAuditEmbed(audit) {
+  return new EmbedBuilder()
+    .setColor(0x7BAFD4)
+    .setTitle('Professional Clubhouse • Read-Only Audit')
+    .setDescription('Nothing was deleted or changed. Role findings require manual review before removal.')
+    .addFields(
+      { name: 'Likely legacy unused roles (' + audit.likelyLegacyRoles.length + ')', value: auditList(audit.likelyLegacyRoles) },
+      { name: 'All unused roles (' + audit.unusedRoles.length + ')', value: auditList(audit.unusedRoles) },
+      { name: 'Same members + permissions (' + audit.overlappingRoles.length + ' groups)', value: auditList(audit.overlappingRoles, group => '• ' + group.join(' / ')) },
+      { name: 'Administrator roles (' + audit.administratorRoles.length + ')', value: auditList(audit.administratorRoles) },
+      { name: 'Missing clubhouse categories (' + audit.missingCategories.length + ')', value: auditList(audit.missingCategories) },
+      { name: 'Missing core channels (' + audit.missingChannels.length + ')', value: auditList(audit.missingChannels) },
+      { name: 'Inactive channels, ' + audit.inactiveDays + '+ days (' + audit.inactiveChannels.length + ')', value: auditList(audit.inactiveChannels, item => '• #' + item) },
+      { name: 'Empty categories (' + audit.emptyCategories.length + ')', value: auditList(audit.emptyCategories, item => '• ' + item.name) },
+      { name: 'Uncategorized channels (' + audit.uncategorizedChannels.length + ')', value: auditList(audit.uncategorizedChannels) },
+      { name: 'Configuration checks', value: audit.missingConfiguredRoles.length ? 'Missing: ' + audit.missingConfiguredRoles.join(', ') : 'Both club player roles are configured.' }
+    )
+    .setFooter({ text: 'RT Football Media • Review only' })
+    .setTimestamp(new Date(audit.generatedAt));
 }
 
 async function registerCommands(token, clientId, guildId) {
@@ -787,6 +918,34 @@ async function startBot() {
       }
     }
     console.log('Recovered ' + pendingSignings.size + ' pending RT Football Media stories.');
+    const auditVersion = 'professional-clubhouse-2026-09-21-v2';
+    if (stateStore.getMetadata('lastProfessionalAuditVersion') !== auditVersion) {
+      try {
+        const guild = process.env.DISCORD_GUILD_ID
+          ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID)
+          : client.guilds.cache.first();
+        if (!guild) throw new Error('The configured Discord server could not be found.');
+        await Promise.all([
+          guild.channels.fetch(),
+          guild.roles.fetch(),
+          guild.members.fetch(),
+        ]);
+        const audit = professionalClubhouseAudit(guild, 45);
+        console.log('RT professional clubhouse audit:', JSON.stringify(audit));
+        const ownerId = process.env.BOT_OWNER_ID || guild.ownerId;
+        const owner = ownerId ? await client.users.fetch(ownerId).catch(() => null) : null;
+        if (owner) {
+          await owner.send({
+            content: 'Fresh professional clubhouse audit completed after the signing-workflow update.',
+            embeds: [professionalAuditEmbed(audit)],
+            allowedMentions: { parse: [] },
+          });
+        }
+        stateStore.setMetadata('lastProfessionalAuditVersion', auditVersion);
+      } catch (error) {
+        console.error('Professional clubhouse audit failed:', error.message);
+      }
+    }
   });
 
   function reporterChannelFor(guild, team) {
@@ -1005,8 +1164,8 @@ async function startBot() {
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football News, covering ' +
           team.label + ' in ' + team.reporterCompetition + '. We’re preparing your official signing announcement.\n\n' +
-          'Please send:\n📸 an optional clear full-body screenshot of your FC27 Pro (head to boots, face visible)\n💬 a short genuine quote about joining ' + team.label + '.\n\n' +
-          'If you do not provide a photo, RT Football News will create club-themed artwork instead. If you provide one, it is only a private visual reference; your original screenshot will not be posted publicly.',
+          'Please choose your available squad number and submit a short genuine quote using the button below. You may also send an optional clear full-body screenshot of your FC27 Pro (head to boots, face visible) before using the button.\n\n' +
+          'If your number is already assigned, I’ll ask you to choose another. If you do not provide a photo, RT Football News will create club-themed artwork instead. Your original screenshot will not be posted publicly.',
         components: [quoteButtons(record.id)],
         allowedMentions: { parse: [] },
       });
@@ -1165,8 +1324,17 @@ async function startBot() {
       if (image) graphic = await cacheGraphic(signingId, { url: image.url, contentType: image.contentType || 'image/unknown' });
       const quote = message.content.trim() ? safePublicText(message.content, 400) : pending.playerQuote;
       pending = remember({ ...pending, graphic, playerQuote: quote, state: 'waiting_for_package' });
+      if (!pending.playerNumber) {
+        await message.reply({
+          content: quote
+            ? 'Your message is saved. Use the button below to choose an available squad number and confirm your quote.'
+            : 'Photo received. Use the button below to choose an available squad number and submit your quote.',
+          components: [quoteButtons(signingId)],
+        }).catch(() => {});
+        return;
+      }
       if (!quote) {
-        await message.reply('Photo received. I still need your short signing quote before I can build the graphics.').catch(() => {});
+        await message.reply({ content: 'I still need your short signing quote.', components: [quoteButtons(signingId)] }).catch(() => {});
         return;
       }
       pendingPlayerQuotes.delete(message.author.id);
@@ -1344,21 +1512,12 @@ async function startBot() {
       } else {
         member = selectedUserId ? await guild.members.fetch(selectedUserId).catch(() => null) : null;
       }
-      const submittedNumber = normalizeSquadNumber(interaction.fields.getTextInputValue('number'));
-      if (submittedNumber === null) {
-        return interaction.editReply('Squad numbers must be a whole number from 1 through 99. Use the player dropdown again to reopen the form.');
-      }
-      const numberOwner = squadNumberConflict(record.teamKey, submittedNumber, signingId, selectedUserId, playerName);
-      if (numberOwner) {
-        const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
-        return interaction.editReply('#' + submittedNumber + ' is already assigned to ' + ownerName + ' for ' + TEAMS[record.teamKey].label + '. Choose a different number from the player dropdown.');
-      }
       record = remember({
         ...record,
         selectedUserId,
         selectedPlayerName: safePublicText(playerName, 40),
         position: safePublicText(interaction.fields.getTextInputValue('position'), 60),
-        playerNumber: submittedNumber,
+        playerNumber: exactTru(selectedUserId, playerName) ? '22' : '',
         previousClub: safePublicText(interaction.fields.getTextInputValue('previous_club'), 100),
         details: safePublicText(interaction.fields.getTextInputValue('details'), 700),
       });
@@ -1381,11 +1540,38 @@ async function startBot() {
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This quote request is no longer active.');
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This quote request belongs to the selected player.');
-      if (action === 'submit') return interaction.showModal(quoteModal(id));
+      return interaction.showModal(playerSigningModal(id, action === 'decline', record));
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('player_package:')) {
+      const [, action, id] = interaction.customId.split(':');
+      let record = pendingSignings.get(id) || stateStore.getStory(id);
+      if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This signing request is no longer active.');
+      if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
+      await interaction.deferReply();
+      const submittedNumber = normalizeSquadNumber(interaction.fields.getTextInputValue('number'));
+      if (submittedNumber === null) {
+        return interaction.editReply({ content: 'Squad numbers must be a whole number from 1 through 99. Use the original button and try again.' });
+      }
+      const numberOwner = squadNumberConflict(record.teamKey, submittedNumber, id, record.selectedUserId, record.selectedPlayerName);
+      if (numberOwner) {
+        const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
+        return interaction.editReply({
+          content: '#' + submittedNumber + ' is already assigned to ' + ownerName + ' for ' + TEAMS[record.teamKey].label + '. Use the original button and choose another number.',
+        });
+      }
+      const quote = action === 'quote'
+        ? safePublicText(interaction.fields.getTextInputValue('quote'), 400)
+        : '';
+      record = remember({ ...record, playerNumber: submittedNumber, playerQuote: quote });
       pendingPlayerQuotes.delete(record.selectedUserId);
-      await interaction.update({ content: 'You declined to comment. RT Football News will notify club management.', components: [] });
-      await requestOwnerDecisionWithoutQuote(id, record.selectedPlayerName + ' declined to comment.');
-      return;
+      if (action === 'decline') {
+        await interaction.editReply('Number #' + submittedNumber + ' is reserved in this signing draft. You declined to comment; club management has been notified.');
+        await requestOwnerDecisionWithoutQuote(id, record.selectedPlayerName + ' selected #' + submittedNumber + ' and declined to comment.');
+        return;
+      }
+      await prepareDraft(id, quote, { freshHero: true });
+      return interaction.editReply('Thank you—#' + submittedNumber + ' and your quote were sent to RT Football News for club approval.');
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('quote_submit:')) {
@@ -1393,16 +1579,16 @@ async function startBot() {
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This quote request is no longer active.');
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This quote request belongs to the selected player.');
-      await interaction.deferReply();      const quote = safePublicText(interaction.fields.getTextInputValue('quote'), 400);
-      pendingPlayerQuotes.delete(record.selectedUserId);
-      await prepareDraft(id, quote, { freshHero: true });
-      return interaction.editReply('Thank you—your quote was sent to RT Football News for club approval.');
+      return interaction.reply('The signing workflow now requires you to choose your squad number too. Use the original “Choose Number & Submit Quote” button.');
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('quote_owner:')) {      const [, action, id] = interaction.customId.split(':');
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || record.state !== 'quote_unavailable') return interaction.reply('This story is no longer waiting for a quote decision.');
       if (interaction.user.id !== record.requesterUserId) return interaction.reply('Only the RT Football Media owner can make this decision.');
+      if (!record.playerNumber) {
+        return interaction.reply('The player has not selected a squad number, so this signing cannot continue yet. Restart `/sign` after the player is available; club management will not be asked to choose the number for them.');
+      }
       if (action === 'manual') return interaction.showModal(quoteModal(id, true));
       await interaction.update({ content: 'Preparing a private no-comment draft for your approval…', components: [] });
       await prepareDraft(id, '', { freshHero: true });
@@ -1413,6 +1599,7 @@ async function startBot() {
       const id = interaction.customId.split(':')[1];
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || interaction.user.id !== record.requesterUserId) return interaction.reply('This manual quote request is no longer active.');
+      if (!record.playerNumber) return interaction.reply('The selected player must choose their squad number before this signing can continue.');
       await interaction.deferReply();
       await prepareDraft(id, safePublicText(interaction.fields.getTextInputValue('quote'), 400), { freshHero: true });
       return interaction.editReply('The private draft with the manually entered quote has been sent.');
@@ -1886,17 +2073,9 @@ async function startBot() {
     if (interaction.commandName === 'match') {
       facts = { context: clean(interaction.options.getString('context'), 1000) };
     } else if (interaction.commandName === 'signing') {
-      const submittedNumber = normalizeSquadNumber(interaction.options.getString('number'));
-      if (submittedNumber === null) return interaction.editReply('Squad numbers must be a whole number from 1 through 99.');
-      const numberOwner = squadNumberConflict(interaction.options.getString('club'), submittedNumber, null, null, interaction.options.getString('player'));
-      if (numberOwner) {
-        const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
-        return interaction.editReply('#' + submittedNumber + ' is already assigned to ' + ownerName + ' for ' + team.label + '. Choose another number.');
-      }
       facts = {
         player: clean(interaction.options.getString('player'), 100),
         position: clean(interaction.options.getString('position'), 100),
-        number: submittedNumber,
         playerComment: clean(interaction.options.getString('player_comment'), 400),
         clubComment: clean(interaction.options.getString('club_comment'), 400),
         details: clean(interaction.options.getString('details'), 700),
@@ -1917,13 +2096,6 @@ async function startBot() {
       editionSeed: Number.parseInt(interaction.id.slice(-4), 10) || 8,
     });
     await interaction.editReply({ files: [newspaperAttachment(newspaper, team, interaction.commandName)] });
-    if (interaction.commandName === 'signing' && facts.number) {
-      stateStore.assignSquadNumber(interaction.options.getString('club'), facts.number, {
-        playerName: facts.player,
-        userId: interaction.user.id,
-        storyId: 'slash-' + interaction.id,
-      });
-    }
     if (interaction.commandName === 'release') {
       stateStore.releaseSquadNumbersForPlayer(interaction.options.getString('club'), facts.player);
     }

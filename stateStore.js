@@ -8,7 +8,7 @@ function clone(value) {
 class StateStore {
   constructor(filePath) {
     this.filePath = filePath;
-    this.state = { stories: {}, processedMessages: {}, squadNumbers: {} };
+    this.state = { stories: {}, processedMessages: {}, squadNumbers: {}, metadata: {} };
     this.load();
   }
 
@@ -19,6 +19,7 @@ class StateStore {
       this.state.stories = parsed.stories || {};
       this.state.processedMessages = parsed.processedMessages || {};
       this.state.squadNumbers = parsed.squadNumbers || {};
+      this.state.metadata = parsed.metadata || {};
     } catch (error) {
       console.error('Could not load RT Football Media state:', error.message);
     }
@@ -90,6 +91,16 @@ class StateStore {
     }
     if (released.length) this.persist();
     return released;
+  }
+
+  getMetadata(key) {
+    return this.state.metadata[key] === undefined ? undefined : clone(this.state.metadata[key]);
+  }
+
+  setMetadata(key, value) {
+    this.state.metadata[key] = clone(value);
+    this.persist();
+    return this.getMetadata(key);
   }
 
   isProcessed(messageId) {

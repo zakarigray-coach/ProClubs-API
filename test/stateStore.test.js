@@ -40,3 +40,12 @@ test('persists club-specific squad number assignments', () => {
   assert.deepEqual(second.releaseSquadNumbersForPlayer('birmingham', 'tru'), ['22']);
   assert.equal(second.getSquadNumber('birmingham', '22'), null);
 });
+
+test('persists one-time audit metadata', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-media-'));
+  const file = path.join(directory, 'state.json');
+  const first = new StateStore(file);
+  assert.equal(first.getMetadata('audit'), undefined);
+  first.setMetadata('audit', { version: 'v2' });
+  assert.equal(new StateStore(file).getMetadata('audit').version, 'v2');
+});
