@@ -5,6 +5,7 @@ const { buildResponse, archetypes, costModels } = require('./optimizer');
 require('./rtReporterVoicePatch');
 require('./rtNewspaperPatch');
 const { startBot } = require('./reporterBot');
+const { startPlayerSpotlights } = require('./playerSpotlight');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +54,7 @@ app.listen(PORT, () => {
   try {
     const client = await startBot();
     if (!client) return;
+    startPlayerSpotlights(client);
     const guild = process.env.DISCORD_GUILD_ID
       ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null)
       : client.guilds.cache.first();
