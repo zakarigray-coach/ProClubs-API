@@ -49,12 +49,14 @@ function randomChoice(items) {
 const TEAMS = {
   birmingham: {
     label: 'Birmingham City', league: 'MPL', reporter: 'Raine',
+    reporterCompetition: 'the Masters Premier League’s Tier League 1 division',
     outlet: 'Raine at St. Andrew’s', color: 0x00a1e4, emoji: '🔵',
     voice: 'Polished and observant football journalism with a grounded matchday tone. Connect the signing to Birmingham City, St. Andrew’s, and the MPL challenge without overhyping it.',
     alertRoleEnv: 'BIRMINGHAM_ROLE_ID',
   },
   crownfc: {
     label: 'CrownFC', league: 'MLPC', reporter: 'Teagan',
+    reporterCompetition: 'MLPC',
     outlet: 'Teagan Behind the Crown', color: 0x7bafd4, emoji: '👑',
     voice: 'Confident, energetic, and personality-driven football reporting. Connect the signing to CrownFC ambition, competition, and what it means behind the Crown without becoming unrealistic.',
     alertRoleEnv: 'MLPC_ROLE_ID',
@@ -615,7 +617,7 @@ async function startBot() {
       try {
         await member.send(
           'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football News, covering ' +
-          team.label + ' in ' + team.league + '. Your signing has just been announced, and I’m preparing the front page.\n\n' +
+          team.label + ' in ' + team.reporterCompetition + '. Your signing has just been announced, and I’m preparing the front page.\n\n' +
           'Could you reply here with a quick quote about joining ' + team.label +
           ' and what supporters can expect from you? Please keep it to one or two sentences. Your reply may be published as your player quote.'
         );
