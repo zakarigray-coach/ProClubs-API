@@ -772,7 +772,7 @@ async function startBot() {
       console.error('Unhandled RT Football Media operation:', error);
     });
   }
-  client.once('ready', async () => {
+  client.once('clientReady', async () => {
     console.log('RT Football Media logged in as ' + client.user.tag);
     for (const record of stateStore.listStories()) {
       if (['published', 'cancelled'].includes(record.state)) continue;
