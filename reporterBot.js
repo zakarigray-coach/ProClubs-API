@@ -264,9 +264,17 @@ function friendlyCalendarDate(value) {
 
 function seasonLine(teamKey) {
   const calendar = stateStore.getMetadata(`seasonCalendar:${teamKey}`);
-  if (!calendar || !validCalendarDate(calendar.begins) || !validCalendarDate(calendar.ends)) return '';
+  if (!calendar || !validCalendarDate(calendar.begins)) return '';
   const status = calendar.status === 'ended' ? ' • FINAL TOTALS' : '';
-  return `${calendar.seasonName || process.env.FC_SEASON || 'Current season'}: ${friendlyCalendarDate(calendar.begins)} – ${friendlyCalendarDate(calendar.ends)}${status}`;
+  const ending = validCalendarDate(calendar.ends) ? friendlyCalendarDate(calendar.ends) : 'End date to be confirmed';
+  return `${calendar.seasonName || process.env.FC_SEASON || 'Current season'}: ${friendlyCalendarDate(calendar.begins)} – ${ending}${status}`;
+}
+
+function easternDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: NEWS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(value).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function seasonForTeam(teamKey) {
@@ -802,6 +810,19 @@ function editStoryModal(id, story) {
       textInput('subheadline', 'Subheadline', { required: true, max: 140, value: story.subheadline }),
       textInput('article', 'Full article', { required: true, long: true, max: 4000, value: story.article || story.body }),
       textInput('player_quote', 'Player quote / no-comment line', { long: true, max: 220, value: story.playerQuote }),      textInput('leadership_quote', 'Club leadership quote', { long: true, max: 220, value: story.leadershipQuote })
+    );
+}
+
+function playerRegistrationModal() {
+  return new ModalBuilder()
+    .setCustomId('club_registration:submit')
+    .setTitle('Castle & Crown Registration')
+    .addComponents(
+      textInput('ea_id', 'EA ID / gamer tag', { required: true, max: 100 }),
+      textInput('position', 'Preferred position(s)', { required: true, max: 100 }),
+      textInput('availability', 'Availability and time zone', { required: true, max: 200 }),
+      textInput('verification', 'League verification / profile information', { required: true, max: 300 }),
+      textInput('notes', 'Previous club or additional notes', { required: false, long: true, max: 500 })
     );
 }
 
@@ -1356,6 +1377,38 @@ async function startBot() {
     const key = teamKey === 'crownfc' ? 'mlpc-stats' : 'ml1-stats';
     return guild.channels.cache.find(channel => channel.isTextBased() &&
       String(channel.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '') === key);
+  }
+
+  function managementLogChannelFor(guild) {
+    return guild.channels.cache.find(channel => channel.isTextBased() &&
+      String(channel.name || '').toLowerCase().includes('management-log'));
+  }
+
+  function canApproveRegistration(interaction) {
+    const ownerId = process.env.BOT_OWNER_ID || interaction.guild?.ownerId;
+    if (interaction.user.id === ownerId) return true;
+    const operationsRoleId = process.env.FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
+    return Boolean(operationsRoleId && interaction.member?.roles?.cache?.has(operationsRoleId));
+  }
+
+  async function clubRole(guild, teamKey) {
+    const roleId = process.env[TEAMS[teamKey].alertRoleEnv];
+    return roleId ? guild.roles.fetch(roleId).catch(() => null) : null;
+  }
+
+  async function ensureRoleCapacity(guild, teamKey, member) {
+    const role = await clubRole(guild, teamKey);
+    if (!role) throw new Error(`${TEAMS[teamKey].label} role is not configured.`);
+    if (member.roles.cache.has(role.id)) return role;
+    const activeMembers = role.members.filter(item => !item.user.bot).size;
+    if (activeMembers >= TEAMS[teamKey].rosterLimit) {
+      throw new Error(`${TEAMS[teamKey].label} has reached its ${TEAMS[teamKey].rosterLimit}-player roster limit.`);
+    }
+    const botMember = guild.members.me || await guild.members.fetchMe();
+    if (role.position >= botMember.roles.highest.position) {
+      throw new Error(`Move RT Football Media above the ${role.name} role before approving access.`);
+    }
+    return role;
   }
 
   function fixed(value, width) {
@@ -2144,6 +2197,100 @@ async function startBot() {
   function teamForRecord(record) { return TEAMS[record.teamKey]; }
 
   async function handleInteraction(interaction) {
+    if (interaction.isButton() && interaction.customId === 'club_registration:start') {
+      const activeId = stateStore.getMetadata(`onboardingActive:${interaction.guildId}:${interaction.user.id}`);
+      const active = activeId ? stateStore.getMetadata(`onboardingRequest:${activeId}`) : null;
+      if (active?.status === 'pending') {
+        return interaction.reply({ content: 'Your registration is already waiting for management review.', flags: MessageFlags.Ephemeral });
+      }
+      return interaction.showModal(playerRegistrationModal());
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'club_registration:submit') {
+      const guild = interaction.guild;
+      const requestId = storyId();
+      const request = {
+        id: requestId, guildId: guild.id, userId: interaction.user.id,
+        displayName: interaction.member?.displayName || interaction.user.username,
+        eaId: clean(interaction.fields.getTextInputValue('ea_id'), 100),
+        position: clean(interaction.fields.getTextInputValue('position'), 100),
+        availability: clean(interaction.fields.getTextInputValue('availability'), 200),
+        verification: clean(interaction.fields.getTextInputValue('verification'), 300),
+        notes: clean(interaction.fields.getTextInputValue('notes'), 500),
+        status: 'pending', submittedAt: new Date().toISOString(),
+      };
+      const activeId = stateStore.getMetadata(`onboardingActive:${guild.id}:${interaction.user.id}`);
+      const active = activeId ? stateStore.getMetadata(`onboardingRequest:${activeId}`) : null;
+      if (active?.status === 'pending') {
+        return interaction.reply({ content: 'Your registration is already waiting for management review.', flags: MessageFlags.Ephemeral });
+      }
+      const managementChannel = managementLogChannelFor(guild) || guild.channels.cache.find(channel =>
+        channel.isTextBased() && String(channel.name || '').toLowerCase().includes('staff-room'));
+      if (!managementChannel) {
+        return interaction.reply({ content: 'The private management review channel is unavailable. Please notify Coach Gray.', flags: MessageFlags.Ephemeral });
+      }
+      stateStore.setMetadata(`onboardingRequest:${requestId}`, request);
+      stateStore.setMetadata(`onboardingActive:${guild.id}:${interaction.user.id}`, requestId);
+      const embed = new EmbedBuilder()
+        .setColor(0x7BAFD4)
+        .setTitle('New Player Registration')
+        .setDescription(`<@${request.userId}> is awaiting management approval. The player cannot select their own club access.`)
+        .addFields(
+          { name: 'EA ID / gamer tag', value: safePublicText(request.eaId, 100) },
+          { name: 'Preferred position(s)', value: safePublicText(request.position, 100) },
+          { name: 'Availability', value: safePublicText(request.availability, 200) },
+          { name: 'League verification', value: safePublicText(request.verification, 300) },
+          { name: 'Previous club / notes', value: safePublicText(request.notes, 500) || 'None supplied' }
+        )
+        .setFooter({ text: 'Owner or Vice President of Football Operations approval required' })
+        .setTimestamp();
+      const controls = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`registration_decision:birmingham:${requestId}`).setLabel('Approve Birmingham').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`registration_decision:crownfc:${requestId}`).setLabel('Approve CrownFC').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`registration_decision:both:${requestId}`).setLabel('Approve Both').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`registration_decision:trialist:${requestId}`).setLabel('Trialist').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`registration_decision:reject:${requestId}`).setLabel('Reject').setStyle(ButtonStyle.Danger)
+      );
+      const review = await managementChannel.send({ embeds: [embed], components: [controls], allowedMentions: { parse: [] } });
+      stateStore.setMetadata(`onboardingRequest:${requestId}`, { ...request, reviewChannelId: managementChannel.id, reviewMessageId: review.id });
+      stateStore.addManagementLog({ action: 'registration_submitted', requestId, userId: request.userId });
+      return interaction.reply({ content: 'Registration submitted privately. Management will choose Birmingham City, CrownFC, both clubs, trialist, or reject. You cannot assign the club roles yourself.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('registration_decision:')) {
+      const [, action, requestId] = interaction.customId.split(':');
+      if (!canApproveRegistration(interaction)) {
+        return interaction.reply({ content: 'Only Coach Gray or a Vice President of Football Operations can approve club access.', flags: MessageFlags.Ephemeral });
+      }
+      const request = stateStore.getMetadata(`onboardingRequest:${requestId}`);
+      if (!request || request.status !== 'pending') {
+        return interaction.reply({ content: 'This registration has already been decided or is no longer available.', flags: MessageFlags.Ephemeral });
+      }
+      await interaction.deferUpdate();
+      const guild = interaction.guild;
+      await guild.members.fetch();
+      const member = await guild.members.fetch(request.userId).catch(() => null);
+      if (!member) throw new Error('The registered player is no longer in the server.');
+      const teamKeys = action === 'both' ? ['birmingham', 'crownfc'] : ['birmingham', 'crownfc'].includes(action) ? [action] : [];
+      const roles = [];
+      for (const teamKey of teamKeys) roles.push(await ensureRoleCapacity(guild, teamKey, member));
+      if (roles.length) await member.roles.add(roles.map(role => role.id), `Approved by ${interaction.user.username}`);
+      const status = action === 'reject' ? 'rejected' : action === 'trialist' ? 'trialist' : 'approved';
+      const accessLabel = action === 'both' ? 'Birmingham City and CrownFC' : action === 'birmingham' ? 'Birmingham City' : action === 'crownfc' ? 'CrownFC' : action === 'trialist' ? 'Trialist — no private club role assigned' : 'Registration rejected — no club role assigned';
+      const decided = {
+        ...request, status, decision: action, accessLabel,
+        decidedBy: interaction.user.id, decidedAt: new Date().toISOString(),
+      };
+      stateStore.setMetadata(`onboardingRequest:${requestId}`, decided);
+      stateStore.setMetadata(`onboardingActive:${guild.id}:${request.userId}`, null);
+      stateStore.addManagementLog({ action: 'registration_decided', requestId, userId: request.userId, decision: action, decidedBy: interaction.user.id });
+      await member.send(`Your Castle & Crown Collective registration was reviewed by management. Decision: **${accessLabel}**.${roles.length ? ' Your approved server access is now active.' : ''}`).catch(() => {});
+      const resultEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+        .setColor(status === 'approved' ? 0x43B581 : status === 'rejected' ? 0xED4245 : 0x99AAB5)
+        .addFields({ name: 'Management decision', value: `${accessLabel}\nApproved by <@${interaction.user.id}>` });
+      return interaction.editReply({ embeds: [resultEmbed], components: [], allowedMentions: { parse: [] } });
+    }
+
     if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('operation:')) {
       const [, action, requestId] = interaction.customId.split(':');
       const request = pendingOperations.get(requestId);
@@ -2713,6 +2860,54 @@ async function startBot() {
         }
       }
 
+      const registrationChannel = all().find(item => normalize(item.name) === 'fc27-registration');
+      if (registrationChannel?.isTextBased()) {
+        try {
+          const registrationEmbed = new EmbedBuilder()
+            .setColor(0x7BAFD4)
+            .setTitle('Player Registration')
+            .setDescription('Submit one private application for Castle & Crown Collective. Management—not the player—chooses Birmingham City, CrownFC, both clubs, trialist status, or rejection.')
+            .addFields(
+              { name: 'Information collected', value: 'EA ID • preferred positions • availability • league verification • previous club/notes' },
+              { name: 'Access protection', value: 'No club role is self-assigned. Coach Gray or a Vice President of Football Operations must approve access.' }
+            )
+            .setFooter({ text: 'One pending registration per member' });
+          const registrationControls = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('club_registration:start').setLabel('Submit Registration').setEmoji('📝').setStyle(ButtonStyle.Primary)
+          );
+          const recent = await registrationChannel.messages.fetch({ limit: 25 });
+          const existing = recent.find(message => message.author.id === botId && message.embeds[0]?.title === 'Player Registration');
+          const payload = { embeds: [registrationEmbed], components: [registrationControls], allowedMentions: { parse: [] } };
+          if (existing) await existing.edit(payload);
+          else await registrationChannel.send(payload);
+        } catch (error) {
+          results.warnings.push('player registration approval panel');
+          console.error('Could not publish registration panel:', error.message);
+        }
+      }
+
+      const verificationChannel = all().find(item => normalize(item.name) === 'verification');
+      if (verificationChannel?.isTextBased()) {
+        try {
+          const verificationEmbed = new EmbedBuilder()
+            .setColor(0x7BAFD4)
+            .setTitle('League Verification')
+            .setDescription('Management uses the verification information from your registration to confirm league eligibility, identity and roster readiness. You do not select a club role here.')
+            .addFields(
+              { name: 'Possible decisions', value: 'Birmingham City • CrownFC • both clubs • trialist • rejected' },
+              { name: 'Need an update?', value: 'Contact Coach Gray or a Vice President of Football Operations. Do not submit duplicate registrations.' }
+            );
+          const recent = await verificationChannel.messages.fetch({ limit: 25 });
+          const existing = recent.find(message => message.author.id === botId && message.embeds[0]?.title === 'League Verification');
+          const payload = { embeds: [verificationEmbed], allowedMentions: { parse: [] } };
+          if (existing) await existing.edit(payload);
+          else await verificationChannel.send(payload);
+        } catch (error) {
+          results.warnings.push('league verification information panel');
+          console.error('Could not publish verification panel:', error.message);
+        }
+      }
+
       const welcomeChannel = all().find(item => normalize(item.name) === 'welcome');
       if (welcomeChannel?.isTextBased()) {
         try {
@@ -2973,10 +3168,10 @@ async function startBot() {
       if (!team) return interaction.editReply('That club is not configured. Nothing was changed.');
       const existing = stateStore.getMetadata(`seasonCalendar:${teamKey}`);
       if (action === 'start') {
-        if (!validCalendarDate(begins) || !validCalendarDate(ends)) {
-          return interaction.editReply('Starting a season requires real begins and ends dates in YYYY-MM-DD format. Nothing was changed.');
+        if (!validCalendarDate(begins) || (ends && !validCalendarDate(ends))) {
+          return interaction.editReply('Starting a season requires a real begins date. If supplied, ends must also use YYYY-MM-DD. Nothing was changed.');
         }
-        if (ends < begins) return interaction.editReply('The season end date must be on or after its start date. Nothing was changed.');
+        if (ends && ends < begins) return interaction.editReply('The season end date must be on or after its start date. Nothing was changed.');
         if (existing?.status === 'ended' && existing.seasonName === seasonName) {
           return interaction.editReply(`The ${seasonName} totals are already final. Use a new season name so historical statistics cannot be merged accidentally.`);
         }
@@ -2985,13 +3180,13 @@ async function startBot() {
           return interaction.editReply(`${seasonName} already has saved match records. Use a unique season name so the new totals begin at zero.`);
         }
         stateStore.setMetadata(`seasonCalendar:${teamKey}`, {
-          seasonName, begins, ends, status: 'active', startedAt: new Date().toISOString(),
+          seasonName, begins, ends: ends || null, status: 'active', startedAt: new Date().toISOString(),
           updatedBy: interaction.user.id, updatedAt: new Date().toISOString(),
         });
       } else {
         if (!existing || existing.status !== 'active') return interaction.editReply('There is no active season to end for that club. Nothing was changed.');
         stateStore.setMetadata(`seasonCalendar:${teamKey}`, {
-          ...existing, status: 'ended', endedAt: new Date().toISOString(),
+          ...existing, ends: easternDateKey(), status: 'ended', endedAt: new Date().toISOString(),
           updatedBy: interaction.user.id, updatedAt: new Date().toISOString(),
         });
       }
@@ -3002,9 +3197,9 @@ async function startBot() {
         headline: started ? 'THE SEASON STARTS NOW' : 'SEASON TOTALS ARE FINAL',
         subheadline: started ? `${team.label} opens its official ${savedCalendar.seasonName} statistical campaign` : `${team.label} closes ${savedCalendar.seasonName} with its verified totals frozen`,
         article: started
-          ? `${team.label} has officially started ${savedCalendar.seasonName}. The season begins on ${friendlyCalendarDate(savedCalendar.begins)} and concludes on ${friendlyCalendarDate(savedCalendar.ends)}. Team and player totals now begin from zero for this named statistical period and will update only from approved match records. RT Football Media will carry the official season window on future ${team.label} reports.`
+          ? `${team.label} has officially started ${savedCalendar.seasonName}. The season begins on ${friendlyCalendarDate(savedCalendar.begins)}${validCalendarDate(savedCalendar.ends) ? ` and is scheduled to conclude on ${friendlyCalendarDate(savedCalendar.ends)}` : ', with the ending date still to be confirmed'}. Team and player totals now begin from zero for this named statistical period and will update only from approved match records. RT Football Media will carry the official season window on future ${team.label} reports.`
           : `${team.label} has officially ended ${savedCalendar.seasonName}. The verified team and player statistics for this season are now final and protected from later match records. Historical match-by-match data remains available for corrections and awards, while any future statistics will require the owner to start a new uniquely named season.`,
-        body: started ? `${savedCalendar.seasonName} begins ${friendlyCalendarDate(savedCalendar.begins)} and ends ${friendlyCalendarDate(savedCalendar.ends)}. Team and player totals are now active.` : `${savedCalendar.seasonName} has ended. Its verified team and player totals are now frozen as the final season record.`,
+        body: started ? `${savedCalendar.seasonName} begins ${friendlyCalendarDate(savedCalendar.begins)} and ${validCalendarDate(savedCalendar.ends) ? `ends ${friendlyCalendarDate(savedCalendar.ends)}` : 'has no confirmed ending date yet'}. Team and player totals are now active.` : `${savedCalendar.seasonName} ended ${friendlyCalendarDate(savedCalendar.ends)}. Its verified team and player totals are now frozen as the final season record.`,
         reporterNote: started ? `${team.reporter} will keep the official season window attached to every future club edition.` : `${team.reporter} closes the campaign with the verified record preserved.`,
         seasonLine: line,
       }, {});
@@ -3428,4 +3623,5 @@ module.exports = {
   safePublicText,
   normalizeStory,
   normalizeSquadNumber,
+  playerRegistrationModal,
 };

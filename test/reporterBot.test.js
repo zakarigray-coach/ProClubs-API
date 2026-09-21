@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const sharp = require('sharp');
-const { publicationDate, safePublicText, normalizeStory, normalizeSquadNumber, newspaperGraphic } = require('../reporterBot');
+const { publicationDate, safePublicText, normalizeStory, normalizeSquadNumber, newspaperGraphic, playerRegistrationModal } = require('../reporterBot');
 
 test('newspaper date follows Eastern Time instead of UTC', () => {
   assert.equal(publicationDate('2026-09-21T02:30:00.000Z'), 'SEP 20, 2026');
@@ -28,6 +28,14 @@ test('squad numbers are normalized and limited to 1 through 99', () => {
   assert.equal(normalizeSquadNumber('0'), null);
   assert.equal(normalizeSquadNumber('100'), null);
   assert.equal(normalizeSquadNumber('keeper'), null);
+});
+
+test('player registration modal collects five fields without exposing club role selection', () => {
+  const modal = playerRegistrationModal().toJSON();
+  assert.equal(modal.components.length, 5);
+  const ids = modal.components.map(row => row.components[0].custom_id);
+  assert.deepEqual(ids, ['ea_id', 'position', 'availability', 'verification', 'notes']);
+  assert.equal(ids.includes('club'), false);
 });
 
 test('approved RT Media renderer creates a Discord-readable vertical front page', async () => {

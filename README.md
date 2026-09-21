@@ -54,7 +54,9 @@ The automatic graphic workflow intentionally stops and privately reports an erro
 
 All publishing commands are owner-only and private. Every route—including the legacy `/match`, `/signing`, and `/release` commands—creates a DM preview with **Publish**, **Edit**, **Regenerate**, and **Cancel** instead of posting immediately.
 
-Use `/season-calendar action:start` with a unique season name and official start/end dates to begin a fresh team and player statistics period. Use `/season-calendar action:end` to freeze those totals without deleting the match-by-match history. The correct reporter creates a private approval preview for either announcement, and the verified season window is printed in future newspaper reports for that club. Matches published while no season is active do not contaminate final totals.
+Use `/season-calendar action:start` with a unique season name and official start date to begin a fresh team and player statistics period; the planned ending date is optional. Use `/season-calendar action:end` to record the actual Eastern-Time ending date and freeze totals without deleting match-by-match history. The correct reporter creates a private approval preview for either announcement, and the verified season window is printed in future newspaper reports for that club. Matches published while no season is active do not contaminate final totals.
+
+The registration panel collects a player’s EA ID, positions, availability, league-verification information and notes. It sends a private management card with **Approve Birmingham**, **Approve CrownFC**, **Approve Both**, **Trialist** and **Reject** controls. Only the owner or the persisted Vice President of Football Operations role can decide; roster limits and Discord role hierarchy are checked before access is granted.
 
 ## Run
 
