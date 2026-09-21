@@ -49,7 +49,7 @@ function randomChoice(items) {
 const TEAMS = {
   birmingham: {
     label: 'Birmingham City', league: 'MPL', reporter: 'Raine',
-    reporterCompetition: 'the Masters Premier League’s Tier League 1 division',
+    reporterCompetition: 'the Masters Premier League’s League 1 division',
     outlet: 'Raine at St. Andrew’s', color: 0x00a1e4, emoji: '🔵',
     voice: 'Polished and observant football journalism with a grounded matchday tone. Connect the signing to Birmingham City, St. Andrew’s, and the MPL challenge without overhyping it.',
     alertRoleEnv: 'BIRMINGHAM_ROLE_ID',
