@@ -54,6 +54,8 @@ The automatic graphic workflow intentionally stops and privately reports an erro
 
 All publishing commands are owner-only and private. Every route—including the legacy `/match`, `/signing`, and `/release` commands—creates a DM preview with **Publish**, **Edit**, **Regenerate**, and **Cancel** instead of posting immediately.
 
+Use `/season-calendar action:start` with a unique season name and official start/end dates to begin a fresh team and player statistics period. Use `/season-calendar action:end` to freeze those totals without deleting the match-by-match history. The correct reporter creates a private approval preview for either announcement, and the verified season window is printed in future newspaper reports for that club. Matches published while no season is active do not contaminate final totals.
+
 ## Run
 
 ```bash

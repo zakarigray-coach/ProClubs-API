@@ -216,8 +216,18 @@ const awardPresentation = new SlashCommandBuilder()
   .addStringOption(o => o.setName('award_key').setDescription('Award key shown in the shortlist').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+const seasonCalendar = clubOption(new SlashCommandBuilder()
+  .setName('season-calendar')
+  .setDescription('Start or end a club season and control its statistics period'))
+  .addStringOption(o => o.setName('action').setDescription('Start a new statistics period or freeze the current one').setRequired(true)
+    .addChoices({ name: 'Start season', value: 'start' }, { name: 'End season', value: 'end' }))
+  .addStringOption(o => o.setName('begins').setDescription('Official start date for Start (YYYY-MM-DD)'))
+  .addStringOption(o => o.setName('ends').setDescription('Official end date for Start (YYYY-MM-DD)'))
+  .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
 const commands = [match, sign, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
-  correctStats, awards, archiveMedia, runSchedules, awardPresentation].map(command => command.toJSON());
+  correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -238,6 +248,33 @@ function publicationDate(value) {
     day: '2-digit',
     year: 'numeric',
   }).format(value ? new Date(value) : new Date()).toUpperCase();
+}
+
+function validCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const parsed = new Date(`${value}T12:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function friendlyCalendarDate(value) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(`${value}T12:00:00.000Z`));
+}
+
+function seasonLine(teamKey) {
+  const calendar = stateStore.getMetadata(`seasonCalendar:${teamKey}`);
+  if (!calendar || !validCalendarDate(calendar.begins) || !validCalendarDate(calendar.ends)) return '';
+  const status = calendar.status === 'ended' ? ' • FINAL TOTALS' : '';
+  return `${calendar.seasonName || process.env.FC_SEASON || 'Current season'}: ${friendlyCalendarDate(calendar.begins)} – ${friendlyCalendarDate(calendar.ends)}${status}`;
+}
+
+function seasonForTeam(teamKey) {
+  return stateStore.getMetadata(`seasonCalendar:${teamKey}`)?.seasonName || process.env.FC_SEASON || 'FC27';
+}
+
+function seasonIsActive(teamKey) {
+  return stateStore.getMetadata(`seasonCalendar:${teamKey}`)?.status === 'active';
 }
 
 function exactTru(userId, playerName) {
@@ -1330,7 +1367,7 @@ async function startBot() {
     const team = TEAMS[teamKey];
     const channel = statsChannelFor(guild, teamKey);
     if (!channel) throw new Error(`The ${team.label} stats channel is unavailable.`);
-    const season = process.env.FC_SEASON || 'FC27';
+    const season = seasonForTeam(teamKey);
     const records = stateStore.listMatchRecords({ teamKey, season });
     const roster = rosterCapacity(teamKey);
     const teamTotals = calculateTeamTotals(records);
@@ -1402,7 +1439,7 @@ async function startBot() {
 
   function recentClubMatches(teamKey, days = 7) {
     const cutoff = Date.now() - days * 86400000;
-    return stateStore.listMatchRecords({ teamKey, season: process.env.FC_SEASON || 'FC27' })
+    return stateStore.listMatchRecords({ teamKey, season: seasonForTeam(teamKey) })
       .filter(record => new Date(record.playedAt).getTime() >= cutoff);
   }
 
@@ -1597,14 +1634,15 @@ async function startBot() {
 
   async function renderEdition(record, options = {}) {
     const team = TEAMS[record.teamKey];
+    const reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };
     let heroPath = record.heroPath;
     if (options.freshHero || !heroPath || !fs.existsSync(heroPath)) {
-      const hero = await generateHeroImage(team, record.type, record.story, record.graphic, options.variationKey || Date.now());
+      const hero = await generateHeroImage(team, record.type, reportStory, record.graphic, options.variationKey || Date.now());
       heroPath = storyPath(record.id, 'hero-' + Date.now() + '.png');
       fs.writeFileSync(heroPath, hero);
       record = remember({ ...record, heroPath });
     }
-    const newspaper = await newspaperGraphic(team, record.type, record.story, record.graphic, {
+    const newspaper = await newspaperGraphic(team, record.type, reportStory, record.graphic, {
       heroPath,
       publishedAt: options.publishedAt,
       editionSeed: Number.parseInt(record.id.slice(-4), 16) || 8,
@@ -1744,23 +1782,27 @@ async function startBot() {
         }
       }
       if (record.type === 'match') {
-        for (const [index, match] of (record.selectedMatches || []).entries()) {
-          const parsedDate = Date.parse(match.date || '');
-          const playedAt = Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : publishedAt;
-          const matchRecord = normalizeMatchRecord({
-            id: `match-${record.id}-${index}`,
-            teamKey: record.teamKey,
-            season: process.env.FC_SEASON || 'FC27',
-            playedAt,
-            opponent: match.opponent,
-            score: match.score,
-            result: match.result,
-            competition: match.competitionType,
-            players: match.players || [],
-            sourceMessageId: record.sourceMessageId,
-            articleStoryId: record.id,
-          });
-          stateStore.putMatchRecord(matchRecord);
+        if (seasonIsActive(record.teamKey)) {
+          for (const [index, match] of (record.selectedMatches || []).entries()) {
+            const parsedDate = Date.parse(match.date || '');
+            const playedAt = Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : publishedAt;
+            const matchRecord = normalizeMatchRecord({
+              id: `match-${record.id}-${index}`,
+              teamKey: record.teamKey,
+              season: seasonForTeam(record.teamKey),
+              playedAt,
+              opponent: match.opponent,
+              score: match.score,
+              result: match.result,
+              competition: match.competitionType,
+              players: match.players || [],
+              sourceMessageId: record.sourceMessageId,
+              articleStoryId: record.id,
+            });
+            stateStore.putMatchRecord(matchRecord);
+          }
+        } else {
+          stateStore.addManagementLog({ action: 'match_stats_skipped_no_active_season', teamKey: record.teamKey, storyId: record.id });
         }
         await refreshPublicStatsBoard(guild, record.teamKey).catch(error => {
           console.error('Published match but could not refresh public stats board:', error.message);
@@ -2909,16 +2951,70 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation'].includes(interaction.commandName)) return;
-    const privateCommand = ['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation'].includes(interaction.commandName);
+    if (!['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
+    const privateCommand = ['match', 'sign', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
     if (['match', 'sign', 'signing', 'release'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
       return interaction.editReply('Only the Castle & Crown Collective owner can start an RT Football Media publication workflow.');
     }
-    if (['correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
+    if (['correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
       return interaction.editReply('Only the Castle & Crown Collective owner can use this operation.');
+    }
+
+    if (interaction.commandName === 'season-calendar') {
+      const teamKey = interaction.options.getString('club');
+      const team = TEAMS[teamKey];
+      const action = interaction.options.getString('action');
+      const begins = clean(interaction.options.getString('begins'), 10);
+      const ends = clean(interaction.options.getString('ends'), 10);
+      const seasonName = clean(interaction.options.getString('season_name') || process.env.FC_SEASON || 'FC27', 40);
+      if (!team) return interaction.editReply('That club is not configured. Nothing was changed.');
+      const existing = stateStore.getMetadata(`seasonCalendar:${teamKey}`);
+      if (action === 'start') {
+        if (!validCalendarDate(begins) || !validCalendarDate(ends)) {
+          return interaction.editReply('Starting a season requires real begins and ends dates in YYYY-MM-DD format. Nothing was changed.');
+        }
+        if (ends < begins) return interaction.editReply('The season end date must be on or after its start date. Nothing was changed.');
+        if (existing?.status === 'ended' && existing.seasonName === seasonName) {
+          return interaction.editReply(`The ${seasonName} totals are already final. Use a new season name so historical statistics cannot be merged accidentally.`);
+        }
+        const priorRecords = stateStore.listMatchRecords({ teamKey, season: seasonName });
+        if (priorRecords.length && existing?.seasonName !== seasonName) {
+          return interaction.editReply(`${seasonName} already has saved match records. Use a unique season name so the new totals begin at zero.`);
+        }
+        stateStore.setMetadata(`seasonCalendar:${teamKey}`, {
+          seasonName, begins, ends, status: 'active', startedAt: new Date().toISOString(),
+          updatedBy: interaction.user.id, updatedAt: new Date().toISOString(),
+        });
+      } else {
+        if (!existing || existing.status !== 'active') return interaction.editReply('There is no active season to end for that club. Nothing was changed.');
+        stateStore.setMetadata(`seasonCalendar:${teamKey}`, {
+          ...existing, status: 'ended', endedAt: new Date().toISOString(),
+          updatedBy: interaction.user.id, updatedAt: new Date().toISOString(),
+        });
+      }
+      const line = seasonLine(teamKey);
+      const savedCalendar = stateStore.getMetadata(`seasonCalendar:${teamKey}`);
+      const started = action === 'start';
+      const story = normalizeStory(team, 'season_calendar', {
+        headline: started ? 'THE SEASON STARTS NOW' : 'SEASON TOTALS ARE FINAL',
+        subheadline: started ? `${team.label} opens its official ${savedCalendar.seasonName} statistical campaign` : `${team.label} closes ${savedCalendar.seasonName} with its verified totals frozen`,
+        article: started
+          ? `${team.label} has officially started ${savedCalendar.seasonName}. The season begins on ${friendlyCalendarDate(savedCalendar.begins)} and concludes on ${friendlyCalendarDate(savedCalendar.ends)}. Team and player totals now begin from zero for this named statistical period and will update only from approved match records. RT Football Media will carry the official season window on future ${team.label} reports.`
+          : `${team.label} has officially ended ${savedCalendar.seasonName}. The verified team and player statistics for this season are now final and protected from later match records. Historical match-by-match data remains available for corrections and awards, while any future statistics will require the owner to start a new uniquely named season.`,
+        body: started ? `${savedCalendar.seasonName} begins ${friendlyCalendarDate(savedCalendar.begins)} and ends ${friendlyCalendarDate(savedCalendar.ends)}. Team and player totals are now active.` : `${savedCalendar.seasonName} has ended. Its verified team and player totals are now frozen as the final season record.`,
+        reporterNote: started ? `${team.reporter} will keep the official season window attached to every future club edition.` : `${team.reporter} closes the campaign with the verified record preserved.`,
+        seasonLine: line,
+      }, {});
+      const owner = await configuredOwner(interaction.guild);
+      await createScheduledDraft(interaction.guild, owner, teamKey, 'season_calendar', story, {
+        previewMessage: `Private ${team.reporter} season-calendar announcement. Publishing remains optional; the verified dates are already saved for future reports.`,
+      });
+      stateStore.addManagementLog({ action: started ? 'season_started' : 'season_ended', teamKey, seasonName: savedCalendar.seasonName, begins: savedCalendar.begins, ends: savedCalendar.ends, requesterUserId: interaction.user.id });
+      await refreshPublicStatsBoard(interaction.guild, teamKey).catch(error => console.error('Season changed but stats board refresh failed:', error.message));
+      return interaction.editReply(`${started ? 'Started' : 'Ended'} ${line}. A private newspaper announcement preview was sent to you. ${started ? 'Totals are active from zero for this season name.' : 'The season totals are now frozen.'}`);
     }
 
     if (interaction.commandName === 'award-presentation') {
@@ -2984,11 +3080,11 @@ async function startBot() {
 
     if (interaction.commandName === 'award-shortlists') {
       const teamKey = interaction.options.getString('club');
-      const records = stateStore.listMatchRecords({ teamKey, season: process.env.FC_SEASON || 'FC27' });
+      const records = stateStore.listMatchRecords({ teamKey, season: seasonForTeam(teamKey) });
       if (!records.length) return interaction.editReply('No verified match records are available for that club, so the bot will not invent an award shortlist.');
       const generated = buildAwardShortlists(records).filter(item => item.candidates.length);
       const id = `awards-${teamKey}-${Date.now()}`;
-      const shortlist = stateStore.putAwardShortlist({ id, teamKey, season: process.env.FC_SEASON || 'FC27', awards: generated, createdAt: new Date().toISOString() });
+      const shortlist = stateStore.putAwardShortlist({ id, teamKey, season: seasonForTeam(teamKey), awards: generated, createdAt: new Date().toISOString() });
       stateStore.addManagementLog({ action: 'award_shortlist_generated', shortlistId: id, teamKey, recordCount: records.length });
       const embeds = generated.map(item => new EmbedBuilder().setColor(TEAMS[teamKey].color).setTitle(item.award).setDescription(item.candidates.map((candidate, index) => `${index + 1}. **${candidate.playerName}** — ${Object.entries(candidate.evidence).map(([key, value]) => `${key}: ${value}`).join(', ')}`).join('\n')));
       const components = generated.slice(0, 5).map(item => new ActionRowBuilder().addComponents(

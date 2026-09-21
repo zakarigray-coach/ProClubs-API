@@ -58,7 +58,7 @@ async function renderNewspaper(options) {
     : realQuote(story.leadershipQuote)
       ? `“${story.leadershipQuote}” — ${story.leadershipRole || 'Club representative'}`
       : story.reporterNote || 'Verified club coverage from RT Football Media.';
-  const keyPoints = [story.subheadline, story.body, story.reporterNote]
+  const keyPoints = [story.seasonLine ? `OFFICIAL SEASON WINDOW — ${story.seasonLine}` : story.subheadline, story.body, story.reporterNote]
     .filter(Boolean).map(value => wrapLines(value, 25, 3)).slice(0, 3);
   const clubStrip = `${team.label.toUpperCase()} • ${team.league.toUpperCase()}`;
   const editionLabel = type === 'match' ? 'MATCHDAY EDITION' : type === 'spotlight' ? 'PLAYER SPOTLIGHT' : type === 'weekly_recap' ? 'WEEK IN REVIEW' : 'CLUB EXCLUSIVE';
