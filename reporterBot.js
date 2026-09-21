@@ -347,8 +347,7 @@ async function extractEligibleMatches(team, recapText, graphic) {
       },
       { role: 'user', content },
     ],
-  });
-  const parsed = extractJson(response.output_text);
+  });  const parsed = extractJson(response.output_text);
   return (Array.isArray(parsed.matches) ? parsed.matches : []).slice(0, 25).map((match, index) => ({
     id: String(index),
     competitionType: safePublicText(match.competitionType || '', 20).toUpperCase(),
@@ -635,98 +634,6 @@ async function registerCommands(token, clientId, guildId) {
 }
 
 
-let twitchMonitorStarted = false;
-let twitchAccessToken = null;
-let twitchTokenExpiresAt = 0;
-
-async function getTwitchAccessToken() {
-  const clientId = process.env.TWITCH_CLIENT_ID;
-  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  if (!clientId || !clientSecret) throw new Error('TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET are missing.');
-  if (twitchAccessToken && Date.now() < twitchTokenExpiresAt - 60000) return twitchAccessToken;
-  const response = await fetch('https://id.twitch.tv/oauth2/token?client_id=' + encodeURIComponent(clientId) +
-    '&client_secret=' + encodeURIComponent(clientSecret) + '&grant_type=client_credentials', { method: 'POST' });
-  if (!response.ok) throw new Error('Twitch token request failed with HTTP ' + response.status);
-  const data = await response.json();
-  twitchAccessToken = data.access_token;
-  twitchTokenExpiresAt = Date.now() + (Number(data.expires_in) || 3600) * 1000;
-  return twitchAccessToken;
-}
-
-function twitchStatePath() {
-  fs.mkdirSync(DATA_DIRECTORY, { recursive: true });
-  return path.join(DATA_DIRECTORY, 'twitch-live-state.json');
-}
-function readTwitchState() {
-  try { return JSON.parse(fs.readFileSync(twitchStatePath(), 'utf8')); } catch { return {}; }
-}
-function writeTwitchState(value) {
-  try { fs.writeFileSync(twitchStatePath(), JSON.stringify(value, null, 2)); }
-  catch (error) { console.error('Could not persist Twitch state:', error.message); }
-}
-function twitchRoute(title) {
-  const value = String(title || '').toLowerCase();
-  if (/\b(mlpc|crownfc|crown fc)\b/.test(value)) return { key: 'mlpc-match-center', label: 'CrownFC • MLPC' };
-  if (/\b(mpl|ml1|birmingham|birmingham city)\b/.test(value)) return { key: 'ml1-match-center', label: 'Birmingham City • MPL' };
-  return { key: 'grounds-match-center', label: 'The Grounds / EA League Play' };
-}
-async function pollTwitch(client) {
-  const username = process.env.TWITCH_USERNAME || 'daddy10420';
-  const token = await getTwitchAccessToken();
-  const response = await fetch('https://api.twitch.tv/helix/streams?user_login=' + encodeURIComponent(username), {
-    headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, Authorization: 'Bearer ' + token },
-  });
-  if (response.status === 401) { twitchAccessToken = null; twitchTokenExpiresAt = 0; throw new Error('Twitch token rejected; refreshing next check.'); }
-  if (!response.ok) throw new Error('Twitch streams request failed with HTTP ' + response.status);
-  const payload = await response.json();
-  const stream = Array.isArray(payload.data) ? payload.data[0] : null;
-  if (!stream) return;
-  const state = readTwitchState();
-  if (state.lastStreamId === stream.id) return;
-  const route = twitchRoute(stream.title);
-  let posted = 0;
-  for (const guild of client.guilds.cache.values()) {
-    await guild.channels.fetch().catch(() => null);
-    const channel = guild.channels.cache.find(item =>
-      [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(item.type) &&
-      String(item.name || '').toLowerCase().replace(/^[^a-z0-9]+/i, '') === route.key
-    );
-    if (!channel) continue;
-    const twitchUrl = 'https://www.twitch.tv/' + username;
-    const thumbnail = String(stream.thumbnail_url || '').replace('{width}', '1280').replace('{height}', '720') + '?rt=' + Date.now();
-    const embed = new EmbedBuilder()
-      .setColor(0x9146FF).setTitle('🔴 LIVE NOW • ' + route.label).setURL(twitchUrl)
-      .setDescription('**' + safePublicText(stream.user_name || username, 80) + '** is live on Twitch.\n' + safePublicText(stream.title || 'EA SPORTS FC live stream', 240))
-      .addFields(
-        { name: 'Game', value: safePublicText(stream.game_name || 'EA SPORTS FC', 100), inline: true },
-        { name: 'Watching', value: String(Number(stream.viewer_count) || 0), inline: true }
-      )
-      .setImage(thumbnail).setFooter({ text: 'RT Football Media • Automatic Twitch Live Alert' })
-      .setTimestamp(new Date(stream.started_at || Date.now()));
-    await channel.send({ content: twitchUrl, embeds: [embed] });
-    posted += 1;
-  }
-  if (posted > 0) {
-    writeTwitchState({ lastStreamId: stream.id, postedAt: new Date().toISOString(), route: route.key });
-    console.log('RT Twitch live alert posted:', JSON.stringify({ username, streamId: stream.id, route: route.key, guilds: posted }));
-  } else console.warn('RT Twitch monitor found a live stream but no matching Match Center channel for route:', route.key);
-}
-function startTwitchMonitor(client) {
-  if (twitchMonitorStarted) return;
-  if (!process.env.TWITCH_CLIENT_ID || !process.env.TWITCH_CLIENT_SECRET) {
-    console.log('RT Twitch monitor disabled: Twitch credentials are not configured.');
-    return;
-  }
-  twitchMonitorStarted = true;
-  const username = process.env.TWITCH_USERNAME || 'daddy10420';
-  const intervalMs = Math.max(60000, Number(process.env.TWITCH_POLL_MS) || 60000);
-  console.log('RT Twitch monitor enabled for ' + username + ' (checks every ' + Math.round(intervalMs / 1000) + 's).');
-  const run = () => pollTwitch(client).catch(error => console.error('RT Twitch monitor check failed:', error.message));
-  run();
-  const timer = setInterval(run, intervalMs);
-  if (typeof timer.unref === 'function') timer.unref();
-}
-
 async function startBot() {
   const token = process.env.DISCORD_TOKEN;
   const clientId = process.env.DISCORD_CLIENT_ID;
@@ -753,7 +660,7 @@ async function startBot() {
     });
   }
   client.once('ready', async () => {
-    console.log('RT Football Media logged in as ' + client.user.tag);\n    startTwitchMonitor(client);
+    console.log('RT Football Media logged in as ' + client.user.tag);
     for (const record of stateStore.listStories()) {
       if (['published', 'cancelled'].includes(record.state)) continue;
       pendingSignings.set(record.id, record);
@@ -1047,8 +954,7 @@ async function startBot() {
     if (!owner) throw new Error('The configured bot owner could not be contacted.');
     const menu = new StringSelectMenuBuilder()
       .setCustomId('match_select:' + id)
-      .setPlaceholder('Choose one or more friendlies to cover')
-      .setMinValues(1)
+      .setPlaceholder('Choose one or more friendlies to cover')      .setMinValues(1)
       .setMaxValues(matches.length)
       .addOptions(matches.map(match => ({
         label: clean((match.competitionType ? match.competitionType + ' • ' : '') +
@@ -1397,8 +1303,7 @@ async function startBot() {
           }
         } catch (error) {
           results.warnings.push(wantedName + ' category');
-          console.error('Could not prepare category:', wantedName, error.code, error.message);
-        }
+          console.error('Could not prepare category:', wantedName, error.code, error.message);        }
         return category;
       }
 
@@ -1747,8 +1652,7 @@ async function startBot() {
         let channel = interaction.guild.channels.cache.find(item =>
           item.type === ChannelType.GuildText &&
           String(item.name || '').toLowerCase().includes(reporter.key)
-        );
-        if (channel) {
+        );        if (channel) {
           existing.push(channel.toString());
           if (channel.parentId !== category.id) await channel.setParent(category);
         } else {
