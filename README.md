@@ -142,6 +142,10 @@ Run `/audit-server` to receive a private report covering empty categories, inact
 
 The audit makes no changes by itself. It provides **Approve Safe Cleanup** and **Cancel** buttons. Approval is tied to the person who ran the command, expires after 15 minutes, and deletes only categories that are still empty at approval time. It never automatically deletes channels, messages, or roles.
 
+The audit explicitly identifies redundant legacy categories named `Club`, `Club Info`, or `Club Information`. After owner approval, useful public and club-specific channels are moved into the current professional structure, unclassified leftovers move to Club Archive, and only the resulting empty category shells are removed. Channel messages are preserved.
+
+The audit also inventories every installed bot, flags bots holding Administrator, labels RT Football Media as required, identifies Wick as optional security infrastructure, and marks Auto Role Bot for review after legacy role panels are removed. It lists unused, overlapping, legacy and Administrator roles but never kicks a bot or deletes a role automatically.
+
 ## Genuine player comments
 
 Signing posts use genuine supplied comments only. You may provide a club-leadership comment in the facts form or the caption accompanying the graphic:

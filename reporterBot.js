@@ -3214,7 +3214,40 @@ async function startBot() {
       }
 
       const deleted = [];
+      const moved = [];
       const skipped = [];
+      const guildChannels = interaction.guild.channels.cache;
+      const normalizeAuditName = value => String(value || '').toLowerCase().replace(/^[^a-z0-9]+/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const communityCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club info.*community|community/i.test(String(channel.name || '')));
+      const archiveCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club archive/i.test(String(channel.name || '')));
+      const birminghamCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /birmingham/i.test(String(channel.name || '')));
+      const crownCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /crownfc|crown fc/i.test(String(channel.name || '')));
+      for (const categoryId of audit.legacyCategoryIds || []) {
+        const category = guildChannels.get(categoryId);
+        if (!category || category.type !== ChannelType.GuildCategory) continue;
+        for (const child of [...guildChannels.values()].filter(channel => channel.parentId === category.id)) {
+          const key = normalizeAuditName(child.name);
+          let destination = archiveCategory;
+          if (/^(general|community|introductions?|club-news|club-information|information|announcements?)$/.test(key)) destination = communityCategory || archiveCategory;
+          else if (/^(ml1|birmingham)/.test(key)) destination = birminghamCategory || archiveCategory;
+          else if (/^(mlpc|crownfc|crown-fc)/.test(key)) destination = crownCategory || archiveCategory;
+          if (!destination) {
+            skipped.push(`${child.name} (no safe destination)`);
+            continue;
+          }
+          try {
+            await child.setParent(destination.id, { lockPermissions: false, reason: 'Approved legacy Club category consolidation' });
+            moved.push(`${child.name} → ${destination.name}`);
+          } catch {
+            skipped.push(`${child.name} (move failed)`);
+          }
+        }
+        const stillHasChildren = [...guildChannels.values()].some(channel => channel.parentId === category.id);
+        if (!stillHasChildren) {
+          try { const name = category.name; await category.delete('Approved redundant Club category cleanup'); deleted.push(name); }
+          catch { skipped.push(`${category.name} (category deletion failed)`); }
+        } else skipped.push(`${category.name} (still contains channels)`);
+      }
       for (const channelId of audit.emptyCategoryIds) {
         const category = interaction.guild.channels.cache.get(channelId);
         if (!category || category.type !== ChannelType.GuildCategory) {
@@ -3238,8 +3271,9 @@ async function startBot() {
       return interaction.update({
         content: 'Approved cleanup finished.\nDeleted empty categories: ' +
           (deleted.length ? deleted.join(', ') : 'none') +
+          '\nPreserved channel moves: ' + (moved.length ? moved.join(', ').slice(0, 1200) : 'none') +
           '\nSkipped: ' + (skipped.length ? skipped.join(', ') : 'none') +
-          '\nNo channels, messages, or roles were deleted.',
+          '\nNo channels, messages, or roles were deleted; only approved empty category shells were removed.',
         embeds: [],
         components: [],
       });
@@ -3438,6 +3472,7 @@ async function startBot() {
         return interaction.editReply('You need the Manage Channels permission to run a server audit.');
       }
 
+      await interaction.guild.members.fetch();
       const inactiveDays = interaction.options.getInteger('inactive_days') || 45;
       const cutoff = Date.now() - inactiveDays * 24 * 60 * 60 * 1000;
       const channels = [...interaction.guild.channels.cache.values()];
@@ -3449,6 +3484,8 @@ async function startBot() {
       const emptyCategories = categories.filter(category =>
         !channels.some(channel => channel.parentId === category.id)
       );
+      const auditCategoryName = value => String(value || '').toLowerCase().replace(/^[^a-z0-9]+/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const legacyClubCategories = categories.filter(category => ['club', 'club-info', 'club-information'].includes(auditCategoryName(category.name)));
       const uncategorized = channels.filter(channel =>
         channel.type !== ChannelType.GuildCategory && channel.parentId === null
       );
@@ -3468,9 +3505,17 @@ async function startBot() {
       const unusedRoles = [...interaction.guild.roles.cache.values()].filter(role =>
         role.id !== interaction.guild.id && !role.managed && role.members.size === 0
       );
+      const legacyRolePattern = /(?:^|\b)(fc\s?2[4-6]|nasl|old|legacy|test|temp|tryout|twitch|manager|position)(?:\b|$)/i;
+      const cleanupRoleCandidates = unusedRoles.filter(role => legacyRolePattern.test(role.name));
       const adminRoles = [...interaction.guild.roles.cache.values()].filter(role =>
         role.id !== interaction.guild.id && role.permissions.has(PermissionFlagsBits.Administrator)
       );
+      const installedBots = [...interaction.guild.members.cache.values()].filter(member => member.user.bot);
+      const botReview = installedBots.map(member => {
+        const administrator = member.permissions.has(PermissionFlagsBits.Administrator);
+        const identity = member.id === interaction.client.user.id ? 'required media bot' : /wick/i.test(member.displayName) ? 'security bot—keep if actively used' : /auto.?role/i.test(member.displayName) ? 'review after role-panel cleanup' : 'review purpose and recent use';
+        return { member, administrator, identity };
+      });
       const roleSignature = role => role.permissions.bitfield.toString() + '|' + role.color + '|' + role.hoist + '|' + role.mentionable;
       const roleGroups = new Map();
       for (const role of [...interaction.guild.roles.cache.values()].filter(role => role.id !== interaction.guild.id && !role.managed)) {
@@ -3484,16 +3529,20 @@ async function startBot() {
         if (!items.length) return 'None found';
         const shown = items.slice(0, 12).map(render);
         if (items.length > 12) shown.push('…and ' + (items.length - 12) + ' more');
-        return shown.join('\n').slice(0, 1024);
+        return shown.join('\n').slice(0, 500);
       };
 
       const report = new EmbedBuilder()
         .setColor(0x7BAFD4)
         .setTitle('RT Football Media • Server Cleanup Audit')
         .setDescription(
-          'Review only—nothing has been changed. The approval button deletes only categories that are empty at approval time.'
+          'Review only—nothing has been changed. Approval safely consolidates legacy Club/Club Info channels, preserves every message, then removes only empty category shells.'
         )
         .addFields(
+          {
+            name: 'Redundant legacy Club categories (' + legacyClubCategories.length + ')',
+            value: list(legacyClubCategories, item => '• ' + item.name + ' — useful channels will be moved; leftovers go to Club Archive'),
+          },
           {
             name: 'Safe cleanup: empty categories (' + emptyCategories.length + ')',
             value: list(emptyCategories, item => '• ' + item.name),
@@ -3515,20 +3564,30 @@ async function startBot() {
             value: list(unusedRoles, item => '• ' + item.name),
           },
           {
+            name: 'Likely legacy role candidates (' + cleanupRoleCandidates.length + ')',
+            value: list(cleanupRoleCandidates, item => '• ' + item.name + ' — unused; safe to review for removal'),
+          },
+          {
             name: 'Overlapping roles—same permissions (' + overlappingRoles.length + ' groups)',
             value: list(overlappingRoles, group => '• ' + group.map(role => role.name).join(' / ')),
           },
           {
             name: 'Administrator roles—security review (' + adminRoles.length + ')',
-            value: list(adminRoles, item => '• ' + item.name),          }
+            value: list(adminRoles, item => '• ' + item.name),
+          },
+          {
+            name: 'Installed bots—manual review (' + botReview.length + ')',
+            value: list(botReview, item => `• ${item.member.displayName} — ${item.identity}${item.administrator ? ' • ⚠ Administrator' : ''}`),
+          }
         )
-        .setFooter({ text: 'Approval expires in 15 minutes • No messages, channels, or roles are auto-deleted' })
+        .setFooter({ text: 'Approval expires in 15 minutes • Bots and roles are report-only and never auto-removed' })
         .setTimestamp();
 
       const auditId = interaction.id;
       pendingAudits.set(auditId, {
         ownerId: interaction.user.id,
-        emptyCategoryIds: emptyCategories.map(item => item.id),
+        legacyCategoryIds: legacyClubCategories.map(item => item.id),
+        emptyCategoryIds: emptyCategories.filter(item => !legacyClubCategories.some(legacy => legacy.id === item.id)).map(item => item.id),
         expiresAt: Date.now() + 15 * 60 * 1000,
       });
       setTimeout(() => pendingAudits.delete(auditId), 15 * 60 * 1000);
@@ -3536,9 +3595,9 @@ async function startBot() {
       const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('server_audit:apply:' + auditId)
-          .setLabel('Approve Safe Cleanup')
+          .setLabel('Approve Consolidation & Cleanup')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(emptyCategories.length === 0),
+          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0),
         new ButtonBuilder()
           .setCustomId('server_audit:cancel:' + auditId)
           .setLabel('Cancel')
