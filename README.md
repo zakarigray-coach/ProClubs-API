@@ -146,6 +146,8 @@ The audit explicitly identifies redundant categories named `Start Here`, `Club`,
 
 The same approved audit also detects these shared channels when they are loose at the top of the server rather than inside a category. It creates the compact community category when needed, moves the Collective chat without changing its existing channel permission overwrites, and deletes an obsolete roster-poll channel only when it has no visible message history.
 
+Management cleanup preserves the conversation-filled `managers-chat` by renaming it `management-office`. An older duplicate `management-office` is deleted only when empty; otherwise it is moved privately to Club Archive. The `League Play` voice channel is placed inside `C&C COLLECTIVE` while retaining its existing channel permission overwrites.
+
 The audit also inventories every installed bot, flags bots holding Administrator, labels RT Football Media as required, identifies Wick as optional security infrastructure, and marks Auto Role Bot for review after legacy role panels are removed. It lists unused, overlapping, legacy and Administrator roles but never kicks a bot or deletes a role automatically.
 
 ## Genuine player comments

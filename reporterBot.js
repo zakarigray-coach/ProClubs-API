@@ -3259,6 +3259,50 @@ async function startBot() {
           }
         }
       }
+      const managersChat = audit.managersChatId ? guildChannels.get(audit.managersChatId) : null;
+      const duplicateManagementOffice = audit.duplicateManagementOfficeId ? guildChannels.get(audit.duplicateManagementOfficeId) : null;
+      if (managersChat) {
+        if (duplicateManagementOffice && duplicateManagementOffice.id !== managersChat.id) {
+          try {
+            if (duplicateManagementOffice.lastMessageId && archiveCategory) {
+              await duplicateManagementOffice.setParent(archiveCategory.id, { lockPermissions: false, reason: 'Conversation-filled managers chat becomes the active Management Office' });
+              await duplicateManagementOffice.setName('management-office-archive', 'Retired duplicate leadership room');
+              moved.push(`${duplicateManagementOffice.name} → ${archiveCategory.name}`);
+            } else if (!duplicateManagementOffice.lastMessageId) {
+              const name = duplicateManagementOffice.name;
+              await duplicateManagementOffice.delete('Approved removal of empty duplicate Management Office channel');
+              deletedChannels.push(name);
+            } else {
+              skipped.push(`${duplicateManagementOffice.name} (contains history and Club Archive is unavailable)`);
+            }
+          } catch {
+            skipped.push(`${duplicateManagementOffice.name} (duplicate management room cleanup failed)`);
+          }
+        }
+        try {
+          await managersChat.setName('management-office', 'Approved preservation of active management conversation history');
+          moved.push(`${managersChat.name} retained as the active Management Office`);
+        } catch {
+          skipped.push(`${managersChat.name} (Management Office rename failed)`);
+        }
+      }
+      for (const voiceId of audit.leaguePlayVoiceIds || []) {
+        const voice = guildChannels.get(voiceId);
+        if (!voice || voice.type !== ChannelType.GuildVoice) continue;
+        try {
+          if (!collectiveCategory) {
+            collectiveCategory = await interaction.guild.channels.create({
+              name: '𓊆 💬 𓊇 C&C COLLECTIVE',
+              type: ChannelType.GuildCategory,
+              reason: 'Approved Collective category organization',
+            });
+          }
+          await voice.setParent(collectiveCategory.id, { lockPermissions: false, reason: 'Approved Collective League Play voice organization' });
+          moved.push(`${voice.name} → ${collectiveCategory.name}`);
+        } catch {
+          skipped.push(`${voice.name} (League Play voice move failed)`);
+        }
+      }
       for (const channelId of audit.sharedCleanupChannelIds || []) {
         const channel = guildChannels.get(channelId);
         if (!channel || channel.type === ChannelType.GuildCategory) continue;
@@ -3613,6 +3657,11 @@ async function startBot() {
       const sharedCleanupChannels = uncategorized.filter(channel =>
         /^(roster-polls?|locker-room-chat|collective-chat|collective-clubhouse|general-chat)$/.test(auditCategoryName(channel.name))
       );
+      const managersChat = channels.find(channel => channel.type === ChannelType.GuildText && auditCategoryName(channel.name) === 'managers-chat');
+      const duplicateManagementOffice = channels.find(channel => channel.type === ChannelType.GuildText && auditCategoryName(channel.name) === 'management-office');
+      const leaguePlayVoices = channels.filter(channel =>
+        channel.type === ChannelType.GuildVoice && auditCategoryName(channel.name) === 'league-play'
+      );
       const inactive = textChannels.filter(channel => {
         if (!channel.lastMessageId) return true;
         return SnowflakeUtil.timestampFrom(channel.lastMessageId) < cutoff;
@@ -3688,6 +3737,14 @@ async function startBot() {
             value: list(communityCategories, item => '• ' + item.name + ' → C&C COLLECTIVE'),
           },
           {
+            name: 'Management conversation room',
+            value: managersChat ? `• ${managersChat.name} → management-office (history preserved)` : 'No managers-chat channel found',
+          },
+          {
+            name: 'League Play voice placement (' + leaguePlayVoices.length + ')',
+            value: list(leaguePlayVoices, item => '• ' + item.name + ' → C&C COLLECTIVE'),
+          },
+          {
             name: 'Duplicate channel names (' + duplicates.length + ' groups)',
             value: list(duplicates, group => '• ' + group[0].name + ' ×' + group.length),
           },
@@ -3721,6 +3778,9 @@ async function startBot() {
         legacyCategoryIds: legacyClubCategories.map(item => item.id),
         sharedCleanupChannelIds: sharedCleanupChannels.map(item => item.id),
         communityCategoryIds: communityCategories.map(item => item.id),
+        managersChatId: managersChat?.id || null,
+        duplicateManagementOfficeId: duplicateManagementOffice?.id || null,
+        leaguePlayVoiceIds: leaguePlayVoices.map(item => item.id),
         emptyCategoryIds: emptyCategories.filter(item => !legacyClubCategories.some(legacy => legacy.id === item.id)).map(item => item.id),
         expiresAt: Date.now() + 15 * 60 * 1000,
       });
@@ -3731,7 +3791,7 @@ async function startBot() {
           .setCustomId('server_audit:apply:' + auditId)
           .setLabel('Approve Consolidation & Cleanup')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0 && sharedCleanupChannels.length === 0 && communityCategories.length === 0),
+          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0 && sharedCleanupChannels.length === 0 && communityCategories.length === 0 && !managersChat && leaguePlayVoices.length === 0),
         new ButtonBuilder()
           .setCustomId('server_audit:cancel:' + auditId)
           .setLabel('Cancel')
