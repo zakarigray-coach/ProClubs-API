@@ -946,6 +946,58 @@ async function startBot() {
         console.error('Professional clubhouse audit failed:', error.message);
       }
     }
+
+    const teamRoleLockVersion = 'team-role-auto-assignment-lock-2026-09-21-v1';
+    if (stateStore.getMetadata('teamRoleLockVersion') !== teamRoleLockVersion) {
+      try {
+        const guild = process.env.DISCORD_GUILD_ID
+          ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID)
+          : client.guilds.cache.first();
+        if (!guild) throw new Error('The configured Discord server could not be found.');
+        await Promise.all([guild.roles.fetch(), guild.members.fetch()]);
+        const autoRoleMember = guild.members.cache.find(member => member.user.bot &&
+          (String(member.displayName || '').toLowerCase().includes('auto role') ||
+            member.roles.cache.some(role => String(role.name || '').toLowerCase() === 'auto role bot'))
+        );
+        if (!autoRoleMember) throw new Error('Auto Role Bot could not be identified in the member list.');
+        const botMember = guild.members.me || await guild.members.fetchMe();
+        const teamRoleIds = [process.env.BIRMINGHAM_ROLE_ID, process.env.MLPC_ROLE_ID].filter(Boolean);
+        if (teamRoleIds.length !== 2) throw new Error('Both club role IDs must be configured before team roles can be locked.');
+        const results = [];
+        for (const roleId of teamRoleIds) {
+          const role = await guild.roles.fetch(roleId);
+          if (!role) throw new Error('A configured club role could not be found: ' + roleId);
+          const autoRolePosition = autoRoleMember.roles.highest.position;
+          if (role.position <= autoRolePosition) {
+            const targetPosition = autoRolePosition + 1;
+            if (targetPosition >= botMember.roles.highest.position) {
+              throw new Error('RT Football Media must be positioned above Auto Role Bot and both club roles before it can lock team access.');
+            }
+            await role.setPosition(targetPosition, 'Prevent self-assignment of private club access roles');
+          }
+          if (role.mentionable) await role.setMentionable(false, 'Keep private club access roles management-controlled');
+          results.push({
+            role: role.name,
+            rolePosition: role.position,
+            autoRoleBotPosition: autoRoleMember.roles.highest.position,
+            locked: role.position > autoRoleMember.roles.highest.position,
+          });
+        }
+        if (results.some(result => !result.locked)) throw new Error('One or more club roles remained assignable by Auto Role Bot.');
+        console.log('Team access role lock result:', JSON.stringify(results));
+        const ownerId = process.env.BOT_OWNER_ID || guild.ownerId;
+        const owner = ownerId ? await client.users.fetch(ownerId).catch(() => null) : null;
+        if (owner) {
+          await owner.send(
+            '🔒 Team-role security updated: Auto Role Bot can no longer assign the Birmingham City or CrownFC access roles. ' +
+            'Position roles may remain self-selectable. Remove any old Birmingham/Crown buttons from the role panel when convenient so members do not see buttons that can no longer grant access.'
+          );
+        }
+        stateStore.setMetadata('teamRoleLockVersion', teamRoleLockVersion);
+      } catch (error) {
+        console.error('Team access role lock failed:', error.message);
+      }
+    }
   });
 
   function reporterChannelFor(guild, team) {
