@@ -125,6 +125,11 @@ const setupServer = new SlashCommandBuilder()
   .setDescription('Create the RT Football Media category and reporter channels')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
+const streamlineServer = new SlashCommandBuilder()
+  .setName('streamline-server')
+  .setDescription('Preview and apply the streamlined ML1/MLPC channel layout')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
+
 const auditServer = new SlashCommandBuilder()
   .setName('audit-server')
   .setDescription('Privately review cleanup opportunities before approving any changes')
@@ -135,7 +140,7 @@ const auditServer = new SlashCommandBuilder()
     .setMaxValue(365))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
-const commands = [match, signing, release, setupServer, auditServer].map(command => command.toJSON());
+const commands = [match, signing, release, setupServer, streamlineServer, auditServer].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -997,8 +1002,8 @@ async function startBot() {
     if (!team) return;
 
     let type = configuredSource ? configuredSource.type : null;
-    if (!type && channelName.includes('match-results')) type = 'match';
-    else if (!type && channelName.includes('signing-announcements')) type = 'signing';
+    if (!type && (channelName.includes('match-results') || channelName.includes('match-center'))) type = 'match';
+    else if (!type && (channelName.includes('signing-announcements') || channelName.includes('transactions'))) type = 'signing';
     if (!type) return;
     if (stateStore.isProcessed(message.id)) return;
 
@@ -1272,6 +1277,35 @@ async function startBot() {
       return interaction.editReply('The edited private preview has been sent.');
     }
 
+    if (interaction.isButton() && interaction.customId.startsWith('server_streamline:')) {
+      const [, action] = interaction.customId.split(':');
+      if (action === 'cancel') return interaction.update({ content: 'Streamlining cancelled. No channels were changed.', embeds: [], components: [] });
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.reply({ content: 'You need Manage Channels permission.', flags: MessageFlags.Ephemeral });
+      }
+      await interaction.update({ content: 'Applying the approved streamlined layout…', embeds: [], components: [] });
+      const guild = interaction.guild;
+      const normalize = n => String(n || '').toLowerCase().replace(/^[^a-z0-9]+/,'');
+      let archive = [...guild.channels.cache.values()].find(c => c.type === ChannelType.GuildCategory && c.name.includes('CLUB ARCHIVE'));
+      if (!archive) archive = await guild.channels.create({ name: '𓊆 📦 𓊇 CLUB ARCHIVE', type: ChannelType.GuildCategory, reason: 'Approved RT Football Media streamlining' });
+      const plans = [
+        { renames: {'ml1-announcements':'🚨・ml1-announcements','ml1-locker-room':'⚽・ml1-locker-room','ml1-match-results':'📅・ml1-match-center','ml1-standings-table':'🏆・ml1-league-center','ml1-signing-announcements':'✍️・ml1-transactions','ml1-team-stats':'📊・ml1-stats'}, archive:['ml1-signups','ml1-schedule','ml1-lineups','ml1-game-live-streams','ml1-player-stats'] },
+        { renames: {'mlpc-announcements':'🚨・mlpc-announcements','mlpc-locker-room':'⚽・mlpc-locker-room','mlpc-match-results':'📅・mlpc-match-center','mlpc-standings-table':'🏆・mlpc-league-center','mlpc-signing-announcements':'✍️・mlpc-transactions','mlpc-team-stats':'📊・mlpc-stats'}, archive:['mlpc-signups','mlpc-schedule','mlpc-lineups','mlpc-game-live-streams','mlpc-player-stats'] }
+      ];
+      const renamed=[], archived=[];
+      for (const plan of plans) {
+        for (const [oldName,newName] of Object.entries(plan.renames)) {
+          const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
+          if (ch && ch.name!==newName) { await ch.setName(newName,'Approved RT Football Media streamlining'); renamed.push(oldName); }
+        }
+        for (const oldName of plan.archive) {
+          const ch=[...guild.channels.cache.values()].find(c=>normalize(c.name)===oldName);
+          if (ch) { await ch.setParent(archive.id,{lockPermissions:false,reason:'Approved RT Football Media streamlining'}); archived.push(oldName); }
+        }
+      }
+      return interaction.editReply('✅ Streamlining complete. Kept/renamed ' + renamed.length + ' primary channels and moved ' + archived.length + ' redundant channels to CLUB ARCHIVE. No message history was deleted.');
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith('server_audit:')) {
       const [, action, auditId] = interaction.customId.split(':');
       const audit = pendingAudits.get(auditId);
@@ -1320,9 +1354,29 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'signing', 'release', 'setup-server', 'audit-server'].includes(interaction.commandName)) return;
-    const privateCommand = ['setup-server', 'audit-server'].includes(interaction.commandName);
+    if (!['match', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName)) return;
+    const privateCommand = ['setup-server', 'streamline-server', 'audit-server'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
+
+    if (interaction.commandName === 'streamline-server') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.editReply('You need the Manage Channels permission to streamline the server.');
+      }
+      const preview = new EmbedBuilder()
+        .setColor(0x7BAFD4)
+        .setTitle('RT Football Media • Streamlined Club Layout')
+        .setDescription('Preview only. Nothing is deleted. Extra channels will be moved to a CLUB ARCHIVE.')
+        .addFields(
+          { name: 'Birmingham City / ML1', value: '🚨 ml1-announcements\\n⚽ ml1-locker-room\\n📅 ml1-match-center\\n🏆 ml1-league-center\\n✍️ ml1-transactions\\n📊 ml1-stats' },
+          { name: 'CrownFC / MLPC', value: '🚨 mlpc-announcements\\n⚽ mlpc-locker-room\\n📅 mlpc-match-center\\n🏆 mlpc-league-center\\n✍️ mlpc-transactions\\n📊 mlpc-stats' },
+          { name: 'Archived, not deleted', value: 'signups • schedule • lineups • live streams • separate player-stats channels' }
+        );
+      const buttons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('server_streamline:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+      );
+      return interaction.editReply({ embeds: [preview], components: [buttons] });
+    }
 
     if (interaction.commandName === 'audit-server') {
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
