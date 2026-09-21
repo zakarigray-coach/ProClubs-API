@@ -60,6 +60,8 @@ The registration panel collects a player’s EA ID, positions, availability, lea
 
 `/streamline-server` consolidates legacy sections into this top-to-bottom flow: Welcome; Club Info & Community; Management Office; Birmingham City; CrownFC; RT Football Media; The Grounds; active BYOT/External Competitions; Club Archive. Loose generic Standings Table, Team Stats and Player Stats channels are archived because each club has its own league center and combined live statistics board. Managers Only merges into Management Office and Matchday merges into The Grounds without deleting messages.
 
+Management Office is the single active leadership discussion room. The redundant Staff Room is moved to Club Archive without deleting its message history.
+
 ## Run
 
 ```bash

@@ -2858,7 +2858,6 @@ async function startBot() {
         ['fc27-registration', '📝・fc27-registration', welcomeCategory, 'Complete all required player registration and league-verification steps before roster consideration.'],
         ['verification', '✅・verification', welcomeCategory, 'Submit or confirm NACL and Virtual Leagues verification for competitive roster eligibility.'],
         ['management-office', '🛡️・management-office', managementCategory, 'Private leadership office for ownership decisions, club planning, staffing and sensitive operations.'],
-        ['staff-room', '👔・staff-room', managementCategory, 'Private working room for club managers, coaches, recruitment staff and approved leadership.'],
         ['transfer-requests', '🔄・transfer-requests', managementCategory, 'Private review queue for recruitment leads, transfer requests and roster-movement decisions.'],
         ['approved-signings', '✅・approved-signings', managementCategory, 'Private record of approved player signings before official transaction and media publication.'],
         ['management-log', '📒・management-log', managementCategory, 'Private operational record for publications, archives, permission changes, statistics corrections, staging runs and bot errors.'],
@@ -3145,6 +3144,16 @@ async function startBot() {
       await moveChildren(legacyManagersCategory, managementCategory, 'Managers Only');
       await moveChildren(legacyMatchdayCategory, groundsCategory, 'Matchday');
 
+      const redundantStaffRoom = all().find(item => normalize(item.name) === 'staff-room');
+      if (redundantStaffRoom && archive && redundantStaffRoom.parentId !== archive.id) {
+        try {
+          await redundantStaffRoom.setParent(archive.id, { lockPermissions: false, reason: 'Management Office is the single active leadership discussion channel' });
+          results.archived.push('staff-room');
+        } catch (error) {
+          results.warnings.push('staff-room');
+        }
+      }
+
       const looseStats = ['standings-table', 'team-stats', 'player-stats'];
       for (const key of looseStats) {
         const channel = all().find(item => normalize(item.name) === key);
@@ -3411,13 +3420,13 @@ async function startBot() {
         .addFields(
           { name: 'Welcome', value: '📌 club directory\\n👋 welcome\\n📜 rules\\n📝 registration\\n✅ verification' },
           { name: 'Club Info & Community', value: 'Public organization information, general conversation, introductions, shared clips and community activity.' },
-          { name: 'Management Office', value: '🛡️ management office\\n👔 staff room\\n🔄 transfer requests\\n✅ approved signings\\n📋 security/mod logs' },
+          { name: 'Management Office', value: '🛡️ one leadership discussion room\\n🔄 transfer requests\\n✅ approved signings\\n📋 management/security logs' },
           { name: 'Birmingham City • MPL', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights\\n🗞️ Romano Times feed' },
           { name: 'CrownFC • MLPC', value: '🚨 announcements\\n⚽ locker room\\n📅 match center\\n🏆 league center\\n✍️ transactions\\n📊 stats\\n🎬 highlights' },
           { name: 'RT Football Media', value: '🔵 Raine at St. Andrew’s\\n👑 Teagan Behind the Crown' },
           { name: 'The Grounds / EA League Play', value: '📅 match center\\n🎬 highlights' },
           { name: 'BYOT / External Competitions', value: 'Retained as a compact section only when an existing BYOT category is active.' },
-          { name: 'Archived, not deleted', value: 'loose standings table • team stats • player stats • duplicate signups/schedules/lineups • old live-stream channels' }
+          { name: 'Archived, not deleted', value: 'staff room • loose standings table • team stats • player stats • duplicate signups/schedules/lineups • old live-stream channels' }
         );
       const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('server_streamline:apply').setLabel('Apply Streamlined Layout').setStyle(ButtonStyle.Success),
