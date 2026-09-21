@@ -44,7 +44,7 @@ Copy `.env.example` to `.env` locally, or add the same values in your hosting se
 - `BOT_OWNER_ID` — Zak’s Discord user ID; all selections and approvals are sent here privately
 - `TRU_USER_ID` — Tru’s Discord user ID; applies his saved #22 and “because I’m a baller” package without asking him again, while preserving owner approval
 - `TRAP_USER_ID` — Trap’s Discord user ID; defaults to `764509653190180874` and displays his real Discord mention beside Coach Gray and Tru on stat-correction notices
-- `FOOTBALL_OPS_ROLE_ID` — stable ID for the role titled `Vice President of Football Operations`
+- `FOOTBALL_OPS_ROLE_ID` — stable ID for the role titled `Vice President of Football Operations` (Castle & Crown production ID: `1536963624747143199`)
 - `FC_SEASON` — season label for persistent match-by-match records; defaults to `FC27`
 - `NEWS_TIMEZONE` — defaults to `America/New_York`
 - `QUOTE_WAIT_HOURS` — defaults to 12 hours, with one reminder

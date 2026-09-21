@@ -77,6 +77,7 @@ const QUOTE_REMINDER_MS = Math.min(QUOTE_WAIT_MS / 2, 6 * 60 * 60 * 1000);
 const APPROVAL_WAIT_MS = Math.max(1, Number(process.env.APPROVAL_WAIT_HOURS) || 48) * 60 * 60 * 1000;
 const NEWS_TIMEZONE = process.env.NEWS_TIMEZONE || 'America/New_York';
 const TRAP_USER_ID = process.env.TRAP_USER_ID || '764509653190180874';
+const FOOTBALL_OPS_ROLE_ID = process.env.FOOTBALL_OPS_ROLE_ID || '1536963624747143199';
 const MPL_ROMANO_TIMES_SOURCE_CHANNEL_ID = '1547269808909979729';
 const SOURCE_CHANNELS = {
   '1549837450854142002': { teamKey: 'birmingham', type: 'signing' },
@@ -1389,7 +1390,7 @@ async function startBot() {
   function canApproveRegistration(interaction) {
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild?.ownerId;
     if (interaction.user.id === ownerId) return true;
-    const operationsRoleId = process.env.FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
+    const operationsRoleId = FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
     return Boolean(operationsRoleId && interaction.member?.roles?.cache?.has(operationsRoleId));
   }
 
@@ -2745,7 +2746,7 @@ async function startBot() {
 
       let footballOpsRole = null;
       try {
-        let footballOpsRoleId = process.env.FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
+        let footballOpsRoleId = FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
         footballOpsRole = footballOpsRoleId ? guild.roles.cache.get(footballOpsRoleId) : null;
         if (!footballOpsRole) {
           footballOpsRole = guild.roles.cache.find(role => !role.managed && ['Manager', 'Vice President of Football Operations'].includes(role.name));
