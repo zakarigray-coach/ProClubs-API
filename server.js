@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
+require('./rtReporterVoicePatch');
 require('./rtNewspaperPatch');
 const { startBot } = require('./reporterBot');
 
