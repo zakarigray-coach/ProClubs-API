@@ -5,7 +5,7 @@ A Discord sports desk for two FC 27 Pro Clubs teams:
 - **Raine at St. Andrew’s** covers Birmingham City in Masters Premier League, League 1.
 - **Teagan Behind the Crown** covers CrownFC in MLPC.
 
-The bot publishes match reports, player signings, and departures as dated RT Football News front pages. Each story receives fresh AI-generated hero artwork, while the newspaper text and exact Eastern-Time publication date are rendered separately for accuracy.
+The bot publishes match reports, player signings, and departures as dated RT Football News front pages. Each story receives fresh AI-generated hero artwork, while the newspaper text and exact Eastern-Time publication date are rendered separately for accuracy. Public posts contain the finished newspaper cover (plus the configured role ping) without repeating the full article in a Discord embed.
 
 ## Commands
 

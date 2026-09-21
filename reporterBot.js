@@ -22,7 +22,24 @@ const {
 
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+// Railway's minimal container does not include dependable system fonts. Point
+// Fontconfig at fonts shipped with the application before Sharp/libvips loads,
+// otherwise newspaper text can render as empty square glyphs.
+function configureNewspaperFonts() {
+  const fontDirectory = path.join(path.dirname(require.resolve('dejavu-fonts-ttf/package.json')), 'ttf');
+  const configPath = path.join(os.tmpdir(), 'rt-football-media-fonts.conf');
+  const escapedDirectory = fontDirectory.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escapedCache = os.tmpdir().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  fs.writeFileSync(configPath,
+    '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n' +
+    '<fontconfig><dir>' + escapedDirectory + '</dir><cachedir>' + escapedCache + '</cachedir></fontconfig>');
+  process.env.FONTCONFIG_FILE = configPath;
+}
+
+configureNewspaperFonts();
 const sharp = require('sharp');
 const { StateStore } = require('./stateStore');
 
@@ -504,67 +521,87 @@ function signingPosterAttachment(buffer, team) {
 async function newspaperGraphic(team, type, story, graphic, options = {}) {
   const width = 1080;
   const height = 1350;
-  const teamColor = '#3b3125';
+  const teamColor = '#' + Number(team.color).toString(16).padStart(6, '0');
+  const accentInk = team === TEAMS.crownfc ? '#111820' : '#ffffff';
   const date = publicationDate(options.publishedAt);
-  const headlineLines = wrapLines(story.headline, 24, 2);
-  const headlineSize = headlineLines.length > 1 ? 62 : 72;
-  const bodyLines = wrapLines(story.body, 33, 9);
-  const playerQuoteLines = wrapLines(story.playerQuote, 18, 5);
-  const leaderQuoteLines = wrapLines(story.leadershipQuote, 18, 5);
-  const noteLines = wrapLines(story.reporterNote, 52, 2);
-  const reporterLines = team.reporter === 'Raine'
-    ? ['RAINE AT', 'ST.', 'ANDREW’S']
-    : ['TEAGAN', 'BEHIND THE', 'CROWN'];
-  const numberLine = story.playerNumber ? ' • NO. ' + story.playerNumber : '';
+  const headlineLines = wrapLines(story.headline, 18, 2);
+  const longestHeadline = Math.max(...headlineLines.map(line => line.length), 1);
+  const headlineSize = longestHeadline > 17 ? 68 : longestHeadline > 14 ? 76 : 90;
+  const summary = safePublicText(story.body || excerptWords(story.article, 65), 700);
+  const summaryWords = summary.split(/\s+/).filter(Boolean);
+  const firstSummary = summaryWords.slice(0, 28).join(' ');
+  const secondSummary = summaryWords.slice(28, 58).join(' ') || story.reporterNote || story.subheadline;
+  const playerQuoteIsReal = story.playerQuote && !/^no .*comment/i.test(story.playerQuote) && !/not supplied/i.test(story.playerQuote);
+  const leadershipQuoteIsReal = story.leadershipQuote && !/^no .*comment/i.test(story.leadershipQuote) && !/not supplied/i.test(story.leadershipQuote);
+  const thirdCopy = playerQuoteIsReal
+    ? '“' + story.playerQuote + '” — ' + (story.playerName || 'Player')
+    : leadershipQuoteIsReal
+      ? '“' + story.leadershipQuote + '” — ' + story.leadershipRole
+      : story.reporterNote || 'RT Football News will continue following the story as the next chapter develops.';
+  const sectionTitles = type === 'match'
+    ? ['FINAL WHISTLE', 'THE KEY STORY', team.reporter.toUpperCase() + '’S VIEW']
+    : ['THE NEW ARRIVAL', 'WHAT IT MEANS', playerQuoteIsReal || leadershipQuoteIsReal ? 'IN THEIR WORDS' : team.reporter.toUpperCase() + '’S VIEW'];
+  const sectionCopies = [story.subheadline || firstSummary, firstSummary || secondSummary, thirdCopy];
+  const bottomHeadline = type === 'match'
+    ? 'THE STORY OF THE NIGHT.'
+    : 'WELCOME, ' + (story.playerName || 'NEW ARRIVAL').toUpperCase() + '.';
+  const bottomSubtitle = type === 'match'
+    ? team.label.toUpperCase() + ' • MATCHDAY, RETOLD.'
+    : team.label.toUpperCase() + ' • A NEW ARRIVAL. A FRESH CHALLENGE.';
+  const masthead = 'RT FOOTBALL NEWS';
 
   const svg = `
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1080" height="1350" fill="#e9e0cf"/>
+    <rect width="1080" height="1350" fill="#eee5d5"/>
     <filter id="paper"><feTurbulence baseFrequency="0.75" numOctaves="2" seed="${escapeXml(options.editionSeed || 8)}" type="fractalNoise"/><feColorMatrix values="0 0 0 0 0.72 0 0 0 0 0.70 0 0 0 0 0.64 0 0 0 .10 0"/></filter>
-    <rect width="1080" height="1350" filter="url(#paper)" opacity=".38"/>
-    <rect x="20" y="20" width="1040" height="1310" fill="none" stroke="#8f8a80" stroke-width="2"/>
-    <text x="44" y="55" font-family="Arial, sans-serif" font-size="14" letter-spacing="5" fill="#222">FOOTBALL • PASSION • PEOPLE • A BIGGER TOMORROW</text>
-    <line x1="42" y1="69" x2="1038" y2="69" stroke="#222" stroke-width="2"/>
-    <text x="42" y="167" font-family="Georgia, serif" font-weight="900" font-size="103" fill="#25221d">RT</text>
-    <text x="175" y="167" font-family="Georgia, serif" font-weight="900" font-size="93" letter-spacing="-5" fill="#111">FOOTBALL NEWS</text>
-    <text x="1038" y="52" text-anchor="end" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#111">${escapeXml(date)} • VOL. 1</text>
-    <line x1="42" y1="187" x2="1038" y2="187" stroke="#222" stroke-width="2"/>
-    <text x="42" y="213" font-family="Arial, sans-serif" font-size="15" letter-spacing="3" fill="#222">REAL PLAYERS. REAL STORIES. MORE THAN A GAME.</text>
-    <text x="1038" y="213" text-anchor="end" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="${teamColor}">${escapeXml(team.label.toUpperCase())} • ${escapeXml(team.league)}</text>
-    <rect x="42" y="232" width="996" height="474" fill="#cfc3ab" stroke="#26221c" stroke-width="3"/>
-    <rect x="42" y="232" width="250" height="474" fill="#27231d" opacity=".98"/>
-    ${tspans(reporterLines, 66, 292, 45, 'font-family="Georgia, serif" font-size="35" font-weight="800" fill="#fff"')}
-    <line x1="66" y1="475" x2="180" y2="475" stroke="#b49a67" stroke-width="7"/>
-    ${tspans(wrapLines(story.subheadline, 17, 5), 66, 520, 28, 'font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#fff" letter-spacing="1"')}
-    <text x="66" y="678" font-family="Arial, sans-serif" font-size="16" letter-spacing="2" fill="#c4ad7c">EXCLUSIVE • ${escapeXml(type.toUpperCase())}</text>
-    <rect x="292" y="232" width="746" height="474" fill="#b9ad95"/>
-    <line x1="42" y1="721" x2="1038" y2="721" stroke="#29251f" stroke-width="8"/>
-    ${tspans(headlineLines, 42, 790, 66, `font-family="Georgia, serif" font-size="${headlineSize}" font-weight="900" fill="#181613" letter-spacing="-1"`)}
-    <text x="42" y="${headlineLines.length > 1 ? 930 : 865}" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="4" fill="#44382a">${escapeXml(team.label.toUpperCase())}${escapeXml(numberLine)} • ${escapeXml(team.league)}</text>
-    <line x1="42" y1="${headlineLines.length > 1 ? 950 : 886}" x2="1038" y2="${headlineLines.length > 1 ? 950 : 886}" stroke="#1d1d1d" stroke-width="2"/>
-    ${tspans(bodyLines, 42, headlineLines.length > 1 ? 990 : 925, 27, 'font-family="Georgia, serif" font-size="22" fill="#171717"')}
-    <rect x="470" y="${headlineLines.length > 1 ? 978 : 914}" width="270" height="250" fill="#ded3bd" stroke="#29251f" stroke-width="3"/>
-    <text x="492" y="${headlineLines.length > 1 ? 1023 : 959}" font-family="Georgia, serif" font-size="50" fill="#3f3528">“</text>
-    ${tspans(playerQuoteLines, 505, headlineLines.length > 1 ? 1060 : 996, 29, 'font-family="Georgia, serif" font-size="22" font-style="italic" fill="#171512"')}
-    <text x="720" y="${headlineLines.length > 1 ? 1202 : 1138}" text-anchor="end" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#3f3528">— ${escapeXml(story.playerName || 'PLAYER')}</text>
-    <rect x="760" y="${headlineLines.length > 1 ? 978 : 914}" width="278" height="250" fill="#ded3bd" stroke="#29251f" stroke-width="3"/>
-    <text x="782" y="${headlineLines.length > 1 ? 1023 : 959}" font-family="Georgia, serif" font-size="50" fill="#3f3528">“</text>
-    ${tspans(leaderQuoteLines, 795, headlineLines.length > 1 ? 1060 : 996, 29, 'font-family="Georgia, serif" font-size="22" font-style="italic" fill="#171512"')}
-    <text x="1018" y="${headlineLines.length > 1 ? 1202 : 1138}" text-anchor="end" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#3f3528">— ${escapeXml(story.leadershipRole.toUpperCase())}</text>
-    <line x1="42" y1="1250" x2="1038" y2="1250" stroke="#222" stroke-width="2"/>
-    <text x="42" y="1280" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="${teamColor}">REPORTER’S NOTE • ${escapeXml(team.reporter.toUpperCase())}</text>
-    ${tspans(noteLines, 315, 1280, 23, 'font-family="Georgia, serif" font-size="18" font-style="italic" fill="#222"')}
-    <text x="1038" y="1320" text-anchor="end" font-family="Arial, sans-serif" font-size="12" letter-spacing="2" fill="#555">SIMULATED COMMENTS WHEN NOT SUPPLIED • RT FOOTBALL MEDIA</text>
+    <rect width="1080" height="1350" filter="url(#paper)" opacity=".30"/>
+    <rect x="18" y="18" width="1044" height="1314" fill="none" stroke="#191714" stroke-width="2"/>
+    <line x1="26" y1="28" x2="1054" y2="28" stroke="#191714" stroke-width="2"/>
+    <text x="540" y="119" text-anchor="middle" font-family="DejaVu Serif" font-weight="700" font-size="83" letter-spacing="-3" fill="#111">${masthead}</text>
+    <text x="540" y="158" text-anchor="middle" font-family="DejaVu Serif" font-weight="700" font-size="27" letter-spacing="3" fill="${teamColor}">ALL THE FOOTBALL THAT MATTERS</text>
+    <line x1="26" y1="178" x2="1054" y2="178" stroke="#191714" stroke-width="3"/>
+    <rect x="0" y="190" width="1080" height="62" fill="${teamColor}"/>
+    <text x="540" y="237" text-anchor="middle" font-family="DejaVu Serif" font-weight="700" font-size="43" letter-spacing="13" fill="${accentInk}">EXCLUSIVE</text>
+    <line x1="26" y1="263" x2="1054" y2="263" stroke="#191714" stroke-width="2"/>
+    ${headlineLines.map((line, index) => `<text x="540" y="${headlineLines.length === 1 ? 365 : 344 + index * 90}" text-anchor="middle" font-family="DejaVu Serif" font-size="${headlineSize}" font-weight="700" letter-spacing="-3" fill="${index === headlineLines.length - 1 && headlineLines.length > 1 ? teamColor : '#111111'}">${escapeXml(line)}</text>`).join('')}
+    <line x1="26" y1="438" x2="1054" y2="438" stroke="#191714" stroke-width="2"/>
+    ${tspans(wrapLines(story.subheadline, 55, 2), 540, 462, 27, 'text-anchor="middle" font-family="DejaVu Serif" font-size="24" font-weight="700" fill="#181614"')}
+    <line x1="26" y1="508" x2="1054" y2="508" stroke="#191714" stroke-width="2"/>
+
+    <rect x="28" y="524" width="650" height="448" fill="#b7ad9b" stroke="#191714" stroke-width="3"/>
+    <line x1="697" y1="524" x2="697" y2="972" stroke="#191714" stroke-width="2"/>
+    <text x="716" y="557" font-family="DejaVu Serif" font-size="27" font-weight="700" fill="#111">${escapeXml(sectionTitles[0])}</text>
+    ${tspans(wrapLines(sectionCopies[0], 26, 4), 716, 587, 27, 'font-family="DejaVu Sans" font-size="21" fill="#171717"')}
+    <line x1="710" y1="670" x2="1048" y2="670" stroke="#191714" stroke-width="2"/>
+    <text x="716" y="711" font-family="DejaVu Serif" font-size="30" font-weight="700" fill="#111">${escapeXml(sectionTitles[1])}</text>
+    ${tspans(wrapLines(sectionCopies[1], 26, 4), 716, 741, 26, 'font-family="DejaVu Sans" font-size="20" fill="#171717"')}
+    <line x1="710" y1="837" x2="1048" y2="837" stroke="#191714" stroke-width="2"/>
+    <text x="716" y="878" font-family="DejaVu Serif" font-size="28" font-weight="700" fill="#111">${escapeXml(sectionTitles[2])}</text>
+    ${tspans(wrapLines(sectionCopies[2], 28, 3), 716, 908, 24, 'font-family="DejaVu Sans" font-size="19" fill="#171717"')}
+
+    <rect x="28" y="992" width="1024" height="248" fill="${teamColor}"/>
+    <circle cx="133" cy="1112" r="73" fill="none" stroke="${accentInk}" stroke-width="5"/>
+    <text x="133" y="1137" text-anchor="middle" font-family="DejaVu Serif" font-size="63" font-weight="700" fill="${accentInk}">RT</text>
+    <line x1="235" y1="1022" x2="235" y2="1210" stroke="${accentInk}" stroke-width="2"/>
+    ${tspans(wrapLines(bottomHeadline, 21, 2), 644, 1090, 55, `text-anchor="middle" font-family="DejaVu Serif" font-size="44" font-weight="700" fill="${accentInk}"`)}
+    <line x1="285" y1="1183" x2="430" y2="1183" stroke="${accentInk}" stroke-width="2"/>
+    <text x="644" y="1192" text-anchor="middle" font-family="DejaVu Serif" font-size="16" letter-spacing="2" fill="${accentInk}">${escapeXml(bottomSubtitle)}</text>
+    <line x1="858" y1="1183" x2="1002" y2="1183" stroke="${accentInk}" stroke-width="2"/>
+
+    <line x1="26" y1="1275" x2="1054" y2="1275" stroke="#191714" stroke-width="2"/>
+    <text x="42" y="1310" font-family="DejaVu Serif" font-size="21" font-weight="700" fill="#111">${escapeXml(team.outlet.toUpperCase())}</text>
+    <text x="540" y="1310" text-anchor="middle" font-family="DejaVu Serif" font-size="21" font-weight="700" fill="#111">PAGE 1</text>
+    <text x="1038" y="1310" text-anchor="end" font-family="DejaVu Serif" font-size="21" font-weight="700" fill="#111">${escapeXml(date)}</text>
   </svg>`;
 
   const composites = [];
   const heroSource = options.heroBuffer || (options.heroPath && fs.existsSync(options.heroPath) ? fs.readFileSync(options.heroPath) : null);
   if (heroSource || graphic) {
     const source = heroSource || await fetchImage(graphic);
-    const photo = await sharp(source).rotate().grayscale().tint('#b3a284').modulate({ brightness: 0.92, saturation: 0.25 }).resize(746, 474, {
+    const photo = await sharp(source).rotate().modulate({ brightness: 0.94, saturation: 0.82 }).resize(644, 442, {
       fit: 'cover', position: 'north',
     }).png().toBuffer();
-    composites.push({ input: photo, left: 292, top: 232 });
+    composites.push({ input: photo, left: 31, top: 527 });
   }
   return sharp(Buffer.from(svg)).composite(composites).png({ compressionLevel: 9 }).toBuffer();
 }
@@ -572,20 +609,6 @@ async function newspaperGraphic(team, type, story, graphic, options = {}) {
 function newspaperAttachment(buffer, team, type) {
   const slug = (team.label + '-' + type + '-rt-football-news').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return new AttachmentBuilder(buffer, { name: slug + '.png' });
-}
-
-function storyEmbed(team, story, publishedAt, draft = false) {
-  const embed = new EmbedBuilder()
-    .setColor(team.color)
-    .setAuthor({ name: team.outlet + ' • RT Football News' })
-    .setTitle(clean(story.headline, 256))
-    .setDescription(safePublicText(story.article || story.body, 3900))
-    .setFooter({
-      text: (draft ? 'PRIVATE DRAFT • ' : '') + team.label + ' • ' + team.league +
-        ' • ' + publicationDate(publishedAt),
-    });
-  if (publishedAt) embed.setTimestamp(new Date(publishedAt));
-  return embed;
 }
 
 function textInput(id, label, options = {}) {
@@ -797,7 +820,6 @@ async function startBot() {
       content: message || ('Private RT Football News preview for ' + team.label +
         '. Verify every fact before publishing. The final cover will use the actual Eastern-Time publication date.'),
       files: [ ...(rendered.poster ? [signingPosterAttachment(rendered.poster, team)] : []), newspaperAttachment(rendered.newspaper, team, record.type)],
-      embeds: [storyEmbed(team, record.story, null, true)],
       components: [approvalButtons(record.id)],
       allowedMentions: { parse: [] },
     });
@@ -852,7 +874,6 @@ async function startBot() {
       const rendered = await renderEdition(record, { freshHero: false, publishedAt });
       const post = {
         files: [newspaperAttachment(rendered.newspaper, team, record.type)],
-        embeds: [storyEmbed(team, record.story, publishedAt, false)],
         allowedMentions: { parse: [] },
       };
       if (record.alertRoleId) {
