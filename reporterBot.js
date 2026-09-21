@@ -89,6 +89,10 @@ const HERO_STYLES = [
   'packed stand celebration with shallow depth of field and authentic sports photography',
   'training-ground portrait with moody clouds and a serious football editorial mood',
 ];
+const RESERVED_SQUAD_NUMBERS = {
+  birmingham: { '22': { playerName: 'Tru', source: 'existing squad assignment' } },
+  crownfc: { '22': { playerName: 'Tru', source: 'existing squad assignment' } },
+};
 
 function randomChoice(items) {
   return items[Math.floor(Math.random() * items.length)];
@@ -128,6 +132,7 @@ const match = clubOption(new SlashCommandBuilder().setName('match').setDescripti
 const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescription('Announce a player signing'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('position').setDescription('Position(s)').setRequired(true))
+  .addStringOption(o => o.setName('number').setDescription('Squad number (1–99, must be available)'))
   .addStringOption(o => o.setName('player_comment').setDescription('Optional genuine player comment'))
   .addStringOption(o => o.setName('club_comment').setDescription('Optional genuine coach/owner comment'))
   .addStringOption(o => o.setName('details').setDescription('Experience or additional signing details'))
@@ -187,6 +192,34 @@ function exactTru(userId, playerName) {
   return /^tru$/i.test(clean(playerName, 40));
 }
 
+function normalizeSquadNumber(value) {
+  const raw = clean(value, 8).replace(/^#/, '').trim();
+  if (!raw) return '';
+  if (!/^\d{1,2}$/.test(raw)) return null;
+  const number = Number(raw);
+  return number >= 1 && number <= 99 ? String(number) : null;
+}
+
+function sameSquadPlayer(assignment, userId, playerName) {
+  if (!assignment) return false;
+  if (userId && assignment.userId && assignment.userId === userId) return true;
+  const assignedName = clean(assignment.playerName || assignment.selectedPlayerName, 40).toLowerCase();
+  return Boolean(assignedName && assignedName === clean(playerName, 40).toLowerCase());
+}
+
+function squadNumberConflict(teamKey, number, excludeStoryId, userId, playerName) {
+  if (!number) return null;
+  const reserved = RESERVED_SQUAD_NUMBERS[teamKey] && RESERVED_SQUAD_NUMBERS[teamKey][number];
+  if (reserved && !sameSquadPlayer(reserved, userId, playerName)) return reserved;
+  const assigned = stateStore.getSquadNumber(teamKey, number);
+  if (assigned && assigned.storyId !== excludeStoryId && !sameSquadPlayer(assigned, userId, playerName)) return assigned;
+  return stateStore.listStories().find(record =>
+    record.id !== excludeStoryId && record.type === 'signing' && record.teamKey === teamKey &&
+    normalizeSquadNumber(record.playerNumber) === number && !['cancelled', 'failed'].includes(record.state) &&
+    !sameSquadPlayer(record, userId, playerName)
+  ) || null;
+}
+
 function storyPath(id, suffix) {
   const directory = path.join(DATA_DIRECTORY, 'stories', id);
   fs.mkdirSync(directory, { recursive: true });
@@ -219,7 +252,7 @@ function normalizeStory(team, type, value, facts) {
     headline: clean(source.headline || (type === 'match' ? 'MATCHDAY VERDICT' : 'A NEW CHAPTER BEGINS'), 90).toUpperCase(),
     subheadline: clean(source.subheadline || team.label + ' make the news in ' + team.league, 140),
     playerName,
-    playerNumber: clean(source.playerNumber || '', 8),
+    playerNumber: clean(source.playerNumber || facts.number || '', 8),
     article,
     body: clean(source.body || article, 700),
     playerQuote,
@@ -444,8 +477,10 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
     'Story: ' + safePublicText(story.headline, 90) + '.',
     'Club: ' + team.label + '. Palette: ' + team.visualPalette + '.',
     'Visual direction: ' + style + '.',
-    type === 'signing'
+    type === 'signing' && graphic
       ? 'Preserve the featured player’s recognizable face, hairstyle, skin tone, body build, footwear, and sleeve length from the reference image. If the reference has long sleeves keep long sleeves; if it has short sleeves keep short sleeves. Create a distinctly new pose and composition rather than copying the reference pose. Use the club color identity without inventing readable sponsor or crest text.'
+      : type === 'signing'
+        ? 'No player photo was supplied. Create a club-related signing scene without an identifiable person: use a dramatic stadium tunnel, folded club-color shirt, scarf, floodlights, supporters, or a signing desk. Do not invent a player face.'
       : 'Create an authentic matchday football scene inspired by the verified story without inventing a visible score or player identity.',
     'Do not add words, headlines, dates, numbers, watermarks, sponsor marks, league marks, or fabricated crests. Leave useful negative space for newspaper overlays.',
     'Unique edition key: ' + String(variationKey || Date.now()) + '.',
@@ -474,28 +509,37 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
 
 
 async function signingPosterGraphic(team, story, graphic, variationKey) {
-  if (!graphic) throw new Error('A player reference photo is required for the signing poster.');
-  if (!process.env.OPENAI_API_KEY || !OpenAI || !toFile) throw new Error('Signing artwork requires OPENAI_API_KEY and image editing support.');
+  if (!process.env.OPENAI_API_KEY || !OpenAI || (graphic && !toFile)) throw new Error('Signing artwork requires OPENAI_API_KEY and image support.');
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const source = await fetchImage(graphic);
-  const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#101010' }).png().toBuffer();
   const prompt = [
-    'Create a premium vertical professional football signing portrait using the supplied FC player screenshot as the identity reference.',
+    graphic
+      ? 'Create a premium vertical professional football signing portrait using the supplied FC player screenshot as the identity reference.'
+      : 'Create a premium vertical professional football club signing announcement background without showing an identifiable player.',
     'Club: ' + team.label + '. Color identity: ' + team.visualPalette + '.',
-    'Preserve the player’s recognizable face, hairstyle, facial hair, skin tone, body build, footwear and especially sleeve length from the reference.',
-    'If the reference has long sleeves, keep long sleeves. If it has short sleeves, keep short sleeves.',
-    'Put the player in the correct club color identity and create a fresh confident signing-announcement pose. Do not simply copy the reference pose.',
+    graphic
+      ? 'Preserve the player’s recognizable face, hairstyle, facial hair, skin tone, body build, footwear and especially sleeve length from the reference. If the reference has long sleeves, keep long sleeves. If it has short sleeves, keep short sleeves. Put the player in the correct club color identity and create a fresh confident signing-announcement pose. Do not simply copy the reference pose.'
+      : 'Feature club-related football imagery such as a floodlit stadium tunnel, an unnumbered folded shirt, scarf, supporters, or a signing desk. Keep the presentation dramatic and do not invent a person or player likeness.',
     'Do not render any words, names, numbers, sponsor text, league logos, watermarks, or fake readable crests. Exact typography will be added separately.',
     'Use dramatic stadium/tunnel lighting and leave clean space near the top and bottom for graphic-design text.',
     'Edition key: ' + String(variationKey || Date.now()) + '.'
   ].join(' ');
-  const response = await client.images.edit({
+  const request = {
     model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst',
     prompt,
     size: '1024x1536',
     quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
-    image: await toFile(normalized, 'player-reference.png', { type: 'image/png' }),
-  });
+  };
+  let response;
+  if (graphic) {
+    const source = await fetchImage(graphic);
+    const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#101010' }).png().toBuffer();
+    response = await client.images.edit({
+      ...request,
+      image: await toFile(normalized, 'player-reference.png', { type: 'image/png' }),
+    });
+  } else {
+    response = await client.images.generate(request);
+  }
   const encoded = response && response.data && response.data[0] && response.data[0].b64_json;
   if (!encoded) throw new Error('The image model did not return signing artwork.');
   const art = Buffer.from(encoded, 'base64');
@@ -637,7 +681,7 @@ function signingFactsModal(id, manual, story) {
   }
   rows.push(
     textInput('position', 'Position(s)', { required: true, max: 60, placeholder: 'Example: CDM / CB' }),
-    textInput('number', 'Shirt number (optional)', { max: 8, value: story && story.playerNumber }),
+    textInput('number', 'Squad number 1–99 (optional)', { max: 2, value: story && story.playerNumber }),
     textInput('previous_club', 'Previous club (optional)', { max: 100 }),
     textInput('details', manual ? 'Extra facts or club quote (optional)' : 'Extra facts / club quote (optional)', {
       long: true,
@@ -798,7 +842,7 @@ async function startBot() {
     });
     let poster = null;
     let posterPath = record.posterPath;
-    if (record.type === 'signing' && record.graphic) {
+    if (record.type === 'signing') {
       if (options.freshHero || !posterPath || !fs.existsSync(posterPath)) {
         poster = await signingPosterGraphic(team, record.story, record.graphic, String(options.variationKey || Date.now()) + '-poster');
         posterPath = storyPath(record.id, 'signing-poster-' + Date.now() + '.png');
@@ -892,7 +936,16 @@ async function startBot() {
         }
       }
       const published = await destination.send(post);
-      stateStore.markProcessed(record.sourceMessageId, 'published');      record = remember({ ...record, state: 'published', publishedAt, publishedMessageId: published.id });
+      stateStore.markProcessed(record.sourceMessageId, 'published');
+      record = remember({ ...record, state: 'published', publishedAt, publishedMessageId: published.id });
+      const publishedNumber = normalizeSquadNumber(record.playerNumber);
+      if (record.type === 'signing' && publishedNumber) {
+        stateStore.assignSquadNumber(record.teamKey, publishedNumber, {
+          playerName: record.selectedPlayerName || (record.story && record.story.playerName) || 'Unknown player',
+          userId: record.selectedUserId || null,
+          storyId: record.id,
+        });
+      }
       const owner = await ownerFor(record);
       if (owner) await owner.send('Published successfully with the publication date ' + publicationDate(publishedAt) + '.').catch(() => {});
       if (record.selectedUserId) pendingPlayerQuotes.delete(record.selectedUserId);
@@ -952,8 +1005,9 @@ async function startBot() {
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football News, covering ' +
           team.label + ' in ' + team.reporterCompetition + '. We’re preparing your official signing announcement.\n\n' +
-          'Please reply here with BOTH:\n📸 one clear full-body screenshot of your FC27 Pro (head to boots, face visible)\n💬 a short genuine quote about joining ' + team.label + '.\n\n' +
-          'Your screenshot is only a private visual reference. The final graphics will use the correct club presentation, preserve details such as your sleeve length, and use different poses for the signing poster and newspaper. Your original screenshot will not be posted publicly.',
+          'Please send:\n📸 an optional clear full-body screenshot of your FC27 Pro (head to boots, face visible)\n💬 a short genuine quote about joining ' + team.label + '.\n\n' +
+          'If you do not provide a photo, RT Football News will create club-themed artwork instead. If you provide one, it is only a private visual reference; your original screenshot will not be posted publicly.',
+        components: [quoteButtons(record.id)],
         allowedMentions: { parse: [] },
       });
       scheduleQuoteTimers(record);
@@ -1111,12 +1165,14 @@ async function startBot() {
       if (image) graphic = await cacheGraphic(signingId, { url: image.url, contentType: image.contentType || 'image/unknown' });
       const quote = message.content.trim() ? safePublicText(message.content, 400) : pending.playerQuote;
       pending = remember({ ...pending, graphic, playerQuote: quote, state: 'waiting_for_package' });
-      if (!graphic || !quote) {
-        await message.reply('Got it. I still need ' + (!graphic && !quote ? 'your full-body FC27 Pro screenshot and your quote' : !graphic ? 'your full-body FC27 Pro screenshot' : 'your short signing quote') + ' before I can build the graphics.').catch(() => {});
+      if (!quote) {
+        await message.reply('Photo received. I still need your short signing quote before I can build the graphics.').catch(() => {});
         return;
       }
       pendingPlayerQuotes.delete(message.author.id);
-      await message.reply('Perfect—your photo and quote are in. RT Football News is generating two different signing graphics for club approval now.').catch(() => {});
+      await message.reply(graphic
+        ? 'Perfect—your photo and quote are in. RT Football News is generating two different signing graphics for club approval now.'
+        : 'Thank you—your quote is in. RT Football News will use club-themed artwork because no player photo was supplied.').catch(() => {});
       await prepareDraft(signingId, quote, { freshHero: true });
       return;
     }
@@ -1154,7 +1210,7 @@ async function startBot() {
       message.embeds.find(item => item.thumbnail && item.thumbnail.url)?.thumbnail?.url;
     const imageUrl = attachment ? attachment.url : embeddedUrl;
     const recapText = recapTextFromMessage(message);
-    if (type === 'signing' && !imageUrl) return;
+    if (type === 'signing' && !imageUrl && !recapText) return;
     if (type === 'match' && !imageUrl && !recapText) return;
 
     try {
@@ -1249,22 +1305,6 @@ async function startBot() {
       if (!member || member.user.bot) {
         return interaction.update({ content: 'That player could not be found. Use “Player not listed” and enter them manually.', components: [] });
       }
-      if (pending.quickSign) {
-        pending = remember({
-          ...pending,
-          selectedUserId: member.id,
-          selectedPlayerName: member.displayName,
-          position: '',
-          playerNumber: '',
-          previousClub: '',
-          details: '',
-          state: 'waiting_for_package',
-          manualPlayer: false,
-        });
-        await interaction.update({ content: teamForRecord(pending).reporter + ' is contacting ' + member.displayName + ' now for their photo and quote.', components: [] });
-        await contactPlayer(pending, member);
-        return;
-      }
       pending = remember({
         ...pending,
         selectedUserId: member.id,
@@ -1304,12 +1344,21 @@ async function startBot() {
       } else {
         member = selectedUserId ? await guild.members.fetch(selectedUserId).catch(() => null) : null;
       }
+      const submittedNumber = normalizeSquadNumber(interaction.fields.getTextInputValue('number'));
+      if (submittedNumber === null) {
+        return interaction.editReply('Squad numbers must be a whole number from 1 through 99. Use the player dropdown again to reopen the form.');
+      }
+      const numberOwner = squadNumberConflict(record.teamKey, submittedNumber, signingId, selectedUserId, playerName);
+      if (numberOwner) {
+        const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
+        return interaction.editReply('#' + submittedNumber + ' is already assigned to ' + ownerName + ' for ' + TEAMS[record.teamKey].label + '. Choose a different number from the player dropdown.');
+      }
       record = remember({
         ...record,
         selectedUserId,
         selectedPlayerName: safePublicText(playerName, 40),
         position: safePublicText(interaction.fields.getTextInputValue('position'), 60),
-        playerNumber: safePublicText(interaction.fields.getTextInputValue('number'), 8),
+        playerNumber: submittedNumber,
         previousClub: safePublicText(interaction.fields.getTextInputValue('previous_club'), 100),
         details: safePublicText(interaction.fields.getTextInputValue('details'), 700),
       });
@@ -1837,9 +1886,17 @@ async function startBot() {
     if (interaction.commandName === 'match') {
       facts = { context: clean(interaction.options.getString('context'), 1000) };
     } else if (interaction.commandName === 'signing') {
+      const submittedNumber = normalizeSquadNumber(interaction.options.getString('number'));
+      if (submittedNumber === null) return interaction.editReply('Squad numbers must be a whole number from 1 through 99.');
+      const numberOwner = squadNumberConflict(interaction.options.getString('club'), submittedNumber, null, null, interaction.options.getString('player'));
+      if (numberOwner) {
+        const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
+        return interaction.editReply('#' + submittedNumber + ' is already assigned to ' + ownerName + ' for ' + team.label + '. Choose another number.');
+      }
       facts = {
         player: clean(interaction.options.getString('player'), 100),
         position: clean(interaction.options.getString('position'), 100),
+        number: submittedNumber,
         playerComment: clean(interaction.options.getString('player_comment'), 400),
         clubComment: clean(interaction.options.getString('club_comment'), 400),
         details: clean(interaction.options.getString('details'), 700),
@@ -1860,6 +1917,16 @@ async function startBot() {
       editionSeed: Number.parseInt(interaction.id.slice(-4), 10) || 8,
     });
     await interaction.editReply({ files: [newspaperAttachment(newspaper, team, interaction.commandName)] });
+    if (interaction.commandName === 'signing' && facts.number) {
+      stateStore.assignSquadNumber(interaction.options.getString('club'), facts.number, {
+        playerName: facts.player,
+        userId: interaction.user.id,
+        storyId: 'slash-' + interaction.id,
+      });
+    }
+    if (interaction.commandName === 'release') {
+      stateStore.releaseSquadNumbersForPlayer(interaction.options.getString('club'), facts.player);
+    }
   }
 
   client.on('interactionCreate', interaction => {
@@ -1883,4 +1950,5 @@ module.exports = {
   publicationDate,
   safePublicText,
   normalizeStory,
+  normalizeSquadNumber,
 };

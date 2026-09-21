@@ -26,3 +26,17 @@ test('patches and deletes a story', () => {
   store.deleteStory('story-2');
   assert.equal(store.getStory('story-2'), null);
 });
+
+test('persists club-specific squad number assignments', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-media-'));
+  const file = path.join(directory, 'state.json');
+  const first = new StateStore(file);
+  first.assignSquadNumber('birmingham', '22', { playerName: 'Tru', storyId: 'signing-1' });
+
+  const second = new StateStore(file);
+  assert.equal(second.getSquadNumber('birmingham', '22').playerName, 'Tru');
+  assert.equal(second.getSquadNumber('crownfc', '22'), null);
+  assert.equal(second.listSquadNumbers('birmingham').length, 1);
+  assert.deepEqual(second.releaseSquadNumbersForPlayer('birmingham', 'tru'), ['22']);
+  assert.equal(second.getSquadNumber('birmingham', '22'), null);
+});

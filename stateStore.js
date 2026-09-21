@@ -8,7 +8,7 @@ function clone(value) {
 class StateStore {
   constructor(filePath) {
     this.filePath = filePath;
-    this.state = { stories: {}, processedMessages: {} };
+    this.state = { stories: {}, processedMessages: {}, squadNumbers: {} };
     this.load();
   }
 
@@ -18,6 +18,7 @@ class StateStore {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
       this.state.stories = parsed.stories || {};
       this.state.processedMessages = parsed.processedMessages || {};
+      this.state.squadNumbers = parsed.squadNumbers || {};
     } catch (error) {
       console.error('Could not load RT Football Media state:', error.message);
     }
@@ -56,6 +57,39 @@ class StateStore {
   deleteStory(id) {
     delete this.state.stories[id];
     this.persist();
+  }
+
+  getSquadNumber(teamKey, number) {
+    const assignment = this.state.squadNumbers[teamKey] && this.state.squadNumbers[teamKey][String(number)];
+    return assignment ? clone(assignment) : null;
+  }
+
+  assignSquadNumber(teamKey, number, assignment) {
+    if (!this.state.squadNumbers[teamKey]) this.state.squadNumbers[teamKey] = {};
+    this.state.squadNumbers[teamKey][String(number)] = clone({
+      ...assignment,
+      number: String(number),
+      assignedAt: new Date().toISOString(),
+    });
+    this.persist();
+    return this.getSquadNumber(teamKey, number);
+  }
+
+  listSquadNumbers(teamKey) {
+    return Object.values(this.state.squadNumbers[teamKey] || {}).map(clone);
+  }
+
+  releaseSquadNumbersForPlayer(teamKey, playerName) {
+    const assignments = this.state.squadNumbers[teamKey] || {};
+    const target = String(playerName || '').trim().toLowerCase();
+    const released = [];
+    for (const [number, assignment] of Object.entries(assignments)) {
+      if (String(assignment.playerName || '').trim().toLowerCase() !== target) continue;
+      delete assignments[number];
+      released.push(number);
+    }
+    if (released.length) this.persist();
+    return released;
   }
 
   isProcessed(messageId) {
