@@ -144,6 +144,8 @@ The audit makes no changes by itself. It provides **Approve Safe Cleanup** and *
 
 The audit explicitly identifies redundant categories named `Start Here`, `Club`, `Club Info`, `Club Information`, or `Club Info & Community`. After owner approval, essential welcome channels move to Welcome, club-specific channels move into the current club structure, empty redundant channels are deleted, history-bearing leftovers move privately to Club Archive, and resulting empty category shells are removed. A shared `locker-room-chat` is retained and renamed `collective-clubhouse` inside a compact `C&C COMMUNITY` category so players from both clubs can talk and organize casual play. Generic `roster-polls` is retired because registration and management approval replace it; existing visible history is archived rather than destroyed.
 
+The same approved audit also detects these shared channels when they are loose at the top of the server rather than inside a category. It creates the compact community category when needed, moves the Collective chat without changing its existing channel permission overwrites, and deletes an obsolete roster-poll channel only when it has no visible message history.
+
 The audit also inventories every installed bot, flags bots holding Administrator, labels RT Football Media as required, identifies Wick as optional security infrastructure, and marks Auto Role Bot for review after legacy role panels are removed. It lists unused, overlapping, legacy and Administrator roles but never kicks a bot or deletes a role automatically.
 
 ## Genuine player comments

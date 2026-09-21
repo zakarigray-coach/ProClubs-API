@@ -3225,6 +3225,47 @@ async function startBot() {
       const archiveCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /club archive/i.test(String(channel.name || '')));
       const birminghamCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /birmingham/i.test(String(channel.name || '')));
       const crownCategory = [...guildChannels.values()].find(channel => channel.type === ChannelType.GuildCategory && /crownfc|crown fc/i.test(String(channel.name || '')));
+      for (const channelId of audit.sharedCleanupChannelIds || []) {
+        const channel = guildChannels.get(channelId);
+        if (!channel || channel.type === ChannelType.GuildCategory) continue;
+        const key = normalizeAuditName(channel.name);
+        if (/^(locker-room-chat|collective-chat|collective-clubhouse|general-chat)$/.test(key)) {
+          let collectiveCategory = [...interaction.guild.channels.cache.values()].find(item =>
+            item.type === ChannelType.GuildCategory && /c&c community|collective community/i.test(String(item.name || ''))
+          );
+          try {
+            if (!collectiveCategory) {
+              collectiveCategory = await interaction.guild.channels.create({
+                name: '𓊆 💬 𓊇 C&C COMMUNITY',
+                type: ChannelType.GuildCategory,
+                reason: 'Approved shared Collective community cleanup',
+              });
+            }
+            if (key !== 'collective-clubhouse') await channel.setName('💬・collective-clubhouse', 'Approved shared Collective community cleanup');
+            if (channel.parentId !== collectiveCategory.id) await channel.setParent(collectiveCategory.id, { lockPermissions: false, reason: 'Approved shared Collective community cleanup' });
+            moved.push(`${channel.name} → ${collectiveCategory.name}`);
+          } catch {
+            skipped.push(`${channel.name} (Collective chat organization failed)`);
+          }
+          continue;
+        }
+        if (/^roster-polls?$/.test(key)) {
+          try {
+            if (channel.lastMessageId && archiveCategory) {
+              await channel.setParent(archiveCategory.id, { lockPermissions: false, reason: 'Roster workflow replaced by management approval' });
+              moved.push(`${channel.name} → ${archiveCategory.name}`);
+            } else if (!channel.lastMessageId) {
+              const name = channel.name;
+              await channel.delete('Approved removal of empty obsolete roster poll channel');
+              deletedChannels.push(name);
+            } else {
+              skipped.push(`${channel.name} (contains history and Club Archive is unavailable)`);
+            }
+          } catch {
+            skipped.push(`${channel.name} (roster poll cleanup failed)`);
+          }
+        }
+      }
       for (const categoryId of audit.legacyCategoryIds || []) {
         const category = guildChannels.get(categoryId);
         if (!category || category.type !== ChannelType.GuildCategory) continue;
@@ -3535,6 +3576,9 @@ async function startBot() {
       const uncategorized = channels.filter(channel =>
         channel.type !== ChannelType.GuildCategory && channel.parentId === null
       );
+      const sharedCleanupChannels = uncategorized.filter(channel =>
+        /^(roster-polls?|locker-room-chat|collective-chat|collective-clubhouse|general-chat)$/.test(auditCategoryName(channel.name))
+      );
       const inactive = textChannels.filter(channel => {
         if (!channel.lastMessageId) return true;
         return SnowflakeUtil.timestampFrom(channel.lastMessageId) < cutoff;
@@ -3602,6 +3646,10 @@ async function startBot() {
             value: list(uncategorized, item => '• ' + item.name),
           },
           {
+            name: 'Loose Collective channels ready to organize (' + sharedCleanupChannels.length + ')',
+            value: list(sharedCleanupChannels, item => '• ' + item.name),
+          },
+          {
             name: 'Duplicate channel names (' + duplicates.length + ' groups)',
             value: list(duplicates, group => '• ' + group[0].name + ' ×' + group.length),
           },
@@ -3633,6 +3681,7 @@ async function startBot() {
       pendingAudits.set(auditId, {
         ownerId: interaction.user.id,
         legacyCategoryIds: legacyClubCategories.map(item => item.id),
+        sharedCleanupChannelIds: sharedCleanupChannels.map(item => item.id),
         emptyCategoryIds: emptyCategories.filter(item => !legacyClubCategories.some(legacy => legacy.id === item.id)).map(item => item.id),
         expiresAt: Date.now() + 15 * 60 * 1000,
       });
@@ -3643,7 +3692,7 @@ async function startBot() {
           .setCustomId('server_audit:apply:' + auditId)
           .setLabel('Approve Consolidation & Cleanup')
           .setStyle(ButtonStyle.Danger)
-          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0),
+          .setDisabled(emptyCategories.length === 0 && legacyClubCategories.length === 0 && sharedCleanupChannels.length === 0),
         new ButtonBuilder()
           .setCustomId('server_audit:cancel:' + auditId)
           .setLabel('Cancel')
