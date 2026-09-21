@@ -1042,11 +1042,13 @@ async function setupMplLeagueNewsFeed(client) {
     }
   }
   const playerRoleId = process.env.BIRMINGHAM_ROLE_ID;
-  if (!playerRoleId || !guild.roles.cache.has(playerRoleId)) throw new Error('BIRMINGHAM_ROLE_ID must be configured before securing the league-news feed.');
+  const playerRole = playerRoleId ? guild.roles.cache.get(playerRoleId) : null;
+  if (!playerRole) throw new Error('BIRMINGHAM_ROLE_ID must be configured before securing the league-news feed.');
   const ownerId = process.env.BOT_OWNER_ID || guild.ownerId;
+  const ownerMember = await guild.members.fetch(ownerId).catch(() => null);
   await target.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false, SendMessages: false });
-  await target.permissionOverwrites.edit(playerRoleId, { ViewChannel: true, SendMessages: false, AddReactions: true });
-  await target.permissionOverwrites.edit(ownerId, { ViewChannel: true, SendMessages: true, ManageMessages: true, ManageWebhooks: true });
+  await target.permissionOverwrites.edit(playerRole, { ViewChannel: true, SendMessages: false, AddReactions: true });
+  if (ownerMember) await target.permissionOverwrites.edit(ownerMember, { ViewChannel: true, SendMessages: true, ManageMessages: true, ManageWebhooks: true });
   if (guild.members.me) {
     await target.permissionOverwrites.edit(guild.members.me.id, { ViewChannel: true, SendMessages: true, ManageMessages: true, ManageWebhooks: true });
   }
@@ -2746,20 +2748,43 @@ async function startBot() {
         let footballOpsRoleId = process.env.FOOTBALL_OPS_ROLE_ID || stateStore.getMetadata('footballOpsRoleId');
         footballOpsRole = footballOpsRoleId ? guild.roles.cache.get(footballOpsRoleId) : null;
         if (!footballOpsRole) {
-          footballOpsRole = guild.roles.cache.find(role => !role.managed && role.name === 'Manager');
+          footballOpsRole = guild.roles.cache.find(role => !role.managed && ['Manager', 'Vice President of Football Operations'].includes(role.name));
           if (footballOpsRole) {
             footballOpsRoleId = footballOpsRole.id;
             stateStore.setMetadata('footballOpsRoleId', footballOpsRoleId);
           }
         }
+        if (!footballOpsRole) {
+          footballOpsRole = await guild.roles.create({
+            name: 'Vice President of Football Operations',
+            color: 0x7BAFD4,
+            hoist: true,
+            mentionable: false,
+            permissions: [],
+            reason: 'Approved Castle & Crown Collective leadership structure',
+          });
+          footballOpsRoleId = footballOpsRole.id;
+          stateStore.setMetadata('footballOpsRoleId', footballOpsRoleId);
+          results.roleChanges.push('Created Vice President of Football Operations');
+        }
         if (footballOpsRole && footballOpsRole.name !== 'Vice President of Football Operations') {
           await footballOpsRole.setName('Vice President of Football Operations', 'Approved professional leadership title');
           results.roleChanges.push('Manager → Vice President of Football Operations');
-        } else if (!footballOpsRole) {
-          results.warnings.push('Manager role ID not configured or found');
+        }
+        await guild.members.fetch();
+        const truMember = process.env.TRU_USER_ID
+          ? guild.members.cache.get(process.env.TRU_USER_ID)
+          : guild.members.cache.find(member => !member.user.bot && /^(tru|codeman22_?)$/i.test(String(member.displayName || member.user.username).trim()));
+        const trapMember = guild.members.cache.get(TRAP_USER_ID);
+        for (const member of [truMember, trapMember].filter(Boolean)) {
+          if (!member.roles.cache.has(footballOpsRole.id)) {
+            await member.roles.add(footballOpsRole, 'Approved Vice President of Football Operations');
+            results.roleChanges.push(`${member.displayName} → Vice President of Football Operations`);
+          }
         }
       } catch (error) {
         results.warnings.push('Vice President of Football Operations role');
+        console.error('Could not prepare Vice President of Football Operations role:', error.code, error.message);
       }
 
       async function categoryFor(prefix, wantedName, aliases) {
