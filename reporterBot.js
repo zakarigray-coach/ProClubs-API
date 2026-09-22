@@ -892,7 +892,6 @@ function signingFactsModal(id, manual, story) {
     }));
   }
   rows.push(
-    textInput('position', 'Position(s)', { required: true, max: 60, placeholder: 'Example: CDM / CB' }),
     textInput('previous_club', 'Previous club (optional)', { max: 100 }),
     textInput('details', manual ? 'Extra facts or club quote (optional)' : 'Extra facts / club quote (optional)', {
       long: true,
@@ -2200,7 +2199,7 @@ async function startBot() {
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football Media, covering ' +
           team.label + ' in ' + team.reporterCompetition + '. We’re preparing your official signing announcement.\n\n' +
-          'Please choose your available squad number and submit a short genuine quote using the button below. You may also send an optional clear full-body screenshot of your FC27 Pro (head to boots, face visible) before using the button.\n\n' +
+          'Please send a clear full-body screenshot of your FC27 Pro (head to boots, face visible), then choose your available squad number using the button below. Your position is collected from your roster role. A quote is optional and is not required for the signing graphic.\n\n' +
           'If your number is already assigned, I’ll ask you to choose another. If you do not provide a photo, RT Football Media will create club-themed artwork instead. Your original screenshot will not be posted publicly.',
         components: [quoteButtons(record.id)],
         allowedMentions: { parse: [] },
@@ -2240,7 +2239,7 @@ async function startBot() {
       createdAt:new Date().toISOString(), selectionExpiresAt:Date.now()+APPROVAL_WAIT_MS,
     });
     const row = new ActionRowBuilder().addComponents(menu);
-    await interaction.editReply({ content:'Select the ' + team.label + ' player. ' + team.reporter + ' will DM them for their quote and full-body FC27 Pro screenshot.', components:[row] });
+    await interaction.editReply({ content:'Select the ' + team.label + ' player. ' + team.reporter + ' will DM them for their full-body FC27 Pro screenshot and squad number; position is taken from their roster role.', components:[row] });
   }
 
   async function startSignBatchCommand(interaction, team, teamKey) {
@@ -2960,7 +2959,7 @@ async function startBot() {
         ...record,
         selectedUserId,
         selectedPlayerName: safePublicText(playerName, 40),
-        position: safePublicText(interaction.fields.getTextInputValue('position'), 60),
+        position: safePublicText(record.position || '', 60),
         playerNumber: exactTru(selectedUserId, playerName) ? '22' : '',
         previousClub: safePublicText(interaction.fields.getTextInputValue('previous_club'), 100),
         details: safePublicText(interaction.fields.getTextInputValue('details'), 700),
