@@ -4444,7 +4444,6 @@ async function startBot() {
 
 module.exports = {
   startBot,
-  newspaperGraphic,
   spotlightGraphic,
   batchSigningGraphic,
   publicationDate,
