@@ -2044,9 +2044,21 @@ async function startBot() {
     record = remember({ ...record, state: 'publishing' });
     try {
       const guild = await client.guilds.fetch(record.guildId);
-      const destination = await guild.channels.fetch(record.destinationChannelId);
-      if (!destination || !destination.isTextBased()) throw new Error('Reporter channel is unavailable.');
       const team = TEAMS[record.teamKey];
+      // Signing announcements belong in the club transaction channel.
+      // Raine at St. Andrew's / Teagan Behind the Crown remain editorial channels for match recaps and Player Spotlights.
+      let destination;
+      if (record.type === 'signing') {
+        destination = record.transactionChannelId
+          ? await guild.channels.fetch(record.transactionChannelId).catch(() => null)
+          : transactionChannelFor(guild, record.teamKey);
+        if (!destination || !destination.isTextBased()) {
+          throw new Error((record.teamKey === 'crownfc' ? 'MLPC' : 'ML1') + ' transactions channel is unavailable.');
+        }
+      } else {
+        destination = await guild.channels.fetch(record.destinationChannelId).catch(() => null);
+        if (!destination || !destination.isTextBased()) throw new Error('Reporter channel is unavailable.');
+      }
       const publishedAt = new Date().toISOString();
       const rendered = await renderEdition(record, { freshHero: false, publishedAt });
       const post = {
@@ -2144,7 +2156,7 @@ async function startBot() {
       record = remember({ ...record, state: partial ? 'published_partial' : 'draft_ready', error: clean(error.message, 300) });
       stateStore.addManagementLog({ action: 'publish_failed', storyId: record.id, error: clean(error.message, 300) });
       if (!partial) {
-        await sendApprovalPreview(record, 'The previous publication attempt failed before the newspaper went live. The signing poster will not be duplicated. Review this retry preview and publish again when ready.').catch(() => {});
+        await sendApprovalPreview(record, 'The previous publication attempt failed before the graphic went live. The signing poster will not be duplicated. Review this retry preview and publish again when ready.').catch(() => {});
       }
       throw error;
     }
