@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const sharp = require('sharp');
-const { publicationDate, safePublicText, normalizeStory, normalizeSquadNumber, newspaperGraphic, playerRegistrationModal } = require('../reporterBot');
-const { headlineLayout, limitWords, storyParagraphs, sidebarRows } = require('../rtNewspaperRenderer');
+const { publicationDate, safePublicText, normalizeStory, normalizeSquadNumber, newspaperGraphic, spotlightGraphic, playerRegistrationModal } = require('../reporterBot');
+const { headlineLayout, limitWords, storyParagraphs, sidebarRows, palette, featureNameSize } = require('../rtNewspaperRenderer');
+const { selectSpotlightLayout, interviewExcerpts, exactExcerpt } = require('../rtSpotlightRenderer');
+const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('../rtBatchSigningRenderer');
 
 test('newspaper date follows Eastern Time instead of UTC', () => {
   assert.equal(publicationDate('2026-09-21T02:30:00.000Z'), 'SEP 20, 2026');
@@ -55,6 +57,35 @@ test('approved RT Media renderer creates a Discord-readable vertical front page'
   assert.equal(metadata.format, 'png');
 });
 
+test('locked newspaper themes keep Birmingham light and CrownFC dark', () => {
+  const birmingham = palette('birmingham');
+  const crown = palette('crownfc');
+  assert.equal(birmingham.paper, '#EEE8DB');
+  assert.equal(birmingham.ink, '#101216');
+  assert.equal(crown.paper, '#050A11');
+  assert.equal(crown.ink, '#F5F2E9');
+  assert.notEqual(birmingham.featurePanel, crown.featurePanel);
+  assert.ok(featureNameSize('A VERY LONG PLAYER DISPLAY NAME') < featureNameSize('TRU'));
+});
+
+test('Player Spotlight uses its own magazine renderer and genuine complete excerpts', async () => {
+  const team = { label: 'CrownFC', league: 'MLPC', reporter: 'Teagan Behind the Crown' };
+  const story = {
+    playerName: 'Tru', playerNumber: '22', position: 'CDM', spotlightHeadline: 'THE GENERAL',
+    playerQuote: 'because I’m a baller',
+    interviewExcerpts: ['because I’m a baller', 'I try to lead by example and set the standard every game.'],
+  };
+  assert.equal(selectSpotlightLayout(story), 'profile');
+  assert.deepEqual(interviewExcerpts(story), story.interviewExcerpts);
+  assert.equal(exactExcerpt('A complete statement.', 10), 'A complete statement.');
+  assert.equal(exactExcerpt('one two three four five six seven eight nine ten eleven twelve', 5), '');
+  const hero = await sharp({ create: { width: 1024, height: 1536, channels: 3, background: '#123A68' } }).png().toBuffer();
+  const buffer = await spotlightGraphic(team, story, null, { heroBuffer: hero });
+  const metadata = await sharp(buffer).metadata();
+  assert.equal(metadata.width, 1024);
+  assert.equal(metadata.height, 1536);
+});
+
 test('newspaper typography keeps full headlines and limits print copy', () => {
   const headline = 'A NEW MIDFIELD STANDARD AT ST. ANDREW’S FOR THE NEW MPL SEASON';
   const layout = headlineLayout(headline);
@@ -69,12 +100,31 @@ test('signing front page uses distinct complete copy without repeated sidebar su
   const team = { label: 'Birmingham City', league: 'Masters Premier League • League 1', reporter: 'Raine at St. Andrew’s' };
   const story = {
     playerName: 'Tru', playerNumber: '22', position: 'CDM', previousClub: '',
-    article: 'This deliberately long article should not be copied into every panel.',
+    playerQuote: 'because I’m a baller', article: 'This deliberately long article should not be copied into every panel.',
   };
   const paragraphs = storyParagraphs(team, 'signing', story);
   assert.equal(paragraphs.every(value => /[.!?]$/.test(value)), true);
   assert.equal(paragraphs.some(value => value.includes('…') || value.includes('...')), false);
   const rows = sidebarRows(team, 'signing', story);
-  assert.deepEqual(rows.map(row => row[0]), ['OFFICIAL MOVE', 'SQUAD FILE', 'PLAYER’S WORD', 'LEAGUE DESK']);
-  assert.equal(rows.filter(row => row[1].includes('Tru')).length, 0);
+  assert.deepEqual(rows.map(row => row[0]), ['ROSTER UPDATE', 'SQUAD FILE', 'LEAGUE WATCH', 'PLAYER’S WORD']);
+  assert.equal(rows[3][1], '“because I’m a baller” — Tru');
+  assert.ok(rows[3][1].length < 50);
+  assert.equal(new Set(rows.map(row => row[1])).size, 4);
+  assert.equal(rows.every(row => !row[1].includes('…') && !row[1].includes('...')), true);
+});
+
+test('multiple signing contract supports two through five players and explicit marquee only', async () => {
+  const players = Array.from({ length: 5 }, (_, index) => ({ id: `player-${index + 1}`, name: `Player ${index + 1}`, position: index ? 'CM' : 'GK', number: String(index + 1) }));
+  assert.equal(validateBatchSigningData('birmingham', players, 'player-3'), true);
+  assert.throws(() => validateBatchSigningData('birmingham', players.slice(0, 1)), /2–5/);
+  assert.throws(() => validateBatchSigningData('crownfc', players, 'not-selected'), /must be one/);
+  assert.match(batchComposition(2, 'a'), /^duo-/);
+  assert.match(batchComposition(3, 'b'), /^trio-/);
+  assert.match(batchComposition(4, 'c'), /^four-/);
+  assert.match(batchComposition(5, 'd'), /^class-/);
+  const art = await sharp({ create: { width: 1024, height: 1536, channels: 3, background: '#10243A' } }).png().toBuffer();
+  const poster = await renderBatchSigningPoster({ teamKey: 'birmingham', players, artBuffer: art, season: '2026/27', composition: 'class-lineup', marqueePlayerId: 'player-3' });
+  const metadata = await sharp(poster).metadata();
+  assert.equal(metadata.width, 1080);
+  assert.equal(metadata.height, 1350);
 });
