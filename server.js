@@ -2,7 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
-const { startBot } = require('./reporterBot');
+const { loadReporterBot } = require('./reporterBotRuntimePatch');
+const { startBot } = loadReporterBot();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
