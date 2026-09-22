@@ -2,6 +2,7 @@ const sharp = require('sharp');
 
 const WIDTH = 1024;
 const HEIGHT = 1536;
+const RT_NEWSPAPER_RENDERER_VERSION = 'approved-editorial-v3-20260922';
 
 // LOCKED RT FOOTBALL MEDIA NEWSPAPER TEMPLATE
 // SOLE NEWSPAPER DESIGN: owner-approved 2026-09-22 RT Media front page.
@@ -121,6 +122,7 @@ async function safeImage(value, width, height, fit = 'cover', position = 'centre
 }
 
 async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club', story = {}, date = '', issueNumber = 1, heroBuffer = null, brandBuffer = null, mastheadBuffer = null } = {}) {
+  console.log('[RT_NEWSPAPER_RENDER]', RT_NEWSPAPER_RENDERER_VERSION, teamKey, type, clean(story.headline, 90));
   const t = theme(teamKey);
   const headline = headlineSpec(story.headline);
   const sub = wrap(clean(story.subheadline || (team.label || 'Club') + ' exclusive', 130).toUpperCase(), 42, 2);
@@ -173,4 +175,4 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
   return base.png({ compressionLevel: 9 }).toBuffer();
 }
 
-module.exports = { renderNewspaper };
+module.exports = { renderNewspaper, RT_NEWSPAPER_RENDERER_VERSION };
