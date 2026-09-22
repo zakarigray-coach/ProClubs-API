@@ -49,6 +49,8 @@ const {
 } = require('./clubOperations');
 const { runPrivateDryRun } = require('./stagingSuite');
 const { renderNewspaper } = require('./rtNewspaperRenderer');
+const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
+const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
 
 let OpenAI;
@@ -116,7 +118,7 @@ const TEAMS = {
     label: 'Birmingham City', league: 'MPL • LEAGUE 1', reporter: 'Raine',
     reporterCompetition: 'the Masters Premier League in League 1',
     outlet: 'Raine at St. Andrew’s', color: 0x00a1e4, emoji: '🔵',
-    visualPalette: 'royal blue, white, and subtle gold accents',
+    visualPalette: 'Birmingham City blue, white, and black; never invent or recolor the club crest',
     voice: REPORTERS.birmingham.voice + ' Connect the story to Birmingham City, St. Andrew’s, and the MPL challenge without overhyping it. Humor must never humiliate a player or appear in every story.',
     alertRoleEnv: 'BIRMINGHAM_ROLE_ID', rosterLimit: 18,
   },
@@ -155,7 +157,8 @@ const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescr
 const sign = clubOption(new SlashCommandBuilder().setName('sign').setDescription('Start the automated player signing workflow'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const signBatch = clubOption(new SlashCommandBuilder().setName('sign-batch').setDescription('Prepare one combined announcement for 2–4 signings'))
+const signBatch = clubOption(new SlashCommandBuilder().setName('sign-batch').setDescription('Prepare one unified announcement for 2–5 signings'))
+  .addUserOption(o => o.setName('marquee').setDescription('Optional marquee player; must also be selected in the signing class'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
@@ -235,6 +238,30 @@ const commands = [match, sign, signBatch, signing, release, setupServer, streaml
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
+}
+
+function completeQuote(value, max = 220) {
+  const source = String(value || '').replace(/\s+/g, ' ').replace(/\.{3}|…/g, '').trim();
+  if (!source) return '';
+  if (source.length <= max) return source;
+  const sentences = source.match(/[^.!?]+[.!?]+/g) || [];
+  let result = '';
+  for (const sentence of sentences) {
+    const next = `${result} ${sentence.trim()}`.trim();
+    if (next.length > max) break;
+    result = next;
+  }
+  return result;
+}
+
+function spotlightExcerptSet(value) {
+  const source = String(value || '').replace(/\.{3}|…/g, '').trim();
+  if (!source) return [];
+  const pieces = source.split(/\n+/).flatMap(line => {
+    const cleaned = line.replace(/^\s*(?:\d+[.)-]?|[QA]:)\s*/i, '').trim();
+    return cleaned.match(/[^.!?]+[.!?]+/g) || [cleaned];
+  }).map(item => item.trim()).filter(Boolean);
+  return [...new Set(pieces.map(item => completeQuote(item, 180)).filter(item => item && item.split(/\s+/).length <= 24))].slice(0, 3);
 }
 
 function storyId() {
@@ -392,7 +419,7 @@ function extractJson(value) {
 function normalizeStory(team, type, value, facts) {
   const source = value || {};
   const playerName = clean(source.playerName || facts.player || 'NEW ARRIVAL', 40);
-  const playerQuote = clean(source.playerQuote || '', 220) || (type === 'match' ? 'No player comment was supplied.' : '');
+  const playerQuote = completeQuote(source.playerQuote || '', 220) || (type === 'match' ? 'No player comment was supplied.' : '');
   const article = clean(source.article || source.body || '', 3500);
   return {
     headline: clean(source.headline || (type === 'match' ? 'MATCHDAY VERDICT' : 'A NEW CHAPTER BEGINS'), 90).toUpperCase(),
@@ -407,6 +434,11 @@ function normalizeStory(team, type, value, facts) {
     leadershipQuote: clean(source.leadershipQuote || '', 220) || 'No separate club leadership comment was supplied.',
     leadershipRole: clean(source.leadershipRole || 'Club Note', 40),
     reporterNote: clean(source.reporterNote || '', 220),
+    gamerTag: clean(source.gamerTag || source.eaId || '', 40),
+    role: clean(source.role || '', 50),
+    spotlightHeadline: clean(source.spotlightHeadline || '', 55),
+    interviewExcerpts: (Array.isArray(source.interviewExcerpts) ? source.interviewExcerpts : spotlightExcerptSet(source.playerQuote || ''))
+      .map(item => completeQuote(item, 180)).filter(Boolean).slice(0, 3),
   };
 }
 
@@ -692,7 +724,9 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
   const hasIdentityReference = Boolean(graphic) && ['signing', 'spotlight'].includes(type);
   const kitDirection = officialKitDirection(team, kitReference, hasIdentityReference, Boolean(crestReferencePath));
   const prompt = [
-    'Create a fresh landscape hero photograph for a professional football newspaper front page.',
+    type === 'spotlight'
+      ? 'Create a fresh vertical premium football magazine editorial portrait. The player must be the dominant hero.'
+      : 'Create a fresh landscape hero photograph for a professional football newspaper front page.',
     'Story: ' + safePublicText(story.headline, 90) + '.',
     'Club: ' + team.label + '. Palette: ' + team.visualPalette + '.',
     'Visual direction: ' + style + '.',
@@ -703,7 +737,7 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
         ? 'No player photo was supplied. Create a club-related signing scene without an identifiable person: use a dramatic stadium tunnel, folded club-color shirt, scarf, floodlights, supporters, or a signing desk. Do not invent a player face.'
       : type === 'spotlight'
         ? (graphic
-          ? 'Use the reference only for the player identity. Create a fresh media-room, tunnel, training-ground, clubhouse, mixed-zone, or sideline interview scene with different clothing, pose, lighting, and composition from the signing announcement.'
+          ? 'Use the reference for identity. Preserve the recognizable face, hair, facial hair, skin tone, build, accessories, and defining characteristics. Create a fresh media-room, tunnel, training-ground, clubhouse, mixed-zone, or sideline interview scene with a different pose and composition from the signing announcement.'
           : 'Create a tasteful club-themed interview environment without inventing an identifiable player face.')
         : type === 'weekly_recap'
           ? 'Create an editorial week-in-review football collage atmosphere without adding scores, text, logos, or invented player identities.'
@@ -716,7 +750,7 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
   const request = {
     model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst',
     prompt,
-    size: process.env.OPENAI_IMAGE_SIZE || '1536x1024',
+    size: type === 'spotlight' ? '1024x1536' : (process.env.OPENAI_IMAGE_SIZE || '1536x1024'),
     quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
   };
   let response;
@@ -824,7 +858,7 @@ async function newspaperGraphic(team, type, story, graphic, options = {}) {
   const date = publicationDate(options.publishedAt);
   const heroSource = options.heroBuffer || (options.heroPath && fs.existsSync(options.heroPath) ? fs.readFileSync(options.heroPath) : null);
   const resolvedHero = heroSource || (graphic ? await fetchImage(graphic) : null);
-  const teamKey = team === TEAMS.crownfc ? 'crownfc' : 'birmingham';
+  const teamKey = team === TEAMS.crownfc || /crown\s*fc/i.test(String(team.label || '')) ? 'crownfc' : 'birmingham';
   const crownCrestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
   const birminghamKitPath = path.join(__dirname, 'assets', 'birmingham-city-kit.jpg');
   const birminghamCrestPath = path.join(__dirname, 'assets', 'birmingham-city-crest-white.png');
@@ -840,6 +874,17 @@ async function newspaperGraphic(team, type, story, graphic, options = {}) {
   const issue = String(options.issueNumber || Math.max(1, Math.floor(Date.now() / 86400000) % 10000)).replace(/^0+/, '') || '1';
   const mastheadBuffer = fs.existsSync(mastheadPath) ? fs.readFileSync(mastheadPath) : null;
   return renderNewspaper({ team, teamKey, type, story, date, issueNumber: issue, heroBuffer: resolvedHero, brandBuffer, mastheadBuffer, editionSeed: options.editionSeed });
+}
+
+async function spotlightGraphic(team, story, graphic, options = {}) {
+  const heroSource = options.heroBuffer || (options.heroPath && fs.existsSync(options.heroPath) ? fs.readFileSync(options.heroPath) : null);
+  const resolvedHero = heroSource || (graphic ? await fetchImage(graphic) : null);
+  const teamKey = team === TEAMS.crownfc || /crown\s*fc/i.test(String(team.label || '')) ? 'crownfc' : 'birmingham';
+  const crownCrestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
+  const birminghamCrestPath = path.join(__dirname, 'assets', 'birmingham-city-crest-white.png');
+  const brandPath = teamKey === 'crownfc' ? crownCrestPath : birminghamCrestPath;
+  const brandBuffer = fs.existsSync(brandPath) ? fs.readFileSync(brandPath) : null;
+  return renderSpotlight({ team, teamKey, story, heroBuffer: resolvedHero, brandBuffer, previousLayout: options.previousLayout });
 }
 
 function newspaperAttachment(buffer, team, type) {
@@ -887,7 +932,7 @@ function signingBatchFactsModal(batchId, players) {
   const modal = new ModalBuilder()
     .setCustomId('signing_batch_facts:' + batchId)
     .setTitle('Batch signing facts');
-  for (const [index, player] of players.slice(0, 4).entries()) {
+  for (const [index, player] of players.slice(0, 5).entries()) {
     modal.addComponents(textInput('player_' + index, clean(player.name, 32) + ': position | previous club', {
       required: true,
       max: 160,
@@ -895,6 +940,56 @@ function signingBatchFactsModal(batchId, players) {
     }));
   }
   return modal;
+}
+
+async function generateBatchSigningArtwork(team, children, variationKey, marqueePlayerId = '') {
+  if (!process.env.OPENAI_API_KEY || !OpenAI || !toFile) throw new Error('Multiple-player signing artwork requires OPENAI_API_KEY and image support.');
+  const teamKey = team === TEAMS.crownfc ? 'crownfc' : 'birmingham';
+  const players = children.map(record => ({ id: record.selectedUserId, name: record.selectedPlayerName, position: record.position, number: record.playerNumber }));
+  validateBatchSigningData(teamKey, players, marqueePlayerId);
+  const composition = batchComposition(players.length, variationKey);
+  const kitReference = officialKitReference(team, variationKey);
+  const crestReferencePath = teamKey === 'crownfc' ? officialCrestReference(team) : path.join(__dirname, 'assets', 'birmingham-city-crest-white.png');
+  const editImages = [];
+  const referenceLines = [];
+  for (const [index, record] of children.entries()) {
+    if (record.graphic) {
+      const source = await fetchImage(record.graphic);
+      const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#111111' }).png().toBuffer();
+      editImages.push(await toFile(normalized, `player-${index + 1}.png`, { type: 'image/png' }));
+      referenceLines.push(`Player reference ${editImages.length} is ${record.selectedPlayerName}, ${record.position}; preserve that identity and place them in lineup position ${index + 1} from left to right.`);
+    } else {
+      referenceLines.push(`${record.selectedPlayerName}, ${record.position}, has no identity photo; represent only that slot with a back-facing or face-obscured club player and do not invent a face.`);
+    }
+  }
+  if (kitReference) editImages.push(await toFile(await sharp(kitReference.path).rotate().resize(1024, 1024, { fit: 'contain', background: '#ffffff' }).png().toBuffer(), 'official-kit-reference.png', { type: 'image/png' }));
+  if (crestReferencePath && fs.existsSync(crestReferencePath)) editImages.push(await toFile(await sharp(crestReferencePath).rotate().resize(1024, 1024, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(), 'official-club-crest.png', { type: 'image/png' }));
+  const kitDescription = teamKey === 'birmingham'
+    ? 'Use the supplied exact Birmingham City 2026/27 kit reference, including the real crest, Nike mark, and CORAL sponsor.'
+    : 'Use the supplied Charlotte-inspired kit as the garment, replace Charlotte identity with the supplied exact CrownFC crest, preserve Adidas and ally marks, and use no gold.';
+  const marquee = marqueePlayerId ? players.find(player => player.id === marqueePlayerId) : null;
+  const prompt = [
+    `Create ONE unified premium vertical football signing-class portrait featuring exactly ${players.length} player slots for ${team.label}.`,
+    `Composition: ${composition}. It must look like one coordinated club announcement, never separate mini-posters or boxes.`,
+    referenceLines.join(' '), kitDescription,
+    marquee ? `The explicitly designated marquee signing is ${marquee.name}; give only slight center or foreground prominence while every player remains important.` : 'No marquee player is designated; give every player equal visual importance.',
+    'Preserve supplied faces, skin tones, hair, facial hair, builds and visible sleeve lengths. Use varied natural confident poses and the stated left-to-right order.',
+    `Use ${team.visualPalette}. Use a stadium, tunnel, floodlights, crowd, smoke or premium football-media atmosphere.`,
+    'Do not add announcement words, names, numbers, dates, league marks, watermarks or invented crests. Exact typography and crest are overlaid separately.',
+    `Edition key: ${variationKey}.`,
+  ].join(' ');
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const request = { model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst', prompt, size: '1024x1536', quality: process.env.OPENAI_IMAGE_QUALITY || 'medium' };
+  const response = editImages.length ? await client.images.edit({ ...request, image: editImages.length === 1 ? editImages[0] : editImages }) : await client.images.generate(request);
+  const encoded = response?.data?.[0]?.b64_json;
+  if (!encoded) throw new Error('The image model did not return unified signing-class artwork.');
+  return { art: Buffer.from(encoded, 'base64'), composition, players };
+}
+
+async function batchSigningGraphic(team, teamKey, children, variationKey, marqueePlayerId = '') {
+  const generated = await generateBatchSigningArtwork(team, children, variationKey, marqueePlayerId);
+  const crestPath = path.join(__dirname, 'assets', teamKey === 'crownfc' ? 'crownfc-crest.png' : 'birmingham-city-crest-white.png');
+  return renderBatchSigningPoster({ teamKey, players: generated.players, artBuffer: generated.art, brandBuffer: fs.existsSync(crestPath) ? fs.readFileSync(crestPath) : null, season: '2026/27', composition: generated.composition, marqueePlayerId });
 }
 
 function batchApprovalButtons(id) {
@@ -1748,15 +1843,22 @@ async function startBot() {
       if (!selection) continue;
       const signing = stateStore.listStories().reverse().find(item => item.type === 'signing' && item.teamKey === teamKey && item.selectedUserId === selection.playerId);
       const response = clean(selection.response, 3000);
+      const excerpts = spotlightExcerptSet(response);
       const disclosure = response ? '' : 'The player did not respond to the Q&A before the deadline; no quote has been invented.';
       const team = TEAMS[teamKey];
       const story = normalizeStory(team, 'spotlight', {
         headline: `${selection.playerName.toUpperCase()} IN THE SPOTLIGHT`,
         subheadline: `${team.reporter} profiles one of ${team.label}’s own`,
         playerName: selection.playerName,
+        playerNumber: signing?.story?.playerNumber || '',
+        position: signing?.story?.position || '',
+        gamerTag: selection.playerName,
+        spotlightHeadline: signing?.story?.position && /GK|GOALKEEPER/i.test(signing.story.position) ? 'BETWEEN THE POSTS'
+          : signing?.story?.position && /CDM|CM/i.test(signing.story.position) ? 'THE ENGINE ROOM' : 'MAKING HIS MARK',
         article: response ? `Player Spotlight responses from ${selection.playerName}: ${response}` : `${selection.playerName} is this week’s Player Spotlight selection. ${disclosure} This edition uses only verified club information already on record.`,
         body: response ? `${selection.playerName} answers ${team.reporter}’s rotating weekly questions on football, the squad and the season.` : `${selection.playerName} was selected for the weekly feature. ${disclosure}`,
-        playerQuote: response,
+        playerQuote: excerpts[0] || '',
+        interviewExcerpts: excerpts,
         reporterNote: response ? `${team.reporter} brings the player’s own answers to the front page.` : disclosure,
       }, {});
       const draft = await createScheduledDraft(guild, owner, teamKey, 'spotlight', story, {
@@ -1873,7 +1975,7 @@ async function startBot() {
 
   async function renderEdition(record, options = {}) {
     const team = TEAMS[record.teamKey];
-    const reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };
+    let reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };
     let heroPath = record.heroPath;
     if (options.freshHero || !heroPath || !fs.existsSync(heroPath)) {
       const hero = await generateHeroImage(team, record.type, reportStory, record.graphic, options.variationKey || Date.now());
@@ -1881,14 +1983,23 @@ async function startBot() {
       fs.writeFileSync(heroPath, hero);
       record = remember({ ...record, heroPath });
     }
-    const newspaper = await newspaperGraphic(team, record.type, reportStory, record.graphic, {
-      heroPath,
-      publishedAt: options.publishedAt,
-      editionSeed: Number.parseInt(record.id.slice(-4), 16) || 8,
-    });
+    let previousLayout = '';
+    if (record.type === 'spotlight') {
+      previousLayout = stateStore.listStories().reverse().find(item => item.id !== record.id && item.teamKey === record.teamKey && item.type === 'spotlight' && item.layoutKey)?.layoutKey || '';
+      const layoutKey = record.layoutKey || selectSpotlightLayout(reportStory, previousLayout);
+      if (record.layoutKey !== layoutKey) record = remember({ ...record, layoutKey });
+      reportStory = { ...reportStory, spotlightLayout: layoutKey };
+    }
+    const newspaper = record.type === 'spotlight'
+      ? await spotlightGraphic(team, reportStory, record.graphic, { heroPath, previousLayout })
+      : await newspaperGraphic(team, record.type, reportStory, record.graphic, {
+        heroPath,
+        publishedAt: options.publishedAt,
+        editionSeed: Number.parseInt(record.id.slice(-4), 16) || 8,
+      });
     let poster = null;
     let posterPath = record.posterPath;
-    if (record.type === 'signing') {
+    if (record.type === 'signing' && !record.batchId) {
       if (options.freshHero || !posterPath || !fs.existsSync(posterPath)) {
         poster = await signingPosterGraphic(team, record.story, record.graphic, String(options.variationKey || Date.now()) + '-poster');
         posterPath = storyPath(record.id, 'signing-poster-' + Date.now() + '.png');
@@ -1944,13 +2055,15 @@ async function startBot() {
       state: 'draft_ready',
       approvalExpiresAt: Date.now() + APPROVAL_WAIT_MS,
     });
-    const rendered = await renderEdition(record, { freshHero: options.freshHero !== false, variationKey: Date.now() });
-    record = rendered.record;
     if (record.batchId) {
       await maybePrepareSigningBatch(record.batchId);
-    } else if (options.sendApproval !== false) {
+    } else {
+      const rendered = await renderEdition(record, { freshHero: options.freshHero !== false, variationKey: Date.now() });
+      record = rendered.record;
+      if (options.sendApproval !== false) {
       await sendApprovalPreview(record, 'Private RT Football Media preview for ' + team.label +
         '. Check every fact, quote, and image before publishing. The final front page will use the actual Eastern-Time publication date.');
+      }
     }
     return record;
   }
@@ -2181,16 +2294,16 @@ async function startBot() {
     const batchId = storyId();
     stateStore.setMetadata(`signingBatch:${batchId}`, {
       id: batchId, guildId: guild.id, teamKey, requesterUserId: process.env.BOT_OWNER_ID || interaction.user.id,
-      state: 'selecting', roleId, createdAt: new Date().toISOString(),
+      state: 'selecting', roleId, marqueePlayerId: interaction.options.getUser('marquee')?.id || '', createdAt: new Date().toISOString(),
     });
     const menu = new StringSelectMenuBuilder()
       .setCustomId('signing_batch_players:' + batchId)
-      .setPlaceholder('Select 2–4 players for one announcement')
+      .setPlaceholder('Select 2–5 players for one announcement')
       .setMinValues(2)
-      .setMaxValues(Math.min(4, members.length, capacity.available))
+      .setMaxValues(Math.min(5, members.length, capacity.available))
       .addOptions(members.map(member => ({ label: clean(member.displayName, 100), description: clean('@' + member.user.username, 100), value: member.id })));
     await interaction.editReply({
-      content: `Select 2–${Math.min(4, capacity.available)} ${team.label} players. Each player will privately choose their own number and provide their own quote/photo; publication is combined and owner-approved.`,
+      content: `Select 2–${Math.min(5, capacity.available)} ${team.label} players. Each player will privately choose their own number and provide their own quote/photo; publication is one unified signing-class graphic and owner-approved newspaper.`,
       components: [new ActionRowBuilder().addComponents(menu)],
     });
   }
@@ -2201,6 +2314,7 @@ async function startBot() {
     const children = (batch.childIds || []).map(id => pendingSignings.get(id) || stateStore.getStory(id)).filter(Boolean);
     if (!children.length || children.some(record => record.state !== 'draft_ready')) return false;
     const team = TEAMS[batch.teamKey];
+    validateBatchSigningData(batch.teamKey, children.map(record => ({ id: record.selectedUserId, name: record.selectedPlayerName, position: record.position, number: record.playerNumber })), batch.marqueePlayerId);
     const playerLines = children.map(record => {
       const quote = record.playerQuote && !/No player comment/i.test(record.playerQuote) ? ` “${record.playerQuote}”` : '';
       return `${record.selectedPlayerName} (#${record.playerNumber}, ${record.position || 'position not listed'})${record.previousClub ? ` joins from ${record.previousClub}` : ' joins the squad'}.${quote}`;
@@ -2220,23 +2334,22 @@ async function startBot() {
       id: parentId, type: 'signing_batch', teamKey: batch.teamKey, guildId: batch.guildId,
       requesterUserId: batch.requesterUserId, destinationChannelId: children[0].destinationChannelId,
       transactionChannelId: children[0].transactionChannelId, alertRoleId: batch.roleId,
-      childStoryIds: children.map(record => record.id), story, state: 'draft_ready',
+      childStoryIds: children.map(record => record.id), story, state: 'draft_ready', marqueePlayerId: batch.marqueePlayerId || '',
       approvalExpiresAt: Date.now() + APPROVAL_WAIT_MS, createdAt: batch.createdAt,
     });
     parent = (await renderEdition(parent, { freshHero: true, variationKey: batchId })).record;
+    const unifiedPoster = await batchSigningGraphic(team, batch.teamKey, children, batchId, batch.marqueePlayerId || '');
+    const batchPosterPath = storyPath(parent.id, 'signing-class-' + Date.now() + '.png');
+    fs.writeFileSync(batchPosterPath, unifiedPoster);
+    parent = remember({ ...parent, batchPosterPath });
     stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'ready', parentStoryId: parent.id });
     const owner = await ownerFor(parent);
     if (!owner) throw new Error('The configured bot owner could not be contacted for batch approval.');
-    const files = [];
-    for (const child of children) {
-      if (child.posterPath && fs.existsSync(child.posterPath)) {
-        files.push(new AttachmentBuilder(fs.readFileSync(child.posterPath), { name: `${clean(child.selectedPlayerName, 30).replace(/[^a-z0-9]+/gi, '-')}-signing.png` }));
-      }
-    }
+    const files = [new AttachmentBuilder(unifiedPoster, { name: `${batch.teamKey}-signing-class.png` })];
     const rendered = await renderEdition(parent, { freshHero: false });
     files.push(newspaperAttachment(rendered.newspaper, team, 'signing-batch'));
     await owner.send({
-      content: `Private ${team.reporter} batch preview for ${children.length} signings. One approval publishes one transaction post and one newspaper edition.`,
+      content: `Private ${team.reporter} signing-class preview for ${children.length} players. Verify every face, left-to-right name/position match, kit, crest and league. One approval publishes one unified transaction graphic and one newspaper edition.`,
       files, components: [batchApprovalButtons(batchId)], allowedMentions: { parse: [] },
     });
     return true;
@@ -2252,9 +2365,8 @@ async function startBot() {
     const team = TEAMS[batch.teamKey];
     const transaction = await guild.channels.fetch(parent.transactionChannelId);
     const reporter = await guild.channels.fetch(parent.destinationChannelId);
-    const posterFiles = children.filter(record => record.posterPath && fs.existsSync(record.posterPath)).map(record =>
-      new AttachmentBuilder(fs.readFileSync(record.posterPath), { name: `${clean(record.selectedPlayerName, 30).replace(/[^a-z0-9]+/gi, '-')}-signing.png` })
-    );
+    if (!parent.batchPosterPath || !fs.existsSync(parent.batchPosterPath)) throw new Error('The approved unified signing-class graphic is missing. Nothing was published.');
+    const posterFiles = [new AttachmentBuilder(fs.readFileSync(parent.batchPosterPath), { name: `${batch.teamKey}-signing-class.png` })];
     const mention = parent.alertRoleId ? `<@&${parent.alertRoleId}>` : undefined;
     const allowedMentions = parent.alertRoleId ? { parse: [], roles: [parent.alertRoleId] } : { parse: [] };
     await transaction.send({ files: posterFiles, allowedMentions: { parse: [] } });
@@ -2732,13 +2844,14 @@ async function startBot() {
       if (interaction.user.id !== batch.requesterUserId) return interaction.reply({ content: 'Only the configured owner can select this signing class.', flags: MessageFlags.Ephemeral });
       const guild = interaction.guild;
       const players = [];
-      for (const id of interaction.values.slice(0, 4)) {
+      for (const id of interaction.values.slice(0, 5)) {
         const member = await guild.members.fetch(id).catch(() => null);
         if (!member || member.user.bot) continue;
         if (existingSquadAssignmentForPlayer(batch.teamKey, member.id, member.displayName)) continue;
         players.push({ id: member.id, name: member.displayName });
       }
       if (players.length < 2) return interaction.reply({ content: 'At least two unsigned players must remain in the batch.', flags: MessageFlags.Ephemeral });
+      if (batch.marqueePlayerId && !players.some(player => player.id === batch.marqueePlayerId)) return interaction.reply({ content: 'The marquee player must also be selected in this signing class.', flags: MessageFlags.Ephemeral });
       stateStore.setMetadata(`signingBatch:${batchId}`, { ...batch, state: 'collecting_facts', players });
       return interaction.showModal(signingBatchFactsModal(batchId, players));
     }
@@ -4358,6 +4471,8 @@ async function startBot() {
 module.exports = {
   startBot,
   newspaperGraphic,
+  spotlightGraphic,
+  batchSigningGraphic,
   publicationDate,
   safePublicText,
   normalizeStory,
