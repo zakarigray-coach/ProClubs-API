@@ -1,19 +1,30 @@
 'use strict';
-
-// RT Football Media Player Spotlight renderer intentionally disabled.
-// All previous Spotlight template/layout/design code was removed on 2026-09-22.
-// Do not add a fallback, alternate, or legacy cover here.
-// New Birmingham City and CrownFC Spotlight templates will be installed when approved files are supplied.
-
-const RT_SPOTLIGHT_RENDERER_VERSION = 'template-removed-awaiting-new-design';
-const LAYOUTS = [];
-
-function selectSpotlightLayout() {
-  return 'template-removed-awaiting-new-design';
+const sharp=require('sharp');
+const WIDTH=1024,HEIGHT=1536;
+const RT_SPOTLIGHT_RENDERER_VERSION='reference-locked-v1-20260922';
+const LAYOUTS=['reference-locked'];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+const clean=(s,n=500)=>String(s??'').replace(/\s+/g,' ').trim().slice(0,n);
+function wrap(s,max,limit=99){const w=clean(s,1200).split(' '),o=[];let l='';for(const x of w){const n=l?l+' '+x:x;if(n.length>max&&l){o.push(l);l=x;if(o.length>=limit)break}else l=n}if(l&&o.length<limit)o.push(l);return o}
+function lines(a,x,y,dy,attrs){return a.map((v,i)=>'<text x="'+x+'" y="'+(y+i*dy)+'" '+attrs+'>'+esc(v)+'</text>').join('')}
+function selectSpotlightLayout(){return 'reference-locked'}
+async function img(b,w,h,pos='attention',alpha=1){if(!b)return null;try{let x=sharp(b).rotate().resize(w,h,{fit:'cover',position:pos});if(alpha<1)x=x.ensureAlpha(alpha);return await x.png().toBuffer()}catch{return null}}
+async function renderSpotlight({team={},teamKey='birmingham',story={},heroBuffer=null,brandBuffer=null}={}){
+ const crown=teamKey==='crownfc',accent=crown?'#16D9F3':'#128AF0',navy=crown?'#02070B':'#061A42',paper=crown?'#05090C':'#EEEDE8';
+ const player=clean(story.playerName||story.player||'PLAYER',30).toUpperCase(),num=clean(story.playerNumber||story.number||'',4),pos=clean(story.position||'PLAYER',18).toUpperCase();
+ const club=crown?'CROWNFC':'BIRMINGHAM CITY',league=crown?'MAJOR LEAGUE PRO CLUBS':'MASTERS PREMIER LEAGUE',leagueShort=crown?'MLPC':'MPL • LEAGUE 1';
+ const quote=clean(story.playerQuote||story.quote||'Ready for the challenge.',110).toUpperCase();
+ const interview=Array.isArray(story.interview)?story.interview:[]; const qs=[
+  {h:'ON JOINING '+club,b:clean(interview[0]?.answer||story.joiningQuote||'Ready to represent the club and compete.',125)},
+  {h:'ON LEADERSHIP',b:clean(interview[1]?.answer||story.leadershipQuote||'Set the standard every game.',125)},
+  {h:'ON THE SEASON AHEAD',b:clean(interview[2]?.answer||story.seasonQuote||'The focus is on helping the team succeed.',125)}
+ ];
+ const hero=await img(heroBuffer,650,1120),ghost=await img(heroBuffer,440,660,'attention',0.35),crest=await img(brandBuffer,240,240,'centre');
+ const qsvg=qs.map((q,i)=>{const y=810+i*145;return '<text x="805" y="'+y+'" font-family="DejaVu Sans" font-size="17" font-weight="900" fill="'+accent+'">'+esc(q.h)+'</text>'+lines(wrap(q.b,25,4),805,y+30,23,'font-family="DejaVu Sans" font-size="16" font-weight="600" fill="#fff"')+'<line x1="805" y1="'+(y+120)+'" x2="980" y2="'+(y+120)+'" stroke="'+accent+'" stroke-width="3"/>';}).join('');
+ const svg='<svg width="1024" height="1536" xmlns="http://www.w3.org/2000/svg"><defs><filter id="g"><feTurbulence baseFrequency=".65" numOctaves="4" seed="19"/><feColorMatrix values=".7 0 0 0 .1 0 .7 0 0 .1 0 0 .7 0 .1 0 0 0 .12 0"/></filter></defs><rect width="1024" height="1536" fill="'+paper+'"/><rect x="22" y="18" width="980" height="1498" fill="'+navy+'"/><rect x="22" y="18" width="980" height="1498" filter="url(#g)" opacity=".7"/><rect x="30" y="28" width="560" height="110" fill="'+(crown?'#05090C':'#F5F3EE')+'"/><text x="50" y="96" font-family="DejaVu Sans" font-size="62" font-weight="900" font-style="italic" fill="'+(crown?'#fff':'#07132D')+'">RT</text><text x="205" y="83" font-family="DejaVu Sans" font-size="45" font-weight="900" fill="'+(crown?'#fff':'#111')+'">FOOTBALL <tspan fill="'+accent+'">MEDIA</tspan></text><text x="210" y="119" font-family="DejaVu Sans" font-size="20" letter-spacing="8" fill="'+(crown?'#fff':'#111')+'">PLAYER SPOTLIGHT</text><text x="985" y="52" text-anchor="end" font-family="DejaVu Sans" font-size="24" font-weight="900" letter-spacing="6" fill="#fff">'+esc(club)+'</text><text x="985" y="83" text-anchor="end" font-family="DejaVu Sans" font-size="15" font-weight="800" letter-spacing="4" fill="#fff">'+esc(league)+'</text><text x="985" y="108" text-anchor="end" font-family="DejaVu Sans" font-size="14" letter-spacing="4" fill="#fff">SEASON 2026/2027</text><rect x="30" y="520" width="145" height="430" fill="#06101B" stroke="'+accent+'" stroke-width="2"/><text x="47" y="570" font-family="DejaVu Sans" font-size="14" letter-spacing="3" fill="'+accent+'">POSITION</text><text x="47" y="610" font-family="DejaVu Sans" font-size="28" font-weight="900" fill="#fff">'+esc(pos)+'</text><text x="47" y="670" font-family="DejaVu Sans" font-size="14" letter-spacing="2" fill="'+accent+'">SQUAD NUMBER</text><text x="47" y="710" font-family="DejaVu Sans" font-size="31" font-weight="900" fill="#fff">'+esc(num)+'</text><text x="47" y="770" font-family="DejaVu Sans" font-size="14" letter-spacing="3" fill="'+accent+'">CLUB</text><text x="47" y="808" font-family="DejaVu Sans" font-size="20" font-weight="900" fill="#fff">'+esc(club)+'</text><text x="47" y="870" font-family="DejaVu Sans" font-size="14" letter-spacing="3" fill="'+accent+'">LEAGUE</text><text x="47" y="908" font-family="DejaVu Sans" font-size="23" font-weight="900" fill="#fff">'+esc(leagueShort)+'</text><text x="775" y="480" font-family="DejaVu Serif" font-size="90" font-weight="900" fill="'+accent+'">“</text>'+lines(wrap('“'+quote+'”',18,4),775,535,48,'font-family="DejaVu Sans" font-size="35" font-weight="900" fill="#fff"')+'<text x="820" y="690" font-family="DejaVu Sans" font-size="48" font-style="italic" font-weight="900" fill="'+accent+'">'+esc(player)+'</text><text x="900" y="735" font-family="DejaVu Sans" font-size="43" font-style="italic" font-weight="900" fill="#fff">#'+esc(num)+'</text><rect x="790" y="770" width="205" height="435" fill="#06101B" stroke="'+accent+'" stroke-width="2"/>'+qsvg+'<text x="230" y="1035" font-family="DejaVu Sans" font-size="116" font-style="italic" font-weight="900" fill="#fff">'+esc(player)+'</text><text x="655" y="1045" font-family="DejaVu Sans" font-size="95" font-style="italic" font-weight="900" fill="'+accent+'">#'+esc(num)+'</text><text x="330" y="1110" font-family="DejaVu Sans" font-size="48" font-weight="900" letter-spacing="10" fill="#fff">THE GENERAL</text><text x="310" y="1150" font-family="DejaVu Sans" font-size="16" letter-spacing="7" fill="#fff">'+(crown?'LEADERSHIP. CULTURE. IMPACT.':'LEADERSHIP. DISCIPLINE. IMPACT.')+'</text><rect x="45" y="1180" width="270" height="260" fill="#101820" stroke="#fff"/><rect x="330" y="1180" width="270" height="260" fill="#101820" stroke="#fff"/><rect x="615" y="1180" width="270" height="260" fill="#101820" stroke="#fff"/><text x="512" y="1490" text-anchor="middle" font-family="DejaVu Sans" font-size="17" letter-spacing="6" fill="#fff">'+esc(club)+'  •  '+esc(crown?'MLPC':'MPL')+'  •  SEASON 2026/2027</text></svg>';
+ const comp=[];if(ghost)comp.push({input:ghost,left:570,top:115});if(hero)comp.push({input:hero,left:175,top:150});comp.push({input:Buffer.from(svg),left:0,top:0});if(crest)comp.push({input:crest,left:38,top:145});
+ // Three photographic strips intentionally reuse distinct crops of the approved player source.
+ if(heroBuffer){for(const [i,left] of [45,330,615].entries()){const crop=await img(heroBuffer,270,260,i===0?'west':i===1?'attention':'east');if(crop)comp.push({input:crop,left,top:1180});}}
+ return sharp({create:{width:WIDTH,height:HEIGHT,channels:4,background:paper}}).composite(comp).png().toBuffer();
 }
-
-async function renderSpotlight() {
-  throw new Error('RT Football Media Player Spotlight rendering is temporarily disabled: approved Birmingham City and CrownFC templates have not been installed yet.');
-}
-
-module.exports = { renderSpotlight, selectSpotlightLayout, LAYOUTS, RT_SPOTLIGHT_RENDERER_VERSION };
+module.exports={renderSpotlight,selectSpotlightLayout,LAYOUTS,RT_SPOTLIGHT_RENDERER_VERSION};
