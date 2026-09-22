@@ -294,6 +294,12 @@ function exactTru(userId, playerName) {
   return /^tru$/i.test(clean(playerName, 40));
 }
 
+function preferredPlayerName(member, fallback = '') {
+  const visibleName = member && (member.displayName || member.user?.globalName || member.user?.username);
+  const candidate = clean(visibleName || fallback, 40);
+  return exactTru(member?.id, candidate) ? 'Tru' : candidate;
+}
+
 function normalizeSquadNumber(value) {
   const raw = clean(value, 8).replace(/^#/, '').trim();
   if (!raw) return '';
@@ -670,7 +676,8 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
   const style = HERO_STYLES[Math.abs(Number.parseInt(String(variationKey || '0').slice(-6), 16) || Date.now()) % HERO_STYLES.length];
   const kitReference = officialKitReference(team, variationKey);
   const crestReferencePath = officialCrestReference(team);
-  const kitDirection = officialKitDirection(team, kitReference, Boolean(graphic), Boolean(crestReferencePath));
+  const hasIdentityReference = Boolean(graphic) && ['signing', 'spotlight'].includes(type);
+  const kitDirection = officialKitDirection(team, kitReference, hasIdentityReference, Boolean(crestReferencePath));
   const prompt = [
     'Create a fresh landscape hero photograph for a professional football newspaper front page.',
     'Story: ' + safePublicText(story.headline, 90) + '.',
@@ -700,9 +707,9 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
     quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
   };
   let response;
-  if (toFile && ((type === 'signing' && graphic) || kitReference)) {
+  if (toFile && (hasIdentityReference || kitReference)) {
     const editImages = [];
-    if (type === 'signing' && graphic) {
+    if (hasIdentityReference) {
       const source = await fetchImage(graphic);
       const normalized = await sharp(source).rotate().resize(1536, 1024, { fit: 'contain', background: '#111111' }).png().toBuffer();
       editImages.push(await toFile(normalized, 'player-reference.png', { type: 'image/png' }));
@@ -878,6 +885,12 @@ function playerSigningModal(id, decline = false, record = null) {
   const modal = new ModalBuilder()
     .setCustomId('player_package:' + (decline ? 'decline' : 'quote') + ':' + id)
     .setTitle(decline ? 'Choose your squad number' : 'Number and signing quote')
+    .addComponents(textInput('preferred_name', 'Name shown in RT Media', {
+      required: true,
+      max: 40,
+      value: record && record.selectedPlayerName,
+      placeholder: 'Example: Tru',
+    }))
     .addComponents(textInput('number', 'Your preferred squad number (1–99)', {
       required: true,
       max: 2,
@@ -898,12 +911,20 @@ function playerQuoteOnlyModal(id, record = null) {
   return new ModalBuilder()
     .setCustomId('player_quote_only:' + id)
     .setTitle('Your signing quote')
-    .addComponents(textInput('quote', 'Your quote (one or two sentences)', {
-      required: true,
-      long: true,
-      max: 400,
-      value: record && record.playerQuote,
-    }));
+    .addComponents(
+      textInput('preferred_name', 'Name shown in RT Media', {
+        required: true,
+        max: 40,
+        value: record && record.selectedPlayerName,
+        placeholder: 'Example: Tru',
+      }),
+      textInput('quote', 'Your quote (one or two sentences)', {
+        required: true,
+        long: true,
+        max: 400,
+        value: record && record.playerQuote,
+      })
+    );
 }
 
 function quoteModal(id, ownerEntry = false) {
@@ -1649,9 +1670,19 @@ async function startBot() {
     const roleId = process.env[TEAMS[teamKey].alertRoleEnv];
     const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
     if (!role) throw new Error(`Club role is not configured for ${TEAMS[teamKey].label}.`);
-    const candidates = [...role.members.values()].filter(member => !member.user.bot).map(member => ({
-      id: member.id, playerId: member.id, playerName: member.displayName, user: member.user,
-    }));
+    const candidates = [...role.members.values()].filter(member => !member.user.bot).map(member => {
+      const signing = stateStore.listStories().reverse().find(item =>
+        item.type === 'signing' && item.teamKey === teamKey && item.selectedUserId === member.id
+      );
+      return {
+        id: member.id,
+        playerId: member.id,
+        playerName: exactTru(member.id, signing?.selectedPlayerName || member.displayName)
+          ? 'Tru'
+          : clean(signing?.selectedPlayerName || preferredPlayerName(member), 40),
+        user: member.user,
+      };
+    });
     const prior = stateStore.listSpotlightSelections(teamKey);
     const selection = selectSpotlightCandidate(candidates, prior, `${dateKey}:${teamKey}`);
     if (selection.exhausted) {
@@ -1850,6 +1881,9 @@ async function startBot() {
   async function prepareDraft(id, quote, options = {}) {
     let record = pendingSignings.get(id) || stateStore.getStory(id);
     if (!record) return null;
+    if (exactTru(record.selectedUserId, record.selectedPlayerName) && record.selectedPlayerName !== 'Tru') {
+      record = remember({ ...record, selectedPlayerName: 'Tru' });
+    }
     const team = TEAMS[record.teamKey];
     const facts = {
       context: record.context,
@@ -2043,7 +2077,7 @@ async function startBot() {
     record = remember({
       ...record,
       selectedUserId: member.id,
-      selectedPlayerName: member.displayName,
+      selectedPlayerName: record.selectedPlayerName || preferredPlayerName(member),
       state: 'waiting_for_package',
       quoteExpiresAt: Date.now() + QUOTE_WAIT_MS,
       reminderSent: false,
@@ -2695,9 +2729,9 @@ async function startBot() {
           sourceMessageId: `batch-${batchId}-${member.id}`, sourceChannelId: interaction.channelId,
           destinationChannelId: reporter.id, transactionChannelId: transaction.id,
           teamKey: batch.teamKey, type: 'signing', alertRoleId: batch.roleId,
-          selectedUserId: member.id, selectedPlayerName: safePublicText(member.displayName, 40),
+          selectedUserId: member.id, selectedPlayerName: safePublicText(preferredPlayerName(member), 40),
           position: safePublicText(positionRaw, 60), previousClub: safePublicText(previousParts.join('|'), 100),
-          playerNumber: exactTru(member.id, member.displayName) ? '22' : '',
+          playerNumber: exactTru(member.id, preferredPlayerName(member)) ? '22' : '',
           state: 'waiting_for_package', createdAt: new Date().toISOString(),
         });
         childIds.push(id);
@@ -2769,7 +2803,7 @@ async function startBot() {
       pending = remember({
         ...pending,
         selectedUserId: member.id,
-        selectedPlayerName: member.displayName,
+        selectedPlayerName: preferredPlayerName(member),
         state: 'collecting_facts',
         manualPlayer: false,
       });
@@ -2797,7 +2831,7 @@ async function startBot() {
         }
         if (member) {
           selectedUserId = member.id;
-          playerName = member.displayName;
+          playerName = preferredPlayerName(member);
         } else {
           selectedUserId = null;
           playerName = rawPlayer;
@@ -2878,7 +2912,8 @@ async function startBot() {
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
       await interaction.deferReply();
       const quote = safePublicText(interaction.fields.getTextInputValue('quote'), 400);
-      record = remember({ ...record, playerQuote: quote });
+      const preferredName = safePublicText(interaction.fields.getTextInputValue('preferred_name'), 40);
+      record = remember({ ...record, selectedPlayerName: preferredName, playerQuote: quote });
       pendingPlayerQuotes.delete(record.selectedUserId);
       await prepareDraft(id, quote, { freshHero: true });
       return interaction.editReply(`Thank you—#${record.playerNumber} and your quote were sent to RT Football Media for club approval.`);
@@ -2899,6 +2934,7 @@ async function startBot() {
       if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This signing request is no longer active.');
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
       await interaction.deferReply();
+      const preferredName = safePublicText(interaction.fields.getTextInputValue('preferred_name'), 40);
       const submittedNumber = normalizeSquadNumber(interaction.fields.getTextInputValue('number'));
       if (submittedNumber === null) {
         return interaction.editReply({ content: 'Squad numbers must be a whole number from 1 through 99. Use the original button and try again.' });
@@ -2913,7 +2949,7 @@ async function startBot() {
       const quote = action === 'quote'
         ? safePublicText(interaction.fields.getTextInputValue('quote'), 400)
         : '';
-      record = remember({ ...record, playerNumber: submittedNumber, playerQuote: quote });
+      record = remember({ ...record, selectedPlayerName: preferredName, playerNumber: submittedNumber, playerQuote: quote });
       pendingPlayerQuotes.delete(record.selectedUserId);
       if (action === 'decline') {
         await interaction.editReply('Number #' + submittedNumber + ' is reserved in this signing draft. You declined to comment; club management has been notified.');

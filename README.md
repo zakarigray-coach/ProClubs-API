@@ -7,7 +7,7 @@ A Discord sports desk for two FC 27 Pro Clubs teams:
 - **Raine at St. Andrew’s** covers Birmingham City in Masters Premier League, League 1.
 - **Teagan Behind the Crown** covers CrownFC in MLPC.
 
-The bot publishes match reports, player signings, weekly recaps, Player Spotlights, awards, and departures as dated RT Football Media front pages. Each story receives fresh AI-generated hero artwork, while exact typography and the Eastern-Time publication date are rendered separately. Public posts contain the finished front page without repeating the full article as a long Discord embed.
+The bot publishes match reports, player signings, weekly recaps, Player Spotlights, awards, and departures as dated RT Football Media front pages. Signing and Spotlight editions share the approved light tabloid design: distressed paper, dark stadium-style masthead, bold club strip, large complete headline, hero photograph, compact sidebar, and short readable editorial blocks. Copy is hard-limited and clipped inside its panel so it cannot run into the footer. Each story receives fresh AI-generated hero artwork, while exact typography and the Eastern-Time publication date are rendered separately. Public posts contain the finished front page without repeating the full article as a long Discord embed.
 
 ## Commands
 
@@ -94,7 +94,7 @@ Post an OurProClubs text recap, graphic recap, or both, or let another bot post 
 
 Only matches explicitly labeled **Friendly/Friendlies**, **Cup**, or **Tournament** are eligible. Friendlies represent the clubs’ competitive league fixtures in this workflow, and Cup/Tournament games receive equal editorial importance. Playoff and unclassified games are ignored. If a recap contains multiple eligible games, the bot privately sends `BOT_OWNER_ID` a multi-select dropdown. The owner can choose one or several matches for a single article. After selection, the match edition is privately sent with **Publish**, **Edit**, **Regenerate**, and **Cancel** controls before anything appears publicly.
 
-For signings, the owner privately selects a player from the correct club role or chooses **Player not listed** and supplies verified football facts—never the squad number. The player sees all squad numbers 1–99 across four selectors; taken numbers remain visible with the assigned player and `TAKEN`, and selecting one is rejected. The reporter collects the player’s genuine quote and optional photo. If no photo is supplied, the bot generates club-themed artwork without inventing a player likeness. Tru’s configured user ID applies his saved #22 and quote without contacting him again, but still sends the owner a private preview before publication.
+For signings, the owner privately selects a player from the correct club role or chooses **Player not listed** and supplies verified football facts—never the squad number. The player sees all squad numbers 1–99 across four selectors; taken numbers remain visible with the assigned player and `TAKEN`, and selecting one is rejected. The reporter collects the name the player wants printed by RT Media, their genuine quote, and an optional photo. That preferred name is used on the signing poster, newspaper, saved roster record, and future Player Spotlight. If no photo is supplied, the bot generates club-themed artwork without inventing a player likeness. Tru’s configured user ID always prints **Tru**, applies his saved #22 and quote without contacting him again, and still sends the owner a private preview before publication.
 
 `/sign-batch` selects two to four unsigned players from one club. Management enters each player as `position | previous club`; each non-Tru player privately selects their own protected number and supplies their own genuine quote and optional photo. Only after every player is ready does the owner receive one combined approval package. One approval creates one transactions post containing the player graphics, one RT Football Media signing-class newspaper and one club-role mention. Cancelling publishes nothing and assigns no numbers.
 
@@ -110,7 +110,7 @@ The scheduler uses `America/New_York` and persistent run keys so a restart canno
 
 - Thursday: each reporter selects a player from the correct club role, never repeating a previous selection, and DMs 4–5 rotating questions.
 - Friday: one weekly recap draft per club summarizes only verified saved results and statistics.
-- Saturday at 10:00 AM Eastern: a Player Spotlight draft uses the saved signing photo only as an identity reference for a fresh scene. If the player did not respond, the cover clearly says so and invents no quote.
+- Saturday at 10:00 AM Eastern: a Player Spotlight draft uses the saved signing photo only as an identity reference for a fresh scene. It uses the same approved RT Media tabloid layout and saved preferred player name as signing coverage, but the hero artwork is regenerated as a new interview/media scene. If the player did not respond, the cover clearly says so and invents no quote.
 - Daily: RT-managed posts at least 30 days old are offered to the owner for approval. The original is deleted only after its archive copy succeeds.
 
 ## Private staging suite
