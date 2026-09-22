@@ -48,7 +48,6 @@ const {
   archiveCandidates, dueRecurringJobs,
 } = require('./clubOperations');
 const { runPrivateDryRun } = require('./stagingSuite');
-const { renderNewspaper, RT_NEWSPAPER_RENDERER_VERSION } = require('./rtNewspaperRenderer');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
@@ -480,7 +479,7 @@ async function aiArticle(team, type, facts, graphic) {
           'If the player name is Trap, use the factual all-caps headline “TRAP JOINS THE ATTACK” and describe only the verified ' +
           'position and role supplied by management, without inventing impact, statistics, promises, or career history. ' +
           'For every other player, create a fresh factual headline suited to that particular ' +
-          'signing and do not reuse “Marquee Signing” as a generic label. Create concise copy for a readable newspaper front page—not a long Discord article. ' +
+          'signing and do not reuse “Marquee Signing” as a generic label. Create concise copy for a readable newspaper signing announcement—not a long Discord article. ' +
           'Return only valid JSON with exactly these keys: headline, subheadline, playerName, playerNumber, article, body, playerQuote, ' +
           'leadershipQuote, leadershipRole, reporterNote. The headline must be all caps and no more than 9 words. The subheadline ' +
           'must be no more than 18 words. The article must be 90–140 words of concise professional reporting made entirely of ' +
@@ -729,7 +728,7 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
   const prompt = [
     type === 'spotlight'
       ? 'Create a fresh vertical premium football magazine editorial portrait. The player must be the dominant hero.'
-      : 'Create a fresh landscape hero photograph for a professional football newspaper front page.',
+      : 'Create a fresh landscape hero photograph for a professional football newspaper signing announcement.',
     'Story: ' + safePublicText(story.headline, 90) + '.',
     'Club: ' + team.label + '. Palette: ' + team.visualPalette + '.',
     'Visual direction: ' + style + '.',
@@ -857,28 +856,6 @@ function signingPosterAttachment(buffer, team) {
   return new AttachmentBuilder(buffer, { name: slug + '.png' });
 }
 
-async function newspaperGraphic(team, type, story, graphic, options = {}) {
-  const date = publicationDate(options.publishedAt);
-  const heroSource = options.heroBuffer || (options.heroPath && fs.existsSync(options.heroPath) ? fs.readFileSync(options.heroPath) : null);
-  const resolvedHero = heroSource || (graphic ? await fetchImage(graphic) : null);
-  const teamKey = team === TEAMS.crownfc || /crown\s*fc/i.test(String(team.label || '')) ? 'crownfc' : 'birmingham';
-  const crownCrestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
-  const birminghamKitPath = path.join(__dirname, 'assets', 'birmingham-city-kit.jpg');
-  const birminghamCrestPath = path.join(__dirname, 'assets', 'birmingham-city-crest-white.png');
-  const mastheadPath = path.join(__dirname, 'assets', 'rt-media-masthead.jpg');
-  let brandBuffer = null;
-  if (teamKey === 'crownfc' && fs.existsSync(crownCrestPath)) {
-    brandBuffer = fs.readFileSync(crownCrestPath);
-  } else if (teamKey === 'birmingham' && fs.existsSync(birminghamCrestPath)) {
-    brandBuffer = fs.readFileSync(birminghamCrestPath);
-  } else if (teamKey === 'birmingham' && fs.existsSync(birminghamKitPath)) {
-    brandBuffer = await sharp(birminghamKitPath).extract({ left: 330, top: 155, width: 105, height: 145 }).png().toBuffer();
-  }
-  const issue = String(options.issueNumber || Math.max(1, Math.floor(Date.now() / 86400000) % 10000)).replace(/^0+/, '') || '1';
-  const mastheadBuffer = fs.existsSync(mastheadPath) ? fs.readFileSync(mastheadPath) : null;
-  return renderNewspaper({ team, teamKey, type, story, date, issueNumber: issue, heroBuffer: resolvedHero, brandBuffer, mastheadBuffer, editionSeed: options.editionSeed });
-}
-
 async function spotlightGraphic(team, story, graphic, options = {}) {
   const heroSource = options.heroBuffer || (options.heroPath && fs.existsSync(options.heroPath) ? fs.readFileSync(options.heroPath) : null);
   const resolvedHero = heroSource || (graphic ? await fetchImage(graphic) : null);
@@ -888,12 +865,6 @@ async function spotlightGraphic(team, story, graphic, options = {}) {
   const brandPath = teamKey === 'crownfc' ? crownCrestPath : birminghamCrestPath;
   const brandBuffer = fs.existsSync(brandPath) ? fs.readFileSync(brandPath) : null;
   return renderSpotlight({ team, teamKey, story, heroBuffer: resolvedHero, brandBuffer, previousLayout: options.previousLayout });
-}
-
-function newspaperAttachment(buffer, team, type) {
-  const slug = (team.label + '-' + type + '-rt-football-news').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const version = String(RT_NEWSPAPER_RENDERER_VERSION || 'current').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-  return new AttachmentBuilder(buffer, { name: slug + '-' + version + '-' + Date.now() + '.png' });
 }
 
 function textInput(id, label, options = {}) {
@@ -911,7 +882,7 @@ function textInput(id, label, options = {}) {
 function signingFactsModal(id, manual, story) {
   const modal = new ModalBuilder()
     .setCustomId('signing_facts:' + id + ':' + (manual ? 'manual' : 'selected'))
-    .setTitle('Signing facts for the front page');
+    .setTitle('Signing facts for the signing announcement');
   const rows = [];
   if (manual) {
     rows.push(textInput('player', 'Player Discord ID or exact name', {
@@ -999,7 +970,7 @@ async function batchSigningGraphic(team, teamKey, children, variationKey, marque
 function batchApprovalButtons(id) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('signing_batch:publish:' + id).setLabel('Publish Batch').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('signing_batch:regenerate:' + id).setLabel('Regenerate Newspaper').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('signing_batch:regenerate:' + id).setLabel('Regenerate Graphic').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('signing_batch:cancel:' + id).setLabel('Cancel Batch').setStyle(ButtonStyle.Danger)
   );
 }
@@ -1863,7 +1834,7 @@ async function startBot() {
         body: response ? `${selection.playerName} answers ${team.reporter}’s rotating weekly questions on football, the squad and the season.` : `${selection.playerName} was selected for the weekly feature. ${disclosure}`,
         playerQuote: excerpts[0] || '',
         interviewExcerpts: excerpts,
-        reporterNote: response ? `${team.reporter} brings the player’s own answers to the front page.` : disclosure,
+        reporterNote: response ? `${team.reporter} brings the player’s own answers to the signing announcement.` : disclosure,
       }, {});
       const draft = await createScheduledDraft(guild, owner, teamKey, 'spotlight', story, {
         selectedUserId: selection.playerId,
@@ -1979,41 +1950,32 @@ async function startBot() {
 
   async function renderEdition(record, options = {}) {
     const team = TEAMS[record.teamKey];
-    let reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };
-    let heroPath = record.heroPath;
-    if (options.freshHero || !heroPath || !fs.existsSync(heroPath)) {
-      const hero = await generateHeroImage(team, record.type, reportStory, record.graphic, options.variationKey || Date.now());
-      heroPath = storyPath(record.id, 'hero-' + Date.now() + '.png');
-      fs.writeFileSync(heroPath, hero);
-      record = remember({ ...record, heroPath });
-    }
-    let previousLayout = '';
-    if (record.type === 'spotlight') {
-      previousLayout = stateStore.listStories().reverse().find(item => item.id !== record.id && item.teamKey === record.teamKey && item.type === 'spotlight' && item.layoutKey)?.layoutKey || '';
-      const layoutKey = record.layoutKey || selectSpotlightLayout(reportStory, previousLayout);
-      if (record.layoutKey !== layoutKey) record = remember({ ...record, layoutKey });
-      reportStory = { ...reportStory, spotlightLayout: layoutKey };
-    }
-    const newspaper = record.type === 'spotlight'
-      ? await spotlightGraphic(team, reportStory, record.graphic, { heroPath, previousLayout })
-      : await newspaperGraphic(team, record.type, reportStory, record.graphic, {
-        heroPath,
-        publishedAt: options.publishedAt,
-        editionSeed: Number.parseInt(record.id.slice(-4), 16) || 8,
-      });
-    let poster = null;
-    let posterPath = record.posterPath;
     if (record.type === 'signing' && !record.batchId) {
+      let posterPath = record.posterPath;
+      let poster = null;
       if (options.freshHero || !posterPath || !fs.existsSync(posterPath)) {
         poster = await signingPosterGraphic(team, record.story, record.graphic, String(options.variationKey || Date.now()) + '-poster');
         posterPath = storyPath(record.id, 'signing-poster-' + Date.now() + '.png');
         fs.writeFileSync(posterPath, poster);
-        record = remember({ ...record, posterPath });
+        record = remember({ ...record, posterPath, heroPath: null });
       } else {
         poster = fs.readFileSync(posterPath);
       }
+      return { record, poster, spotlight: null };
     }
-    return { record, newspaper, poster };
+    if (record.type === 'spotlight') {
+      let heroPath = record.heroPath;
+      const reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };
+      if (options.freshHero || !heroPath || !fs.existsSync(heroPath)) {
+        const hero = await generateHeroImage(team, record.type, reportStory, record.graphic, options.variationKey || Date.now());
+        heroPath = storyPath(record.id, 'hero-' + Date.now() + '.png');
+        fs.writeFileSync(heroPath, hero);
+        record = remember({ ...record, heroPath });
+      }
+      const spotlight = await spotlightGraphic(team, reportStory, record.graphic, { heroPath });
+      return { record, poster: null, spotlight };
+    }
+    throw new Error('Newspaper rendering has been removed. Signing workflows generate signing announcement graphics only.');
   }
 
   async function sendApprovalPreview(record, message) {
@@ -2021,10 +1983,14 @@ async function startBot() {
     const rendered = await renderEdition(record, { freshHero: false });
     const owner = await ownerFor(rendered.record);
     if (!owner) throw new Error('The configured bot owner could not be contacted.');
+    const files = rendered.poster
+      ? [signingPosterAttachment(rendered.poster, team)]
+      : rendered.spotlight
+        ? [new AttachmentBuilder(rendered.spotlight, { name: (team.label + '-player-spotlight.png').toLowerCase().replace(/[^a-z0-9.]+/g, '-') })]
+        : [];
     await owner.send({
-      content: message || ('Private RT Football Media preview for ' + team.label +
-        '. Verify every fact before publishing. The final cover will use the actual Eastern-Time publication date.'),
-      files: [ ...(rendered.poster ? [signingPosterAttachment(rendered.poster, team)] : []), newspaperAttachment(rendered.newspaper, team, record.type)],
+      content: message || ('Private RT Football Media graphic preview for ' + team.label + '. Verify the player identity, position and squad number before publishing.'),
+      files,
       components: [approvalButtons(record.id)],
       allowedMentions: { parse: [] },
     });
@@ -2066,7 +2032,7 @@ async function startBot() {
       record = rendered.record;
       if (options.sendApproval !== false) {
       await sendApprovalPreview(record, 'Private RT Football Media preview for ' + team.label +
-        '. Check every fact, quote, and image before publishing. The final front page will use the actual Eastern-Time publication date.');
+        '. Check every fact, quote, and image before publishing. The final signing announcement will use the actual Eastern-Time publication date.');
       }
     }
     return record;
@@ -2085,25 +2051,18 @@ async function startBot() {
       const publishedAt = new Date().toISOString();
       const rendered = await renderEdition(record, { freshHero: false, publishedAt });
       const post = {
-        files: [newspaperAttachment(rendered.newspaper, team, record.type)],
+        files: rendered.poster
+          ? [signingPosterAttachment(rendered.poster, team)]
+          : rendered.spotlight
+            ? [new AttachmentBuilder(rendered.spotlight, { name: (team.label + '-player-spotlight.png').toLowerCase().replace(/[^a-z0-9.]+/g, '-') })]
+            : [],
         allowedMentions: { parse: [] },
       };
       if (record.alertRoleId) {
         post.content = '<@&' + record.alertRoleId + '>';
         post.allowedMentions = { parse: [], roles: [record.alertRoleId] };
       }
-      if (record.type === 'signing' && rendered.poster && record.transactionChannelId) {
-        const transactionChannel = await guild.channels.fetch(record.transactionChannelId).catch(() => null);
-        if (transactionChannel && transactionChannel.isTextBased() && !record.transactionPublishedMessageId) {
-          const transactionPost = await transactionChannel.send({
-            content: record.alertRoleId ? '<@&' + record.alertRoleId + '>' : undefined,
-            files: [signingPosterAttachment(rendered.poster, team)],
-            allowedMentions: record.alertRoleId ? { parse: [], roles: [record.alertRoleId] } : { parse: [] },
-          });
-          record = remember({ ...record, transactionPublishedMessageId: transactionPost.id });
-          console.log('Signing poster published to ' + transactionChannel.name);
-        }
-      }
+
       const published = record.publishedMessageId
         ? await destination.messages.fetch(record.publishedMessageId)
         : await destination.send(post);
@@ -2485,7 +2444,7 @@ async function startBot() {
       })));
     await owner.send({
       content: team.reporter + ' found ' + matches.length + ' eligible Friendly/Cup/Tournament match' +
-        (matches.length === 1 ? '' : 'es') + ' in the OurProClubs recap. Select every game you want included in one newspaper article.',
+        (matches.length === 1 ? '' : 'es') + ' in the OurProClubs recap. Select every game you want included in one signing announcement.',
       components: [new ActionRowBuilder().addComponents(menu)],
       allowedMentions: { parse: [] },
     });
@@ -4434,7 +4393,7 @@ async function startBot() {
           value: matchItem.id,
         })));
       stateStore.markProcessed(sourceMessageId, 'pending');
-      return interaction.editReply({ content: `${team.reporter} found ${matches.length} eligible match${matches.length === 1 ? '' : 'es'}. Select the game or games for one owner-approved newspaper article and stats update.`, components: [new ActionRowBuilder().addComponents(menu)] });
+      return interaction.editReply({ content: `${team.reporter} found ${matches.length} eligible match${matches.length === 1 ? '' : 'es'}. Select the game or games for one owner-approved signing announcement and stats update.`, components: [new ActionRowBuilder().addComponents(menu)] });
     }
     if (interaction.commandName === 'signing') {
       const capacity = rosterCapacity(teamKey);
