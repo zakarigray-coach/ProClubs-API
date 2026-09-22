@@ -2,7 +2,13 @@ const sharp = require('sharp');
 
 const WIDTH = 1024;
 const HEIGHT = 1536;
-const LAYOUTS = ['locked-cover'];
+// SOLE PLAYER SPOTLIGHT DESIGN: owner-approved 2026-09-22 magazine cover.
+// Birmingham reference: blue/white distressed RT Football Media cover with dominant player,
+// oversized ghost portrait, left identity panel, right quote/interview panel, brush-name treatment,
+// three-photo film strip and club/league/season footer.
+// CrownFC reference: black/electric-cyan version of the same premium editorial system.
+// No legacy spotlight layouts or rotating templates are permitted.
+const LAYOUTS = ['approved-2026-cover'];
 
 function clean(value, max = 2000) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -24,7 +30,7 @@ function wrap(value, maxChars, maxLines) {
 function textLines(lines, x, y, dy, attrs) {
   return `<text x="${x}" y="${y}" ${attrs}>${lines.map((line, i) => `<tspan x="${x}" dy="${i ? dy : 0}">${esc(line)}</tspan>`).join('')}</text>`;
 }
-function selectSpotlightLayout() { return 'locked-cover'; }
+function selectSpotlightLayout() { return 'approved-2026-cover'; }
 function theme(teamKey) {
   return teamKey === 'crownfc'
     ? { bg: '#02070B', accent: '#18D0F5', accent2: '#0D7FA8', ink: '#FFFFFF', panel: '#061019', border: '#D9D7D1' }
@@ -59,8 +65,8 @@ async function renderSpotlight({ team = {}, teamKey = 'birmingham', story = {}, 
   if (heroBuffer) {
     const main = await sharp(heroBuffer).rotate().resize(600, 1000, { fit: 'cover', position: 'attention' }).png().toBuffer();
     composites.push({ input: main, left: 212, top: 210 });
-    const ghost = await sharp(heroBuffer).rotate().resize(380, 610, { fit: 'cover', position: 'attention' }).grayscale().modulate({ brightness: 0.62 }).png().toBuffer();
-    composites.push({ input: ghost, left: 630, top: 175, blend: 'screen', opacity: 0.32 });
+    const ghost = await sharp(heroBuffer).rotate().resize(380, 610, { fit: 'cover', position: 'attention' }).grayscale().modulate({ brightness: 0.50 }).ensureAlpha(0.32).png().toBuffer();
+    composites.push({ input: ghost, left: 630, top: 175, blend: 'screen' });
     const strip1 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'north' }).png().toBuffer();
     const strip2 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'attention' }).grayscale().png().toBuffer();
     const strip3 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'south' }).png().toBuffer();
