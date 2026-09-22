@@ -153,7 +153,13 @@ const signing = clubOption(new SlashCommandBuilder().setName('signing').setDescr
   .addAttachmentOption(o => o.setName('graphic').setDescription('Optional signing graphic'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const sign = clubOption(new SlashCommandBuilder().setName('sign').setDescription('Start the automated player signing workflow'))
+const sign = new SlashCommandBuilder().setName('sign').setDescription('Collect a player signing package for one or both clubs')
+  .addStringOption(o => o.setName('club').setDescription('Club(s)').setRequired(true)
+    .addChoices(
+      { name: 'Birmingham City (Raine)', value: 'birmingham' },
+      { name: 'CrownFC (Teagan)', value: 'crownfc' },
+      { name: 'Both — Birmingham City + CrownFC', value: 'both' },
+    ))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 const signBatch = clubOption(new SlashCommandBuilder().setName('sign-batch').setDescription('Prepare one unified announcement for 2–5 signings'))
@@ -1106,10 +1112,11 @@ function squadNumberOwner(teamKey, number) {
   return stateStore.getSquadNumber(teamKey, number) || RESERVED_SQUAD_NUMBERS[teamKey]?.[String(number)] || null;
 }
 
-function squadNumberRows(record, action) {
+function squadNumberRows(record, action, overrideTeamKey = null) {
+  const numberTeamKey = overrideTeamKey || record.numberSelectionTeamKey || record.teamKey;
   const available = [];
   for (let number = 1; number <= 99; number += 1) {
-    if (!squadNumberConflict(record.teamKey, String(number), record.id, record.selectedUserId, record.selectedPlayerName)) {
+    if (!squadNumberConflict(numberTeamKey, String(number), record.id, record.selectedUserId, record.selectedPlayerName)) {
       available.push(number);
     }
   }
@@ -1122,7 +1129,7 @@ function squadNumberRows(record, action) {
       .setPlaceholder(`Available numbers ${numbers[0]}–${numbers[numbers.length - 1]}`)
       .addOptions(numbers.map(number => ({
         label: `#${number}`,
-        description: `Available for ${TEAMS[record.teamKey].label}`,
+        description: `Available for ${TEAMS[numberTeamKey].label}`,
         value: String(number),
       })))
   ));
@@ -2271,34 +2278,44 @@ async function startBot() {
   }
 
   async function startSignCommand(interaction, team, teamKey) {
-    const capacity = rosterCapacity(teamKey);
-    if (capacity.full) throw new Error(`${team.label} has reached its ${capacity.limit}-player roster limit. Publish a release before starting another signing.`);
+    const teamKeys = teamKey === 'both' ? ['birmingham', 'crownfc'] : [teamKey];
+    for (const key of teamKeys) {
+      const capacity = rosterCapacity(key);
+      if (capacity.full) throw new Error(`${TEAMS[key].label} has reached its ${capacity.limit}-player roster limit. Publish a release before starting another signing.`);
+    }
     const id = storyId();
     const guild = interaction.guild;
     const requesterUserId = process.env.BOT_OWNER_ID || interaction.user.id;
-    const roleId = process.env[team.alertRoleEnv];
-    const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
     await guild.members.fetch().catch(() => {});
-    const members = role ? [...role.members.values()].filter(m => !m.user.bot).sort((a,b) => a.displayName.localeCompare(b.displayName)).slice(0,24) : [];
-    if (!members.length) throw new Error('No players were found in the configured ' + team.label + ' role.');
+    const memberMap = new Map();
+    for (const key of teamKeys) {
+      const roleId = process.env[TEAMS[key].alertRoleEnv];
+      const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
+      if (role) for (const member of role.members.values()) if (!member.user.bot) memberMap.set(member.id, member);
+    }
+    const members = [...memberMap.values()].sort((a,b) => a.displayName.localeCompare(b.displayName)).slice(0,24);
+    if (!members.length) throw new Error('No eligible players were found in the configured club roles.');
     const menu = new StringSelectMenuBuilder()
       .setCustomId('signing_player:' + id)
       .setPlaceholder('Select the player who signed')
       .addOptions(members.map(member => ({ label: clean(member.displayName,100), description: clean('@'+member.user.username,100), value: member.id })));
-    const reporter = reporterChannelFor(guild, team);
-    if (!reporter) throw new Error('The ' + team.reporter + ' reporter channel could not be found.');
-    const transaction = transactionChannelFor(guild, teamKey);
-    if (!transaction) throw new Error('The ' + team.label + ' transactions channel could not be found.');
+    const primaryKey = teamKeys[0];
+    const primaryTeam = TEAMS[primaryKey];
+    const reporter = reporterChannelFor(guild, primaryTeam);
+    if (!reporter) throw new Error('The reporter channel could not be found.');
+    const transaction = transactionChannelFor(guild, primaryKey);
+    if (!transaction) throw new Error('The transactions channel could not be found.');
     remember({
       id, requesterUserId, guildId:guild.id, sourceMessageId:'slash-'+interaction.id,
       sourceChannelId:interaction.channelId, destinationChannelId:reporter.id, transactionChannelId:transaction.id,
-      teamKey, type:'signing', alertRoleId:roleId, state:'selecting', quickSign:true,
+      teamKey:primaryKey, signingTeamKeys:teamKeys, multiClub:teamKeys.length > 1, type:'signing',
+      alertRoleId:process.env[primaryTeam.alertRoleEnv] || null, state:'selecting', quickSign:true,
       createdAt:new Date().toISOString(), selectionExpiresAt:Date.now()+APPROVAL_WAIT_MS,
     });
+    const clubLabel = teamKeys.length > 1 ? 'Birmingham City + CrownFC' : primaryTeam.label;
     const row = new ActionRowBuilder().addComponents(menu);
-    await interaction.editReply({ content:'Select the ' + team.label + ' player. ' + team.reporter + ' will DM them for their full-body FC27 Pro screenshot and squad number; position is taken from their roster role.', components:[row] });
+    await interaction.editReply({ content:'Select the player signing for **' + clubLabel + '**. The reporter will DM them once to collect player name, nickname, clear FC27 Pro photo, and squad number selection for ' + (teamKeys.length > 1 ? 'each club' : 'the club') + '.', components:[row] });
   }
-
   async function startSignBatchCommand(interaction, team, teamKey) {
     const capacity = rosterCapacity(teamKey);
     if (capacity.available < 2) throw new Error(`${team.label} needs at least two open roster spots for a batch signing.`);
@@ -4441,13 +4458,14 @@ async function startBot() {
       );
     }
 
-    const team = TEAMS[interaction.options.getString('club')];
-    if (!team) return interaction.editReply('That club is not configured.');
+    const selectedClub = interaction.options.getString('club');
     if (interaction.commandName === 'sign') {
-      const teamKey = interaction.options.getString('club');
-      await startSignCommand(interaction, team, teamKey);
+      if (!['birmingham', 'crownfc', 'both'].includes(selectedClub)) return interaction.editReply('That club selection is not configured.');
+      await startSignCommand(interaction, selectedClub === 'both' ? TEAMS.birmingham : TEAMS[selectedClub], selectedClub);
       return;
     }
+    const team = TEAMS[selectedClub];
+    if (!team) return interaction.editReply('That club is not configured.');
     if (interaction.commandName === 'sign-batch') {
       const teamKey = interaction.options.getString('club');
       await startSignBatchCommand(interaction, team, teamKey);
