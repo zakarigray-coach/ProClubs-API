@@ -837,14 +837,14 @@ async function signingPosterGraphic(team, story, graphic, variationKey) {
   const encoded = response && response.data && response.data[0] && response.data[0].b64_json;
   if (!encoded) throw new Error('The image model did not return signing artwork.');
   const art = Buffer.from(encoded, 'base64');
-  const player = safePublicText(story.playerName || 'NEW SIGNING', 40).toUpperCase();
+  const player = safePublicText(story.announcementName || story.playerName || 'NEW SIGNING', 40).toUpperCase();
   const svg = `<svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".12"/><stop offset=".68" stop-color="#000" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".82"/></linearGradient></defs>
     <rect width="1080" height="1350" fill="url(#shade)"/>
     <text x="58" y="92" font-family="Arial, sans-serif" font-size="30" font-weight="800" fill="#fff" letter-spacing="4">RT FOOTBALL MEDIA</text>
     <text x="58" y="1110" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#fff" letter-spacing="7">NEW SIGNING</text>
     <text x="58" y="1210" font-family="Arial Black, Arial, sans-serif" font-size="92" font-weight="900" fill="#fff">SIGNED</text>
-    <text x="58" y="1270" font-family="Arial, sans-serif" font-size="34" font-weight="800" fill="#fff">${escapeXml(player)}</text>
+    <text x="58" y="1282" font-family="Arial Black, Arial, sans-serif" font-size="48" font-weight="900" font-style="italic" fill="#fff" letter-spacing="2">${escapeXml(player)}</text>
     <text x="58" y="1315" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#fff">${escapeXml(team.label.toUpperCase())} • ${escapeXml(team.league)}</text>
   </svg>`;
   const photo = await sharp(art).rotate().resize(1080, 1350, { fit: 'cover', position: 'north' }).png().toBuffer();
@@ -877,6 +877,26 @@ function textInput(id, label, options = {}) {
   if (options.value) input.setValue(clean(options.value, options.max || 700));
   if (options.placeholder) input.setPlaceholder(options.placeholder);
   return new ActionRowBuilder().addComponents(input);
+}
+
+function preferredPositionFromMember(member) {
+  const roles = member && member.roles && member.roles.cache ? [...member.roles.cache.values()].map(role => String(role.name || '').toUpperCase()) : [];
+  const positions = ['GK','RB','LB','CB','CDM','CM','CAM','RM','LM','RW','LW','ST'];
+  return positions.find(pos => roles.some(role => new RegExp('(^|[^A-Z])' + pos + '([^A-Z]|$)').test(role))) || '';
+}
+
+function announcementNameMenu(record) {
+  const base = safePublicText(record.selectedPlayerName || 'PLAYER', 40);
+  const compact = base.replace(/\s+/g, '');
+  const first = base.split(/\s+/)[0] || base;
+  const opts = [...new Set([base, first, compact, '@' + compact, (record.position ? record.position + ' ' : '') + first])]
+    .filter(Boolean).slice(0,5);
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('announcement_name:' + record.id)
+      .setPlaceholder('Choose name / nickname for the signing graphic')
+      .addOptions(opts.map((name,index)=>({label: clean(name,100), value: String(index), description: index===0?'Roster/display name':'Signing graphic nickname option'})))
+  );
 }
 
 function signingFactsModal(id, manual, story) {
@@ -1067,8 +1087,8 @@ function approvalButtons(id) {
 
 function quoteButtons(id) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('number:start:quote:' + id).setLabel('Choose Number & Submit Quote').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('number:start:decline:' + id).setLabel('Choose Number • No Comment').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('number:start:quote:' + id).setLabel('Choose Squad Number').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('number:start:decline:' + id).setLabel('Choose Squad Number').setStyle(ButtonStyle.Secondary)
   );
 }
 
@@ -2011,12 +2031,19 @@ async function startBot() {
       details: record.details,
       playerComment: clean(quote || record.playerQuote, 400),
     };
-    const story = await buildStory(team, record.type, facts, record.graphic);
+    const story = record.type === 'signing'
+      ? {
+          playerName: clean(record.selectedPlayerName || 'NEW SIGNING', 40),
+          announcementName: clean(record.announcementName || record.selectedPlayerName || 'NEW SIGNING', 40),
+          playerNumber: clean(record.playerNumber || '', 8),
+          position: clean(record.position || '', 40),
+          playerQuote: '',
+        }
+      : await buildStory(team, record.type, facts, record.graphic);
     story.playerName = clean(record.selectedPlayerName || story.playerName, 40);
+    story.announcementName = clean(record.announcementName || story.announcementName || story.playerName, 40);
     story.playerNumber = clean(record.playerNumber || story.playerNumber, 8);
-    if (exactTru(record.selectedUserId, story.playerName)) story.playerQuote = 'because I’m a baller';
-    else if (facts.playerComment) story.playerQuote = clean(facts.playerComment, 220);
-    else story.playerQuote = 'No player comment was provided before publication.';
+    story.playerQuote = '';
     record = remember({
       ...record,
       story,
@@ -2211,9 +2238,9 @@ async function startBot() {
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football Media, covering ' +
           team.label + ' in ' + team.reporterCompetition + '. We’re preparing your official signing announcement.\n\n' +
-          'Please send a clear full-body screenshot of your FC27 Pro (head to boots, face visible), then choose your available squad number using the button below. Your position is collected from your roster role. A quote is optional and is not required for the signing graphic.\n\n' +
-          'If your number is already assigned, I’ll ask you to choose another. If you do not provide a photo, RT Football Media will create club-themed artwork instead. Your original screenshot will not be posted publicly.',
-        components: [quoteButtons(record.id)],
+          'Please send a clear full-body screenshot of your FC27 Pro (head to boots, face visible). Then choose your available squad number and the name/nickname you want displayed on the signing graphic below. Your position is taken from your roster role. There are no newspaper questions or signing quote form.\n\n' +
+          'If your number is already assigned, I’ll ask you to choose another. Your original screenshot will only be used to create the announcement artwork.',
+        components: [quoteButtons(record.id), announcementNameMenu(record)],
         allowedMentions: { parse: [] },
       });
       scheduleQuoteTimers(record);
@@ -2928,10 +2955,12 @@ async function startBot() {
         ...pending,
         selectedUserId: member.id,
         selectedPlayerName: preferredPlayerName(member),
-        state: 'collecting_facts',
+        position: preferredPositionFromMember(member),
+        state: 'waiting_for_package',
         manualPlayer: false,
       });
-      return interaction.showModal(signingFactsModal(signingId, false, null));
+      await contactPlayer(pending, member);
+      return interaction.update({ content: 'Player selected. ' + TEAMS[pending.teamKey].reporter + ' has privately contacted ' + member.displayName + ' for their photo, squad number and announcement name.', components: [] });
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('signing_facts:')) {
@@ -3004,6 +3033,25 @@ async function startBot() {
       return interaction.reply(selectorReply);
     }
 
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('announcement_name:')) {
+      const id = interaction.customId.split(':')[1];
+      let record = pendingSignings.get(id) || stateStore.getStory(id);
+      if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return interaction.reply('This signing request is no longer active.');
+      if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
+      const base = safePublicText(record.selectedPlayerName || 'PLAYER', 40);
+      const compact = base.replace(/\s+/g, '');
+      const first = base.split(/\s+/)[0] || base;
+      const opts = [...new Set([base, first, compact, '@' + compact, (record.position ? record.position + ' ' : '') + first])].filter(Boolean).slice(0,5);
+      const chosen = opts[Number(interaction.values[0])] || base;
+      record = remember({ ...record, announcementName: chosen });
+      await interaction.update({ content: 'Signing graphic name set to **' + chosen + '**. Choose your squad number if you have not already.', components: [] });
+      if (record.playerNumber) {
+        pendingPlayerQuotes.delete(record.selectedUserId);
+        await prepareDraft(id, '', { freshHero: true });
+      }
+      return;
+    }
+
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('number_select:')) {
       const [, action, id] = interaction.customId.split(':');
       let record = pendingSignings.get(id) || stateStore.getStory(id);
@@ -3022,10 +3070,11 @@ async function startBot() {
         return interaction.reply(conflictReply);
       }
       record = remember({ ...record, playerNumber: submittedNumber });
-      if (action === 'quote') return interaction.showModal(playerQuoteOnlyModal(id, record));
-      pendingPlayerQuotes.delete(record.selectedUserId);
-      await interaction.update({ content: `#${submittedNumber} is reserved in this signing draft. You declined to comment.`, components: [] });
-      await requestOwnerDecisionWithoutQuote(id, `${record.selectedPlayerName} selected #${submittedNumber} and declined to comment.`);
+      await interaction.update({ content: '#' + submittedNumber + ' is reserved. Now choose your signing graphic name/nickname from the other menu.', components: [] });
+      if (record.announcementName) {
+        pendingPlayerQuotes.delete(record.selectedUserId);
+        await prepareDraft(id, '', { freshHero: true });
+      }
       return;
     }
 
@@ -3124,7 +3173,10 @@ async function startBot() {
         remember({ ...record, state: 'approval_expired' });
         return interaction.update({ content: 'This private approval expired. Nothing was published; start a fresh workflow to verify current facts and artwork.', components: [], attachments: [] });
       }
-      if (action === 'edit') return interaction.showModal(editStoryModal(id, record.story));
+      if (action === 'edit') {
+        if (record.type === 'signing') return interaction.reply('Signing graphics only use NEW SIGNING, SIGNED, and the player-selected name/nickname. There is no newspaper edit form.');
+        return interaction.showModal(editStoryModal(id, record.story));
+      }
       if (action === 'cancel') {
         if (record.sourceMessageId) stateStore.markProcessed(record.sourceMessageId, 'cancelled');
         stateStore.addManagementLog({ action: record.type + '_cancelled', storyId: record.id, teamKey: record.teamKey, requesterUserId: interaction.user.id });
