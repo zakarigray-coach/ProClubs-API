@@ -48,7 +48,7 @@ const {
   archiveCandidates, dueRecurringJobs,
 } = require('./clubOperations');
 const { runPrivateDryRun } = require('./stagingSuite');
-const { renderNewspaper } = require('./rtNewspaperRenderer');
+const { renderNewspaper, RT_NEWSPAPER_RENDERER_VERSION } = require('./rtNewspaperRenderer');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
@@ -892,7 +892,8 @@ async function spotlightGraphic(team, story, graphic, options = {}) {
 
 function newspaperAttachment(buffer, team, type) {
   const slug = (team.label + '-' + type + '-rt-football-news').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  return new AttachmentBuilder(buffer, { name: slug + '.png' });
+  const version = String(RT_NEWSPAPER_RENDERER_VERSION || 'current').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  return new AttachmentBuilder(buffer, { name: slug + '-' + version + '-' + Date.now() + '.png' });
 }
 
 function textInput(id, label, options = {}) {
