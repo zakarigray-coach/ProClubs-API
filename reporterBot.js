@@ -544,7 +544,10 @@ async function buildStory(team, type, facts, graphic) {
       type: error.type,
       message: error.message,
     });
-    if (graphic) throw error;
+    // Article generation must never block the owner preview. If the model
+    // returns malformed/truncated JSON, preserve the verified supplied facts
+    // and continue through the locked newspaper renderer with deterministic copy.
+    console.warn('RT Football Media is using verified fallback newspaper copy for this render.');
     return fallbackArticle(team, type, facts);
   }
 }
