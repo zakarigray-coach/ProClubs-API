@@ -3172,7 +3172,7 @@ async function startBot() {
             'competition type as equally important and do not mention unselected fixtures.\n' +
             JSON.stringify(record.selectedMatches || []),
         }, null);
-        record = remember({ ...record, story, heroPath: null, state: 'draft_ready' });
+        record = remember({ ...record, story, heroPath: null, posterPath: null, state: 'draft_ready' });
         record = (await renderEdition(record, { freshHero: true, variationKey: Date.now() })).record;
         await sendApprovalPreview(record, 'Regenerated private match preview. Verify the score and statistics before publishing.');
       } else {
@@ -3183,7 +3183,7 @@ async function startBot() {
           playerComment: record.story?.playerQuote,
         }, record.graphic);
         if (record.story?.playerQuote) regenerated.playerQuote = record.story.playerQuote;
-        record = remember({ ...record, story: regenerated, heroPath: null, state: 'draft_ready' });
+        record = remember({ ...record, story: regenerated, heroPath: null, posterPath: null, state: 'draft_ready' });
         record = (await renderEdition(record, { freshHero: true, variationKey: Date.now() })).record;
         await sendApprovalPreview(record, `Regenerated private ${record.type.replaceAll('_', ' ')} preview. Verify every fact before publishing.`);
       }
