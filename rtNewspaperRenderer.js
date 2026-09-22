@@ -52,8 +52,8 @@ function leagueLabel(team, teamKey) {
 }
 function theme(teamKey) {
   return teamKey === 'crownfc'
-    ? { accent: '#17C5F3', accent2: '#0D7DA8', dark: '#03070C', ink: '#F7F7F2', paper: '#E8E2D6', clubText: '#17C5F3', footer: 'BUILT DIFFERENT.', footer2: 'MORE THAN A CLUB.' }
-    : { accent: '#188DE8', accent2: '#0D4DA2', dark: '#040911', ink: '#F8F6F1', paper: '#E8E2D6', clubText: '#FFFFFF', footer: 'A NEW ERA', footer2: 'TAKING SHAPE.' };
+    ? { accent: '#17C5F3', accent2: '#0D7DA8', paper: '#E8E2D6', clubText: '#17C5F3' }
+    : { accent: '#188DE8', accent2: '#0D4DA2', paper: '#E8E2D6', clubText: '#FFFFFF' };
 }
 function uniqueSidebar(team, teamKey, type, story) {
   const player = clean(story.playerName || 'The player', 50);
@@ -62,23 +62,18 @@ function uniqueSidebar(team, teamKey, type, story) {
   const previous = clean(story.previousClub || '', 70);
   const league = teamKey === 'crownfc' ? 'MLPC' : 'MPL League 1';
   const quote = `“${quoteExcerpt(story.playerQuote, 12)}”${realQuote(story.playerQuote) ? ` — ${player}` : ''}`;
-
-  if (type === 'signing') {
-    return [
-      ['KEY STORY 1', position ? `${player} joins the squad as a ${position}.` : `${player} joins the squad.`],
-      ['KEY STORY 2', previous ? `The new arrival comes from ${previous}.` : number ? `Squad number ${number} has been assigned.` : 'The signing is officially confirmed.'],
-      ['KEY STORY 3', `${team.label} continue preparations for ${league}.`],
-      ['PLAYER QUOTE', quote],
-    ];
-  }
-  if (type === 'match') {
-    return [
-      ['KEY STORY 1', 'Final result and decisive match moments.'],
-      ['KEY STORY 2', 'Individual performances and verified player stats.'],
-      ['KEY STORY 3', `What the result means for ${team.label}.`],
-      ['PLAYER QUOTE', quote],
-    ];
-  }
+  if (type === 'signing') return [
+    ['KEY STORY 1', position ? `${player} joins the squad as a ${position}.` : `${player} joins the squad.`],
+    ['KEY STORY 2', previous ? `The new arrival comes from ${previous}.` : number ? `Squad number ${number} has been assigned.` : 'The signing is officially confirmed.'],
+    ['KEY STORY 3', `${team.label} continue preparations for ${league}.`],
+    ['PLAYER QUOTE', quote],
+  ];
+  if (type === 'match') return [
+    ['KEY STORY 1', 'Final result and decisive match moments.'],
+    ['KEY STORY 2', 'Individual performances and verified player stats.'],
+    ['KEY STORY 3', `What the result means for ${team.label}.`],
+    ['PLAYER QUOTE', quote],
+  ];
   return [
     ['KEY STORY 1', clean(story.subheadline || `${team.label} lead today’s club report.`, 95)],
     ['KEY STORY 2', `A separate club angle from the ${league} campaign.`],
@@ -94,6 +89,18 @@ function headlineLines(value) {
   }
   return { lines: wrap(h, 32, 3), size: 46, dy: 45 };
 }
+function usableBuffer(value) {
+  return Buffer.isBuffer(value) && value.length > 0;
+}
+async function safeImage(value, width, height, fit = 'contain', position = 'centre') {
+  if (!usableBuffer(value)) return null;
+  try {
+    return await sharp(value).rotate().resize(width, height, { fit, position }).png().toBuffer();
+  } catch (error) {
+    console.warn('RT Media skipped unusable renderer image asset:', error.message);
+    return null;
+  }
+}
 
 async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club', story = {}, date = '', issueNumber = 27, heroBuffer = null, brandBuffer = null, mastheadBuffer = null } = {}) {
   const t = theme(teamKey);
@@ -106,17 +113,15 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
   const footerTop = teamKey === 'crownfc' ? 'BUILT DIFFERENT.' : 'A NEW ERA';
   const footerBottom = teamKey === 'crownfc' ? 'MORE THAN A CLUB.' : 'TAKING SHAPE.';
 
+  const hero = await safeImage(heroBuffer, 676, 485, 'cover', 'attention');
+  const brandSmall = await safeImage(brandBuffer, 120, 120);
+  const brandLarge = await safeImage(brandBuffer, 150, 150);
+  const masthead = await safeImage(mastheadBuffer, 610, 170);
   const composites = [];
-  if (heroBuffer) {
-    composites.push({ input: await sharp(heroBuffer).rotate().resize(676, 485, { fit: 'cover', position: 'attention' }).png().toBuffer(), left: 42, top: 755 });
-  }
-  if (brandBuffer) {
-    composites.push({ input: await sharp(brandBuffer).rotate().resize(120, 120, { fit: 'contain' }).png().toBuffer(), left: 46, top: 340 });
-    composites.push({ input: await sharp(brandBuffer).rotate().resize(150, 150, { fit: 'contain' }).png().toBuffer(), left: 46, top: 1295 });
-  }
-  if (mastheadBuffer) {
-    composites.push({ input: await sharp(mastheadBuffer).rotate().resize(610, 170, { fit: 'contain' }).png().toBuffer(), left: 45, top: 28 });
-  }
+  if (hero) composites.push({ input: hero, left: 42, top: 755 });
+  if (brandSmall) composites.push({ input: brandSmall, left: 46, top: 340 });
+  if (brandLarge) composites.push({ input: brandLarge, left: 46, top: 1295 });
+  if (masthead) composites.push({ input: masthead, left: 45, top: 28 });
 
   const rowMarkup = rows.map((row, i) => {
     const y = 515 + i * 180;
@@ -126,7 +131,7 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
       ${i < 3 ? `<line x1="748" y1="${y + 142}" x2="972" y2="${y + 142}" stroke="${t.accent}" stroke-width="4"/>` : ''}`;
   }).join('');
 
-  const clubTextX = brandBuffer ? 182 : 44;
+  const clubTextX = brandSmall ? 182 : 44;
   const svg = `<svg width="1024" height="1536" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <filter id="grain"><feTurbulence baseFrequency=".55" numOctaves="4" seed="7"/><feColorMatrix values=".8 0 0 0 .3 0 .8 0 0 .3 0 0 .8 0 .3 0 0 0 .12 0"/></filter>
@@ -137,8 +142,7 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
     <rect x="14" y="14" width="996" height="1508" rx="4" fill="#EAE4D8" stroke="#141414" stroke-width="3"/>
     <rect x="28" y="26" width="968" height="235" fill="url(#head)"/>
     <rect x="28" y="26" width="968" height="235" filter="url(#grain)" opacity=".5"/>
-    ${mastheadBuffer ? '' : `<text x="58" y="128" font-family="DejaVu Sans" font-size="72" font-weight="900" font-style="italic" fill="#FFFFFF">RT MEDIA</text>
-      <text x="62" y="177" font-family="DejaVu Sans" font-size="20" font-weight="700" letter-spacing="7" fill="#DDE7F0">PRO CLUBS NEWS NETWORK</text>`}
+    ${masthead ? '' : `<text x="58" y="128" font-family="DejaVu Sans" font-size="72" font-weight="900" font-style="italic" fill="#FFFFFF">RT MEDIA</text><text x="62" y="177" font-family="DejaVu Sans" font-size="20" font-weight="700" letter-spacing="7" fill="#DDE7F0">PRO CLUBS NEWS NETWORK</text>`}
     <text x="760" y="83" font-family="DejaVu Sans" font-size="20" font-weight="900" fill="${t.accent}">REAL CLUBS.</text>
     <text x="760" y="113" font-family="DejaVu Sans" font-size="20" font-weight="900" fill="${t.accent}">REAL STORIES.</text>
     <text x="760" y="143" font-family="DejaVu Sans" font-size="20" font-weight="900" fill="${t.accent}">ALL FOOTBALL</text>
@@ -160,7 +164,7 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
     ${textLines(sub, 42, 690, 38, `font-family="DejaVu Sans" font-size="34" font-weight="900" fill="${t.accent2}"`)}
     <line x1="42" y1="730" x2="718" y2="730" stroke="#111" stroke-width="3"/>
     <text x="380" y="750" text-anchor="middle" font-family="DejaVu Sans" font-size="16" font-weight="900" fill="#222">SOURCE: ${esc(source)}</text>
-    ${heroBuffer ? '' : `<rect x="42" y="755" width="676" height="485" fill="#13243A"/><text x="380" y="1000" text-anchor="middle" font-family="DejaVu Sans" font-size="28" font-weight="800" fill="#DDE7F0">RT FOOTBALL MEDIA</text>`}
+    ${hero ? '' : `<rect x="42" y="755" width="676" height="485" fill="#13243A"/><text x="380" y="1000" text-anchor="middle" font-family="DejaVu Sans" font-size="28" font-weight="800" fill="#DDE7F0">RT FOOTBALL MEDIA</text>`}
     <rect x="28" y="1255" width="968" height="245" fill="#03070B"/>
     <line x1="28" y1="1255" x2="996" y2="1255" stroke="${t.accent}" stroke-width="4"/>
     <text x="245" y="1340" font-family="DejaVu Sans" font-size="55" font-weight="900" fill="#FFFFFF">${esc(footerTop)}</text>
