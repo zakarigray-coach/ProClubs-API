@@ -148,8 +148,43 @@ function safeReporterNote(team, story) {
   return complete || `${team.reporter} reports only the verified details supplied to RT Football Media.`;
 }
 
+function lowerSidebarRows(team, type, story) {
+  if (type === 'signing') return [
+    ['STATUS', 'Official club signing.'],
+    ['ARRIVES FROM', cleanText(story.previousClub || 'Not supplied.')],
+    ['REPORTER', team.reporter],
+  ];
+  if (type === 'spotlight') return [
+    ['FEATURE', 'Weekly player interview.'],
+    ['RESPONSE', realQuote(story.playerQuote) ? 'Player submitted.' : 'No response received.'],
+    ['REPORTER', team.reporter],
+  ];
+  return [
+    ['EDITION', type === 'match' ? 'Matchday report.' : 'Club report.'],
+    ['VERIFICATION', 'Owner approved.'],
+    ['REPORTER', team.reporter],
+  ];
+}
+
+function lowerFeatureCopy(team, type, story) {
+  const player = cleanText(story.playerName || 'The player');
+  if (type === 'signing') {
+    return completeSentences(
+      `${player} is now part of the ${team.label} squad. The move adds another option as the club prepares for the ${shortLeague(team)} campaign.`,
+      32,
+    );
+  }
+  if (type === 'spotlight') {
+    return realQuote(story.playerQuote)
+      ? `${player} shares a personal view of life inside ${team.label}.`
+      : `${player} is profiled using verified club information; no interview quote has been invented.`;
+  }
+  return completeSentences(story.reporterNote, 32)
+    || `${team.reporter} brings the verified story from inside ${team.label}.`;
+}
+
 async function renderNewspaper(options) {
-  const { team, teamKey, type, story, date, issueNumber, heroBuffer, brandBuffer, editionSeed } = options;
+  const { team, teamKey, type, story, date, issueNumber, heroBuffer, brandBuffer, mastheadBuffer, editionSeed } = options;
   const colors = palette(teamKey);
   const headline = headlineLayout(story.headline);
   const headlineStart = 426;
@@ -158,7 +193,9 @@ async function renderNewspaper(options) {
   const mainTop = Math.max(650, subY + 62);
   const mainHeight = 455;
   const rows = sidebarRows(team, type, story);
+  const lowerRows = lowerSidebarRows(team, type, story);
   const paragraphs = storyParagraphs(team, type, story);
+  const lowerCopy = lowerFeatureCopy(team, type, story);
   const quote = realQuote(story.playerQuote)
     ? `“${cleanText(story.playerQuote)}”`
     : realQuote(story.leadershipQuote)
@@ -175,21 +212,10 @@ async function renderNewspaper(options) {
     <defs>
       <filter id="paper"><feTurbulence baseFrequency=".5" numOctaves="4" seed="${escapeXml(editionSeed || 7)}"/><feColorMatrix values=".5 0 0 0 .45 0 .5 0 0 .42 0 0 .5 0 .36 0 0 0 .13 0"/></filter>
       <filter id="rough"><feTurbulence baseFrequency=".025 .7" numOctaves="2" seed="${escapeXml((editionSeed || 7) + 3)}"/><feDisplacementMap in="SourceGraphic" scale="3"/></filter>
-      <linearGradient id="mast" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#061321"/><stop offset="1" stop-color="#02070D"/></linearGradient>
       <linearGradient id="club" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0A3767"/><stop offset=".5" stop-color="${colors.accent2}"/><stop offset="1" stop-color="#071D35"/></linearGradient>
-      <radialGradient id="light"><stop stop-color="#FFFFFF" stop-opacity=".95"/><stop offset=".25" stop-color="#D9ECFF" stop-opacity=".45"/><stop offset="1" stop-color="#5BADE8" stop-opacity="0"/></radialGradient>
     </defs>
     <rect width="1024" height="1536" fill="${colors.paper}"/>
     <rect width="1024" height="1536" filter="url(#paper)" opacity=".7"/>
-    <rect x="16" y="18" width="992" height="214" fill="url(#mast)"/>
-    <ellipse cx="110" cy="58" rx="115" ry="66" fill="url(#light)"/><ellipse cx="906" cy="58" rx="115" ry="66" fill="url(#light)"/>
-    <path d="M18 28 L1006 28 M18 222 L1006 222" stroke="#F5F0E5" stroke-width="2" opacity=".65"/>
-    <text x="42" y="152" font-family="Nimbus Sans Narrow" font-size="112" font-weight="900" font-style="italic" letter-spacing="-7" fill="#F7F3EA" filter="url(#rough)">RT MEDIA</text>
-    <path d="M474 88 L482 48 L503 68 L512 34 L522 68 L543 48 L551 88 Z" fill="none" stroke="${colors.accent}" stroke-width="8" stroke-linejoin="round"/>
-    <line x1="476" y1="94" x2="550" y2="94" stroke="${colors.accent}" stroke-width="8"/>
-    <line x1="760" y1="58" x2="760" y2="186" stroke="#F7F3EA" stroke-width="2"/>
-    ${textLines(['REAL CLUBS.', 'REAL STORIES.', 'ALL FOOTBALL', 'THAT MATTERS.'], 786, 84, 29, `font-family="Nimbus Sans Narrow" font-size="23" font-weight="900" letter-spacing="2" fill="#F7F3EA"`)}
-    <text x="510" y="215" text-anchor="middle" font-family="DejaVu Sans" font-size="14" font-weight="800" letter-spacing="8" fill="#F7F3EA">PRO CLUBS NEWS NETWORK</text>
     <rect x="16" y="238" width="992" height="34" fill="#F7F3EA" stroke="${colors.ink}" stroke-width="2"/>
     <text x="26" y="261" font-family="Nimbus Sans Narrow" font-size="17" font-weight="900" letter-spacing="1" fill="${colors.ink}">${escapeXml(displayDate(date))}</text>
     <text x="548" y="261" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="12" font-weight="800" letter-spacing="1" fill="${colors.ink}">TRANSFERS  |  MATCHDAY  |  CLUB UPDATES  |  COMMUNITY</text>
@@ -197,13 +223,16 @@ async function renderNewspaper(options) {
     <rect x="16" y="281" width="992" height="79" fill="url(#club)"/>
     <text x="${brandBuffer ? 124 : 42}" y="334" font-family="Nimbus Sans Narrow" font-size="48" font-weight="900" letter-spacing="1" fill="#F7F3EA">${escapeXml(team.label.toUpperCase())}</text>
     ${textLines(wrapLines(team.league.toUpperCase(), 20, 2), 760, 312, 23, `font-family="Nimbus Sans Narrow" font-size="18" font-weight="800" letter-spacing=".5" fill="#F7F3EA"`)}
-    ${headline.wrapped.map((line, index) => `<text x="34" y="${headlineStart + index * headline.height}" font-family="Nimbus Sans Narrow" font-size="${headline.size}" font-weight="900" letter-spacing="-3" fill="${index === headline.wrapped.length - 1 && headline.wrapped.length > 1 ? colors.accent2 : colors.ink}">${escapeXml(line)}</text>`).join('')}
+    ${headline.wrapped.map((line, index) => `<text x="34" y="${headlineStart + index * headline.height}" font-family="Nimbus Sans Narrow" font-size="${headline.size}" font-weight="900" letter-spacing="-3" filter="url(#rough)" fill="${index === headline.wrapped.length - 1 && headline.wrapped.length > 1 ? colors.accent2 : colors.ink}">${escapeXml(line)}</text>`).join('')}
     ${textLines(wrapLines(story.subheadline, 58, 2), 36, subY, 28, `font-family="Nimbus Sans Narrow" font-size="23" font-weight="900" letter-spacing=".2" fill="${colors.ink}"`)}
     <line x1="30" y1="${subY + 40}" x2="994" y2="${subY + 40}" stroke="${colors.ink}" stroke-width="3"/>
 
-    <rect x="30" y="${mainTop}" width="211" height="${mainHeight}" fill="#F6F1E7"/>
-    <text x="42" y="${mainTop + 30}" font-family="Nimbus Sans Narrow" font-size="20" font-weight="900" letter-spacing="2" fill="${colors.accent2}">${escapeXml(editionLabel)}</text>
-    ${paragraphs.map((paragraph, index) => textLines(wrapLines(paragraph, 17, 5), 42, mainTop + 70 + index * 117, 22, `font-family="Nimbus Sans Narrow" font-size="19" font-weight="600" fill="${colors.ink}"`)).join('')}
+    <rect x="30" y="${mainTop}" width="211" height="${mainHeight}" fill="#EEE8DB"/>
+    <text x="42" y="${mainTop + 28}" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="2" fill="${colors.accent2}">${escapeXml(editionLabel)}</text>
+    <line x1="42" y1="${mainTop + 40}" x2="222" y2="${mainTop + 40}" stroke="${colors.ink}" stroke-width="2"/>
+    ${paragraphs.map((paragraph, index) => textLines(wrapLines(paragraph, 19, 5), 42, mainTop + 75 + index * 118, 21, `font-family="DejaVu Serif" font-size="18" font-weight="600" fill="${colors.ink}"`)).join('')}
+    <line x1="42" y1="${mainTop + 176}" x2="98" y2="${mainTop + 176}" stroke="${colors.accent2}" stroke-width="3"/>
+    <line x1="42" y1="${mainTop + 294}" x2="98" y2="${mainTop + 294}" stroke="${colors.accent2}" stroke-width="3"/>
     <rect x="254" y="${mainTop}" width="488" height="${mainHeight}" fill="#07111B"/>
     <rect x="756" y="${mainTop}" width="238" height="${mainHeight}" fill="${colors.dark}"/>
     <rect x="756" y="${mainTop}" width="238" height="46" fill="${colors.accent2}"/>
@@ -211,22 +240,30 @@ async function renderNewspaper(options) {
     ${rows.map(([label, value], index) => {
       const y = mainTop + 72 + index * 92;
       return `<line x1="775" y1="${y}" x2="976" y2="${y}" stroke="${colors.accent}" stroke-width="1" opacity=".65"/>
-        <text x="775" y="${y + 27}" font-family="Nimbus Sans Narrow" font-size="19" font-weight="900" fill="#F7F3EA">${escapeXml(label)}</text>
-        ${textLines(wrapLines(value, 22, 2), 775, y + 51, 20, `font-family="Nimbus Sans Narrow" font-size="17" font-weight="600" fill="#DDE8F0"`)}`;
+        <circle cx="793" cy="${y + 35}" r="18" fill="none" stroke="#F7F3EA" stroke-width="3"/>
+        <text x="793" y="${y + 42}" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#F7F3EA">${index + 1}</text>
+        <text x="821" y="${y + 26}" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#F7F3EA">${escapeXml(label)}</text>
+        ${textLines(wrapLines(value, 18, 2), 821, y + 49, 18, `font-family="Nimbus Sans Narrow" font-size="15" font-weight="600" fill="#DDE8F0"`)}`;
     }).join('')}
 
-    <rect x="24" y="1130" width="976" height="302" fill="${colors.dark}"/>
-    <path d="M24 1130 L1000 1130 L1000 1183 L24 1183 Z" fill="url(#club)"/>
-    <text x="47" y="1166" font-family="Nimbus Sans Narrow" font-size="29" font-weight="900" letter-spacing="2" fill="#F7F3EA">${escapeXml(team.reporter.toUpperCase())}</text>
-    <text x="976" y="1166" text-anchor="end" font-family="Nimbus Sans Narrow" font-size="20" font-weight="900" letter-spacing="2" fill="#F7F3EA">${escapeXml(editionLabel)}</text>
-    <text x="54" y="1242" font-family="Nimbus Sans Narrow" font-size="62" font-weight="900" font-style="italic" fill="${colors.accent}">THE WORD</text>
-    <line x1="54" y1="1264" x2="410" y2="1264" stroke="${colors.accent}" stroke-width="3"/>
-    ${textLines(wrapLines(quote, 39, 4), 54, 1303, 30, `font-family="DejaVu Serif" font-size="25" font-weight="700" font-style="italic" fill="#F7F3EA"`)}
-    <text x="54" y="1408" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="2" fill="${colors.accent}">${escapeXml(quoteAttribution)}</text>
-    <line x1="520" y1="1210" x2="520" y2="1405" stroke="#F7F3EA" stroke-width="2" opacity=".7"/>
-    <text x="552" y="1242" font-family="Nimbus Sans Narrow" font-size="24" font-weight="900" letter-spacing="2" fill="${colors.accent}">REPORTER’S VIEW</text>
-    ${textLines(wrapLines(safeReporterNote(team, story), 28, 5), 552, 1285, 27, `font-family="Nimbus Sans Narrow" font-size="20" font-weight="600" fill="#F7F3EA"`)}
-    <text x="552" y="1407" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="2" fill="#F7F3EA">RT FOOTBALL MEDIA</text>
+    <rect x="24" y="1124" width="718" height="308" fill="${colors.dark}" stroke="${colors.ink}" stroke-width="4"/>
+    <path d="M24 1124 L742 1124 L742 1180 L24 1180 Z" fill="url(#club)"/>
+    <path d="M205 1180 L742 1180 L742 1432 L150 1432 Z" fill="#071421" opacity=".9"/>
+    <path d="M220 1191 L730 1191" stroke="${colors.accent}" stroke-width="4" opacity=".85"/>
+    <text x="220" y="1228" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="3" fill="#F7F3EA">${escapeXml(editionLabel)}</text>
+    <text x="220" y="1281" font-family="Nimbus Sans Narrow" font-size="55" font-weight="900" font-style="italic" fill="${colors.accent}" filter="url(#rough)">${escapeXml(cleanText(story.playerName || team.label).toUpperCase())}</text>
+    <text x="220" y="1318" font-family="Nimbus Sans Narrow" font-size="24" font-weight="900" letter-spacing="2" fill="#F7F3EA">${escapeXml(story.playerNumber ? `NUMBER ${cleanText(story.playerNumber)}` : shortLeague(team))}${escapeXml(story.position ? `  •  ${cleanText(story.position).toUpperCase()}` : '')}</text>
+    ${textLines(wrapLines(lowerCopy, 48, 2), 220, 1352, 20, `font-family="DejaVu Serif" font-size="15" font-weight="600" fill="#F7F3EA"`)}
+    ${textLines(wrapLines(quote, 42, 2), 220, 1408, 22, `font-family="DejaVu Serif" font-size="18" font-weight="700" font-style="italic" fill="${colors.accent}"`)}
+    <rect x="756" y="1124" width="238" height="308" fill="${colors.dark}"/>
+    <rect x="756" y="1124" width="238" height="46" fill="${colors.accent2}"/>
+    <text x="775" y="1155" font-family="Nimbus Sans Narrow" font-size="19" font-weight="900" letter-spacing="2" fill="#F7F3EA">KEY STORYLINES</text>
+    ${lowerRows.map(([label, value], index) => {
+      const y = 1190 + index * 76;
+      return `<line x1="775" y1="${y}" x2="976" y2="${y}" stroke="${colors.accent}" stroke-width="1" opacity=".7"/>
+        <text x="775" y="${y + 24}" font-family="Nimbus Sans Narrow" font-size="17" font-weight="900" fill="#F7F3EA">${escapeXml(label)}</text>
+        ${textLines(wrapLines(value, 22, 2), 775, y + 46, 18, `font-family="Nimbus Sans Narrow" font-size="15" font-weight="600" fill="#DDE8F0"`)}`;
+    }).join('')}
     <line x1="24" y1="1460" x2="1000" y2="1460" stroke="${colors.ink}" stroke-width="3"/>
     <text x="38" y="1494" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="${colors.ink}">RT FOOTBALL MEDIA</text>
     <text x="512" y="1494" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="${colors.ink}">CASTLE &amp; CROWN COLLECTIVE</text>
@@ -234,6 +271,10 @@ async function renderNewspaper(options) {
   </svg>`;
 
   const composites = [];
+  if (mastheadBuffer) {
+    const masthead = await sharp(mastheadBuffer).resize(WIDTH, 232, { fit: 'fill' }).png().toBuffer();
+    composites.push({ input: masthead, left: 0, top: 0 });
+  }
   if (heroBuffer) {
     const hero = await sharp(heroBuffer).rotate().resize(480, mainHeight - 8, { fit: 'cover', position: 'north' })
       .modulate({ brightness: 0.94, saturation: 0.94 }).png().toBuffer();
@@ -244,11 +285,13 @@ async function renderNewspaper(options) {
   if (brandBuffer) {
     const brand = await sharp(brandBuffer).rotate().resize(70, 68, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
     composites.push({ input: brand, left: 38, top: 286 });
+    const lowerBrand = await sharp(brandBuffer).rotate().resize(150, 190, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+    composites.push({ input: lowerBrand, left: 43, top: 1192 });
   }
   return sharp(Buffer.from(svg)).composite(composites).png({ compressionLevel: 9 }).toBuffer();
 }
 
 module.exports = {
   renderNewspaper, palette, wrapLines, limitWords, completeSentences, headlineLayout,
-  storyParagraphs, sidebarRows, WIDTH, HEIGHT,
+  storyParagraphs, sidebarRows, lowerSidebarRows, lowerFeatureCopy, WIDTH, HEIGHT,
 };

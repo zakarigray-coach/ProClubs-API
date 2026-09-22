@@ -827,14 +827,19 @@ async function newspaperGraphic(team, type, story, graphic, options = {}) {
   const teamKey = team === TEAMS.crownfc ? 'crownfc' : 'birmingham';
   const crownCrestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
   const birminghamKitPath = path.join(__dirname, 'assets', 'birmingham-city-kit.jpg');
+  const birminghamCrestPath = path.join(__dirname, 'assets', 'birmingham-city-crest-white.png');
+  const mastheadPath = path.join(__dirname, 'assets', 'rt-media-masthead.jpg');
   let brandBuffer = null;
   if (teamKey === 'crownfc' && fs.existsSync(crownCrestPath)) {
     brandBuffer = fs.readFileSync(crownCrestPath);
+  } else if (teamKey === 'birmingham' && fs.existsSync(birminghamCrestPath)) {
+    brandBuffer = fs.readFileSync(birminghamCrestPath);
   } else if (teamKey === 'birmingham' && fs.existsSync(birminghamKitPath)) {
     brandBuffer = await sharp(birminghamKitPath).extract({ left: 330, top: 155, width: 105, height: 145 }).png().toBuffer();
   }
   const issue = String(options.issueNumber || Math.max(1, Math.floor(Date.now() / 86400000) % 10000)).replace(/^0+/, '') || '1';
-  return renderNewspaper({ team, teamKey, type, story, date, issueNumber: issue, heroBuffer: resolvedHero, brandBuffer, editionSeed: options.editionSeed });
+  const mastheadBuffer = fs.existsSync(mastheadPath) ? fs.readFileSync(mastheadPath) : null;
+  return renderNewspaper({ team, teamKey, type, story, date, issueNumber: issue, heroBuffer: resolvedHero, brandBuffer, mastheadBuffer, editionSeed: options.editionSeed });
 }
 
 function newspaperAttachment(buffer, team, type) {
