@@ -4,10 +4,13 @@ const WIDTH = 1024;
 const HEIGHT = 1536;
 
 // LOCKED RT FOOTBALL MEDIA NEWSPAPER TEMPLATE
-// Visual contract: premium printed football front page matching the owner-approved
-// RT Media reference. Do not replace this with the legacy flat-card layout.
-// Birmingham hero artwork must use the current official kit references supplied
-// by reporterBot.js (assets/birmingham-city-kit.jpg / away kit).
+// SOLE NEWSPAPER DESIGN: owner-approved 2026-09-22 RT Media front page.
+// Reference composition: distressed print border; stadium RT masthead; compact date/nav strip;
+// photographic club banner; EXCLUSIVE strap; oversized two-tone editorial headline;
+// torn-paper article/byline at left; dominant player artwork center; photographic INSIDE TODAY
+// cards at right with story #4 reserved for PLAYER QUOTE; photographic stadium footer.
+// No legacy flat-card/newspaper variants are permitted. Birmingham artwork must use the
+// newest official 2026/27 kit references supplied by reporterBot.js.
 
 function clean(value, max = 2000) {
   return String(value || '').replace(/\s+/g, ' ').replace(/\.{3}|…/g, '').trim().slice(0, max);
@@ -147,8 +150,8 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
       (i < 3 ? '<line x1="758" y1="' + (y + 151) + '" x2="982" y2="' + (y + 151) + '" stroke="' + t.accent + '" stroke-width="4"/>' : '');
   }).join('');
 
-  const footerMain = teamKey === 'crownfc' ? 'BUILT DIFFERENT.' : 'A BIGGER STAGE.';
-  const footerAccent = teamKey === 'crownfc' ? 'MORE THAN A CLUB.' : 'SAME AMBITION.';
+  const footerMain = teamKey === 'crownfc' ? 'MORE THAN A CLUB.' : 'A BIGGER STAGE.';
+  const footerAccent = teamKey === 'crownfc' ? 'BUILT FOR THE CROWN.' : 'SAME AMBITION.';
   const svg = '<svg width="' + WIDTH + '" height="' + HEIGHT + '" xmlns="http://www.w3.org/2000/svg">' +
     '<defs>' +
       '<filter id="grain"><feTurbulence baseFrequency=".7" numOctaves="3" seed="12"/><feColorMatrix values=".8 0 0 0 .2 0 .8 0 0 .2 0 0 .8 0 .2 0 0 0 .09 0"/></filter>' +
