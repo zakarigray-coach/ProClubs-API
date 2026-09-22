@@ -172,6 +172,8 @@ Pending selections, quote requests, approvals, cached source graphics, statistic
 
 The exact owner-supplied CrownFC identity artwork is stored in `assets/crownfc-brand.jpg` with its production crest crop in `assets/crownfc-crest.png`. CrownFC media uses Carolina/cyan blue, deep navy, royal blue, white and silver—never gold.
 
+Official signing and newspaper artwork rotates deterministically between the saved kit references so consecutive editions do not all reuse one shirt. Birmingham City uses its blue CORAL home kit and yellow CORAL away kit. CrownFC uses the supplied black and Carolina-blue/white Adidas/ally shirt bases, but the generator must remove the Charlotte identity and replace it with the exact saved CrownFC crest. The player image, chosen kit, and CrownFC crest are passed as separate identity references; sponsor and chest marks are required rather than left blank.
+
 ## Targeted role alerts
 
 Reporter posts can notify only the relevant club role instead of using `@everyone`. Add `BIRMINGHAM_ROLE_ID` and `MLPC_ROLE_ID` in Railway. Raine’s posts mention only the Birmingham role; Teagan’s posts mention only the MLPC role. The role must be mentionable, or the bot must have permission to mention roles.

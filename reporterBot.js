@@ -608,19 +608,77 @@ async function fetchImage(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+function stableVariantIndex(value, count) {
+  const hash = crypto.createHash('sha256').update(String(value || Date.now())).digest();
+  return hash.readUInt32BE(0) % count;
+}
+
+function officialKitReference(team, variationKey) {
+  // A poster and its matching newspaper cover share one kit, while different
+  // signing editions still rotate between the saved home/away references.
+  const editionKey = String(variationKey || Date.now()).replace(/-poster$/, '');
+  const choices = team === TEAMS.birmingham
+    ? [
+        { id: 'birmingham-home', path: 'birmingham-city-kit.jpg' },
+        { id: 'birmingham-away', path: 'birmingham-city-away-kit.jpg' },
+      ]
+    : team === TEAMS.crownfc
+      ? [
+          { id: 'crownfc-black', path: 'crownfc-black-kit.jpg' },
+          { id: 'crownfc-blue', path: 'crownfc-blue-kit.jpg' },
+        ]
+      : [];
+  const available = choices
+    .map(kit => ({ ...kit, path: path.join(__dirname, 'assets', kit.path) }))
+    .filter(kit => fs.existsSync(kit.path));
+  if (!available.length) return null;
+  return available[stableVariantIndex(editionKey, available.length)];
+}
+
+function officialCrestReference(team) {
+  if (team !== TEAMS.crownfc) return null;
+  const crestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
+  return fs.existsSync(crestPath) ? crestPath : null;
+}
+
+function officialKitDirection(team, kit, hasPlayerReference, hasCrestReference) {
+  if (!kit) return '';
+  const referenceOrder = hasPlayerReference
+    ? 'The first reference is the player identity and the second reference is the official shirt. '
+    : 'The first reference is the official shirt. ';
+  const crestOrder = hasCrestReference
+    ? (hasPlayerReference ? 'The third reference is the exact CrownFC crest. ' : 'The second reference is the exact CrownFC crest. ')
+    : '';
+  const manufacturing = 'The shirt must look like a real manufactured football kit with natural seams, fabric texture, folds, shadows, and correct logo placement. ';
+  if (kit.id === 'birmingham-home') {
+    return referenceOrder + 'Dress the player in that exact Birmingham City royal-blue short-sleeve polo-collar home kit. If the player reference visibly has long sleeves, preserve that look as a fitted royal-blue base layer beneath the official short sleeves. Preserve the white Nike swoosh, Birmingham City crest, and large white CORAL sponsor wordmark with its small multicolor mark. ' + manufacturing + 'Do not blank, omit, replace, blur, mirror, misspell, or invent the sponsor or chest marks.';
+  }
+  if (kit.id === 'birmingham-away') {
+    return referenceOrder + 'Dress the player in that exact Birmingham City bright-yellow short-sleeve away kit with blue trim. If the player reference visibly has long sleeves, use a fitted yellow base layer beneath the official short sleeves. Preserve the blue Nike swoosh, Birmingham City crest, and large blue CORAL sponsor wordmark with its small multicolor mark. ' + manufacturing + 'Do not blank, omit, replace, blur, mirror, misspell, or invent the sponsor or chest marks.';
+  }
+  const shirtDescription = kit.id === 'crownfc-black'
+    ? 'that black patterned Adidas short-sleeve kit with cyan collar trim, white Adidas chest mark, and large white ally sponsor'
+    : 'that Carolina-blue torso and white-sleeve Adidas short-sleeve kit with cyan trim, white Adidas chest mark, and large white ally sponsor';
+  return referenceOrder + crestOrder + 'Use the Charlotte shirt only as the base garment and dress the player in ' + shirtDescription + '. Remove the Charlotte/CFC crest completely and replace it in the same chest position with the exact supplied CrownFC crest. No Charlotte badge, initials, or identity may remain. If the player reference visibly has long sleeves, use a fitted matching base layer beneath the official short sleeves. ' + manufacturing + 'Preserve the Adidas and ally marks, never introduce gold, and do not blank, omit, blur, mirror, misspell, or invent the sponsor or CrownFC crest.';
+}
+
 async function generateHeroImage(team, type, story, graphic, variationKey) {
   if (!process.env.OPENAI_API_KEY || !OpenAI) {
     throw new Error('Fresh image generation requires OPENAI_API_KEY and API billing.');
   }
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const style = HERO_STYLES[Math.abs(Number.parseInt(String(variationKey || '0').slice(-6), 16) || Date.now()) % HERO_STYLES.length];
+  const kitReference = officialKitReference(team, variationKey);
+  const crestReferencePath = officialCrestReference(team);
+  const kitDirection = officialKitDirection(team, kitReference, Boolean(graphic), Boolean(crestReferencePath));
   const prompt = [
     'Create a fresh landscape hero photograph for a professional football newspaper front page.',
     'Story: ' + safePublicText(story.headline, 90) + '.',
     'Club: ' + team.label + '. Palette: ' + team.visualPalette + '.',
     'Visual direction: ' + style + '.',
+    kitDirection,
     type === 'signing' && graphic
-      ? 'Preserve the featured player’s recognizable face, hairstyle, skin tone, body build, footwear, and sleeve length from the reference image. If the reference has long sleeves keep long sleeves; if it has short sleeves keep short sleeves. Create a distinctly new pose and composition rather than copying the reference pose. Use the club color identity without inventing readable sponsor or crest text.'
+      ? 'Preserve the featured player’s recognizable face, hairstyle, skin tone, body build, and footwear from the player reference image. Create a distinctly new pose and composition rather than copying the reference pose.'
       : type === 'signing'
         ? 'No player photo was supplied. Create a club-related signing scene without an identifiable person: use a dramatic stadium tunnel, folded club-color shirt, scarf, floodlights, supporters, or a signing desk. Do not invent a player face.'
       : type === 'spotlight'
@@ -630,7 +688,9 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
         : type === 'weekly_recap'
           ? 'Create an editorial week-in-review football collage atmosphere without adding scores, text, logos, or invented player identities.'
           : 'Create an authentic matchday football scene inspired by the verified story without inventing a visible score or player identity.',
-    'Do not add words, headlines, dates, numbers, watermarks, sponsor marks, league marks, or fabricated crests. Leave useful negative space for newspaper overlays.',
+    kitReference
+      ? 'Do not add headlines, dates, shirt numbers, watermarks, league marks, or unrelated text. The authentic kit manufacturer, club crest, and sponsor marks required by the supplied references are the only text/logo exceptions. Leave useful negative space for newspaper overlays.'
+      : 'Do not add words, headlines, dates, numbers, watermarks, sponsor marks, league marks, or fabricated crests. Leave useful negative space for newspaper overlays.',
     'Unique edition key: ' + String(variationKey || Date.now()) + '.',
   ].join(' ');
   const request = {
@@ -640,12 +700,24 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
     quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
   };
   let response;
-  if (type === 'signing' && graphic && toFile) {
-    const source = await fetchImage(graphic);
-    const normalized = await sharp(source).rotate().resize(1536, 1024, { fit: 'contain', background: '#111111' }).png().toBuffer();
+  if (toFile && ((type === 'signing' && graphic) || kitReference)) {
+    const editImages = [];
+    if (type === 'signing' && graphic) {
+      const source = await fetchImage(graphic);
+      const normalized = await sharp(source).rotate().resize(1536, 1024, { fit: 'contain', background: '#111111' }).png().toBuffer();
+      editImages.push(await toFile(normalized, 'player-reference.png', { type: 'image/png' }));
+    }
+    if (kitReference) {
+      const kit = await sharp(kitReference.path).rotate().resize(1024, 1024, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
+      editImages.push(await toFile(kit, kitReference.id + '.png', { type: 'image/png' }));
+    }
+    if (crestReferencePath) {
+      const crest = await sharp(crestReferencePath).rotate().resize(1024, 1024, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+      editImages.push(await toFile(crest, 'official-crownfc-crest.png', { type: 'image/png' }));
+    }
     response = await client.images.edit({
       ...request,
-      image: await toFile(normalized, 'player-reference.png', { type: 'image/png' }),
+      image: editImages.length === 1 ? editImages[0] : editImages,
     });
   } else {
     response = await client.images.generate(request);
@@ -657,17 +729,23 @@ async function generateHeroImage(team, type, story, graphic, variationKey) {
 
 
 async function signingPosterGraphic(team, story, graphic, variationKey) {
-  if (!process.env.OPENAI_API_KEY || !OpenAI || (graphic && !toFile)) throw new Error('Signing artwork requires OPENAI_API_KEY and image support.');
+  const kitReference = officialKitReference(team, variationKey);
+  if (!process.env.OPENAI_API_KEY || !OpenAI || ((graphic || kitReference) && !toFile)) throw new Error('Signing artwork requires OPENAI_API_KEY and image support.');
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const crestReferencePath = officialCrestReference(team);
+  const kitDirection = officialKitDirection(team, kitReference, Boolean(graphic), Boolean(crestReferencePath));
   const prompt = [
     graphic
       ? 'Create a premium vertical professional football signing portrait using the supplied FC player screenshot as the identity reference.'
       : 'Create a premium vertical professional football club signing announcement background without showing an identifiable player.',
     'Club: ' + team.label + '. Color identity: ' + team.visualPalette + '.',
+    kitDirection,
     graphic
-      ? 'Preserve the player’s recognizable face, hairstyle, facial hair, skin tone, body build, footwear and especially sleeve length from the reference. If the reference has long sleeves, keep long sleeves. If it has short sleeves, keep short sleeves. Put the player in the correct club color identity and create a fresh confident signing-announcement pose. Do not simply copy the reference pose.'
+      ? 'Preserve the player’s recognizable face, hairstyle, facial hair, skin tone, body build, and footwear from the player reference. Create a fresh confident signing-announcement pose and do not simply copy the reference pose.'
       : 'Feature club-related football imagery such as a floodlit stadium tunnel, an unnumbered folded shirt, scarf, supporters, or a signing desk. Keep the presentation dramatic and do not invent a person or player likeness.',
-    'Do not render any words, names, numbers, sponsor text, league logos, watermarks, or fake readable crests. Exact typography will be added separately.',
+    kitReference
+      ? 'Do not render announcement words, player names, shirt numbers, league logos, watermarks, or unrelated text. The authentic manufacturer, club crest, and sponsor marks required by the supplied references are the only text/logo exceptions. Exact announcement typography will be added separately.'
+      : 'Do not render any words, names, numbers, sponsor text, league logos, watermarks, or fake readable crests. Exact typography will be added separately.',
     'Use dramatic stadium/tunnel lighting and leave clean space near the top and bottom for graphic-design text.',
     'Edition key: ' + String(variationKey || Date.now()) + '.'
   ].join(' ');
@@ -678,12 +756,24 @@ async function signingPosterGraphic(team, story, graphic, variationKey) {
     quality: process.env.OPENAI_IMAGE_QUALITY || 'medium',
   };
   let response;
-  if (graphic) {
-    const source = await fetchImage(graphic);
-    const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#101010' }).png().toBuffer();
+  if (graphic || kitReference) {
+    const editImages = [];
+    if (graphic) {
+      const source = await fetchImage(graphic);
+      const normalized = await sharp(source).rotate().resize(1024, 1536, { fit: 'contain', background: '#101010' }).png().toBuffer();
+      editImages.push(await toFile(normalized, 'player-reference.png', { type: 'image/png' }));
+    }
+    if (kitReference) {
+      const kit = await sharp(kitReference.path).rotate().resize(1024, 1024, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
+      editImages.push(await toFile(kit, kitReference.id + '.png', { type: 'image/png' }));
+    }
+    if (crestReferencePath) {
+      const crest = await sharp(crestReferencePath).rotate().resize(1024, 1024, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+      editImages.push(await toFile(crest, 'official-crownfc-crest.png', { type: 'image/png' }));
+    }
     response = await client.images.edit({
       ...request,
-      image: await toFile(normalized, 'player-reference.png', { type: 'image/png' }),
+      image: editImages.length === 1 ? editImages[0] : editImages,
     });
   } else {
     response = await client.images.generate(request);
