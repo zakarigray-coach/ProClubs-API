@@ -300,6 +300,16 @@ function preferredPlayerName(member, fallback = '') {
   return exactTru(member?.id, candidate) ? 'Tru' : candidate;
 }
 
+function replacePlayerNameInStory(story, previousName, preferredName) {
+  if (!story || !previousName || !preferredName || previousName === preferredName) return story;
+  const escaped = String(previousName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(escaped, 'gi');
+  return Object.fromEntries(Object.entries(story).map(([key, value]) => [
+    key,
+    typeof value === 'string' ? value.replace(pattern, preferredName) : value,
+  ]));
+}
+
 function normalizeSquadNumber(value) {
   const raw = clean(value, 8).replace(/^#/, '').trim();
   if (!raw) return '';
@@ -1250,13 +1260,22 @@ async function startBot() {
     }
     for (const record of stateStore.listStories()) {
       if (['published', 'cancelled'].includes(record.state)) continue;
-      pendingSignings.set(record.id, record);
-      if (['waiting_for_quote', 'waiting_for_package'].includes(record.state) && record.selectedUserId) {
-        pendingPlayerQuotes.set(record.selectedUserId, record.id);
-        if (Number(record.quoteExpiresAt) <= Date.now()) {
-          await requestOwnerDecisionWithoutQuote(record.id, 'The player quote window expired while the bot was offline.').catch(console.error);
+      let recovered = record;
+      if (exactTru(record.selectedUserId, record.selectedPlayerName) && record.selectedPlayerName !== 'Tru') {
+        recovered = stateStore.putStory({
+          ...record,
+          selectedPlayerName: 'Tru',
+          story: replacePlayerNameInStory(record.story, record.selectedPlayerName, 'Tru'),
+          posterPath: null,
+        });
+      }
+      pendingSignings.set(recovered.id, recovered);
+      if (['waiting_for_quote', 'waiting_for_package'].includes(recovered.state) && recovered.selectedUserId) {
+        pendingPlayerQuotes.set(recovered.selectedUserId, recovered.id);
+        if (Number(recovered.quoteExpiresAt) <= Date.now()) {
+          await requestOwnerDecisionWithoutQuote(recovered.id, 'The player quote window expired while the bot was offline.').catch(console.error);
         } else {
-          scheduleQuoteTimers(record);
+          scheduleQuoteTimers(recovered);
         }
       }
     }
