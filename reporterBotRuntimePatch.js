@@ -1,0 +1,51 @@
+const fs = require('fs');
+const path = require('path');
+const Module = require('module');
+
+/**
+ * Loads reporterBot.js with a small, fail-fast source patch that preserves the
+ * original Discord image URL alongside the /data cached copy. This lets a
+ * regenerated story restore its player/source image automatically if the
+ * local cached file is ever missing.
+ *
+ * Kept separate so the production hotfix is explicit and easy to remove once
+ * the same changes are folded directly into reporterBot.js.
+ */
+function loadReporterBot() {
+  const filename = path.join(__dirname, 'reporterBot.js');
+  let source = fs.readFileSync(filename, 'utf8');
+
+  const replacements = [
+    {
+      name: 'fetchImage source-url fallback',
+      from: `async function fetchImage(url) {\n  if (url && typeof url === 'object' && url.localPath && fs.existsSync(url.localPath)) {\n    return fs.readFileSync(url.localPath);\n  }\n  if (url && typeof url === 'object') url = url.url;\n  if (!url) return null;`,
+      to: `async function fetchImage(url) {\n  if (url && typeof url === 'object' && url.localPath && fs.existsSync(url.localPath)) {\n    return fs.readFileSync(url.localPath);\n  }\n  if (url && typeof url === 'object') url = url.url || url.sourceUrl;\n  if (!url) return null;`,
+    },
+    {
+      name: 'cacheGraphic source-url persistence',
+      from: `async function cacheGraphic(id, graphic) {\n  if (!graphic || (!graphic.url && !graphic.localPath)) return null;\n  if (graphic.localPath && fs.existsSync(graphic.localPath)) return graphic;\n  const source = await fetchImage(graphic.url);\n  const localPath = storyPath(id, 'source.png');\n  await sharp(source).rotate().png().toFile(localPath);\n  return { contentType: 'image/png', localPath };\n}`,
+      to: `async function cacheGraphic(id, graphic) {\n  if (!graphic) return null;\n  const sourceUrl = graphic.url || graphic.sourceUrl || '';\n  if (!sourceUrl && !graphic.localPath) return null;\n  if (graphic.localPath && fs.existsSync(graphic.localPath)) {\n    return { ...graphic, sourceUrl: sourceUrl || graphic.sourceUrl || '' };\n  }\n  if (!sourceUrl) return null;\n  const source = await fetchImage(sourceUrl);\n  if (!source || !source.length) throw new Error('The saved player/source image could not be recovered.');\n  const localPath = storyPath(id, 'source.png');\n  await sharp(source).rotate().png().toFile(localPath);\n  return { contentType: 'image/png', localPath, sourceUrl };\n}`,
+    },
+    {
+      name: 'renderEdition image recovery',
+      from: `  async function renderEdition(record, options = {}) {\n    const team = TEAMS[record.teamKey];\n    let reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };\n    let heroPath = record.heroPath;`,
+      to: `  async function renderEdition(record, options = {}) {\n    const team = TEAMS[record.teamKey];\n    let reportStory = { ...record.story, seasonLine: seasonLine(record.teamKey) };\n\n    // The player/source image is part of the story package. Keep a durable\n    // /data copy and recover it from its original Discord URL when needed so\n    // Regenerate never silently loses a photo that was already submitted.\n    if (record.graphic) {\n      const localReady = Boolean(record.graphic.localPath && fs.existsSync(record.graphic.localPath));\n      const recoverable = record.graphic.url || record.graphic.sourceUrl;\n      if (!localReady && recoverable) {\n        try {\n          const recoveredGraphic = await cacheGraphic(record.id, record.graphic);\n          if (recoveredGraphic) record = remember({ ...record, graphic: recoveredGraphic });\n        } catch (error) {\n          console.warn('RT Football Media could not recover the saved source image; using safe artwork fallback:', error.message);\n        }\n      }\n    }\n\n    let heroPath = record.heroPath;`,
+    },
+  ];
+
+  for (const replacement of replacements) {
+    if (!source.includes(replacement.from)) {
+      throw new Error(`RT Media runtime patch anchor missing: ${replacement.name}`);
+    }
+    source = source.replace(replacement.from, replacement.to);
+  }
+
+  const patched = new Module(filename, module.parent || module);
+  patched.filename = filename;
+  patched.paths = Module._nodeModulePaths(__dirname);
+  patched._compile(source, filename);
+  console.log('RT Football Media source-image persistence patch loaded.');
+  return patched.exports;
+}
+
+module.exports = { loadReporterBot };
