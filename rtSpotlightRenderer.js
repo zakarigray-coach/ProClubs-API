@@ -63,10 +63,10 @@ async function renderSpotlight({ team = {}, teamKey = 'birmingham', story = {}, 
   ];
   const composites = [];
   if (heroBuffer) {
-    const main = await sharp(heroBuffer).rotate().resize(600, 1000, { fit: 'cover', position: 'attention' }).png().toBuffer();
-    composites.push({ input: main, left: 212, top: 210 });
-    const ghost = await sharp(heroBuffer).rotate().resize(380, 610, { fit: 'cover', position: 'attention' }).grayscale().modulate({ brightness: 0.50 }).ensureAlpha(0.32).png().toBuffer();
-    composites.push({ input: ghost, left: 630, top: 175, blend: 'screen' });
+    const main = await sharp(heroBuffer).rotate().resize(650, 1040, { fit: 'cover', position: 'attention' }).png().toBuffer();
+    composites.push({ input: main, left: 185, top: 190 });
+    const ghost = await sharp(heroBuffer).rotate().resize(420, 650, { fit: 'cover', position: 'attention' }).grayscale().modulate({ brightness: 0.50 }).ensureAlpha(0.32).png().toBuffer();
+    composites.push({ input: ghost, left: 595, top: 165, blend: 'screen' });
     const strip1 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'north' }).png().toBuffer();
     const strip2 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'attention' }).grayscale().png().toBuffer();
     const strip3 = await sharp(heroBuffer).rotate().resize(260, 245, { fit: 'cover', position: 'south' }).png().toBuffer();
@@ -94,7 +94,7 @@ async function renderSpotlight({ team = {}, teamKey = 'birmingham', story = {}, 
   const sectionNames = teamKey === 'crownfc' ? ['ON JOINING CROWNFC', 'ON LEADERSHIP', 'ON THE SEASON AHEAD'] : ['ON JOINING BIRMINGHAM', 'ON LEADERSHIP', 'ON THE SEASON AHEAD'];
   const interviewMarkup = interview.map((v, i) => {
     const y = 790 + i * 132;
-    return `<text x="805" y="${y}" font-family="DejaVu Sans" font-size="16" font-weight="900" fill="${t.accent}">${esc(sectionNames[i])}</text>
+    return `<text x="792" y="${y}" font-family="DejaVu Sans" font-size="16" font-weight="900" fill="${t.accent}">${esc(sectionNames[i])}</text>
       ${textLines(wrap(v, 21, 4), 805, y + 29, 23, `font-family="DejaVu Sans" font-size="15" font-weight="500" fill="#FFFFFF"`)}
       ${i < 2 ? `<line x1="805" y1="${y + 105}" x2="976" y2="${y + 105}" stroke="${t.accent}" stroke-width="3"/>` : ''}`;
   }).join('');
@@ -120,7 +120,7 @@ async function renderSpotlight({ team = {}, teamKey = 'birmingham', story = {}, 
     <text x="815" y="450" font-family="DejaVu Sans" font-size="85" font-weight="900" fill="${t.accent}">“</text>
     ${textLines(qLines, 790, 520, 42, `font-family="DejaVu Sans" font-size="30" font-weight="900" fill="#FFFFFF"`)}
     <text x="790" y="690" font-family="DejaVu Sans" font-size="44" font-weight="900" font-style="italic" fill="${t.accent}">${esc(bigName)}</text>
-    <rect x="785" y="748" width="203" height="405" fill="#03070B" fill-opacity=".82" stroke="${t.accent}" stroke-width="2"/>
+    <rect x="770" y="735" width="218" height="420" fill="#03070B" fill-opacity=".82" stroke="${t.accent}" stroke-width="2"/>
     ${interviewMarkup}
     <rect x="180" y="920" width="650" height="280" fill="url(#fade)"/>
     <text x="220" y="1002" font-family="DejaVu Sans" font-size="118" font-weight="900" font-style="italic" fill="#FFFFFF">${esc(player)}</text>
