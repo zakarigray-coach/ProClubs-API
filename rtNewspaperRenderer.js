@@ -29,6 +29,21 @@ function wrapLines(value, maxChars, maxLines) {
   return lines.slice(0, maxLines);
 }
 
+function completeLineBlock(value, maxChars, maxLines, fallback = '') {
+  const source = cleanText(value);
+  const full = wrapLines(source, maxChars, 99);
+  if (full.length <= maxLines) return full;
+  const sentences = source.match(/[^.!?]+[.!?]+/g) || [];
+  for (let count = sentences.length; count > 0; count -= 1) {
+    const candidate = sentences.slice(0, count).join(' ').trim();
+    const lines = wrapLines(candidate, maxChars, 99);
+    if (lines.length <= maxLines) return lines;
+  }
+  const fallbackLines = wrapLines(fallback, maxChars, 99);
+  if (fallbackLines.length <= maxLines) return fallbackLines;
+  throw new Error('RT Media validation failed: complete copy does not fit the approved layout.');
+}
+
 function limitWords(value, count) {
   return cleanText(value).split(' ').filter(Boolean).slice(0, count).join(' ');
 }
@@ -56,13 +71,29 @@ function textLines(lines, x, y, lineHeight, attrs) {
 
 function palette(teamKey) {
   if (teamKey === 'crownfc') {
-    return { accent: '#45C7F2', accent2: '#146AB3', ink: '#101216', dark: '#050C14', paper: '#EEE8DB' };
+    return {
+      accent: '#45C7F2', accent2: '#146AB3', ink: '#F5F2E9', muted: '#DDE8F0',
+      dark: '#030910', paper: '#050A11', copyPanel: '#07111B', featurePanel: '#050C14',
+      featureText: '#F5F2E9', frame: '#F5F2E9', textureOpacity: '.2',
+    };
   }
-  return { accent: '#12A9EA', accent2: '#155EAA', ink: '#101216', dark: '#050C14', paper: '#EEE8DB' };
+  return {
+    accent: '#12A9EA', accent2: '#155EAA', ink: '#101216', muted: '#30343A',
+    dark: '#050C14', paper: '#EEE8DB', copyPanel: '#EEE8DB', featurePanel: '#EEE8DB',
+    featureText: '#101216', frame: '#101216', textureOpacity: '.7',
+  };
 }
 
 function realQuote(value) {
   return value && !/^no .*comment/i.test(value) && !/not supplied/i.test(value);
+}
+
+function exactQuoteExcerpt(value, maxWords = 14) {
+  const source = cleanText(value);
+  if (!realQuote(source)) return '';
+  if (source.split(/\s+/).length <= maxWords) return source;
+  const complete = completeSentences(source, maxWords);
+  return complete || '';
 }
 
 function headlineLayout(value) {
@@ -117,12 +148,18 @@ function storyParagraphs(team, type, story) {
 }
 
 function sidebarRows(team, type, story) {
-  if (type === 'signing') return [
-    ['OFFICIAL MOVE', 'Club confirmation received.'],
-    ['SQUAD FILE', 'Position and shirt number verified.'],
-    ['PLAYER’S WORD', realQuote(story.playerQuote) ? 'Genuine comment included below.' : 'No quote has been invented.'],
-    ['LEAGUE DESK', shortLeague(team)],
-  ];
+  if (type === 'signing') {
+    const player = cleanText(story.playerName || 'New arrival');
+    const quote = exactQuoteExcerpt(story.playerQuote, 8);
+    const quoteSummary = quote ? `“${quote}” — ${player}` : '';
+    const usableQuote = quoteSummary && wrapLines(quoteSummary, 25, 99).length <= 2;
+    return [
+      ['ROSTER UPDATE', `${player}${story.position ? ` joins as a ${cleanText(story.position)}` : ' joins the squad'}.`],
+      ['SQUAD FILE', story.previousClub ? `${player} arrives from ${cleanText(story.previousClub)}.` : story.playerNumber ? `Number ${cleanText(story.playerNumber)} is assigned.` : 'Signing confirmed.'],
+      ['LEAGUE WATCH', `${team.label} prepare for ${shortLeague(team)}.`],
+      usableQuote ? ['PLAYER’S WORD', quoteSummary] : ['QUICK HIT', 'Official club signing.'],
+    ];
+  }
   if (type === 'spotlight') return [
     ['WEEKLY FEATURE', 'One player. One fresh interview scene.'],
     ['PLAYER’S WORD', realQuote(story.playerQuote) ? 'Submitted answers included.' : 'No response. No invented quote.'],
@@ -183,6 +220,11 @@ function lowerFeatureCopy(team, type, story) {
     || `${team.reporter} brings the verified story from inside ${team.label}.`;
 }
 
+function featureNameSize(value) {
+  const length = Math.max(1, cleanText(value).length);
+  return Math.max(28, Math.min(55, Math.floor(500 / (length * 0.58))));
+}
+
 async function renderNewspaper(options) {
   const { team, teamKey, type, story, date, issueNumber, heroBuffer, brandBuffer, mastheadBuffer, editionSeed } = options;
   const colors = palette(teamKey);
@@ -196,7 +238,9 @@ async function renderNewspaper(options) {
   const lowerRows = lowerSidebarRows(team, type, story);
   const paragraphs = storyParagraphs(team, type, story);
   const lowerCopy = lowerFeatureCopy(team, type, story);
-  const quote = realQuote(story.playerQuote)
+  const featureName = cleanText(story.playerName || team.label).toUpperCase();
+  const featureSize = featureNameSize(featureName);
+  const quote = type !== 'signing' && realQuote(story.playerQuote)
     ? `“${cleanText(story.playerQuote)}”`
     : realQuote(story.leadershipQuote)
       ? `“${cleanText(story.leadershipQuote)}”`
@@ -207,6 +251,7 @@ async function renderNewspaper(options) {
       ? `— ${cleanText(story.leadershipRole || 'CLUB REPRESENTATIVE')}`
       : '';
   const editionLabel = type === 'match' ? 'MATCHDAY' : type === 'spotlight' ? 'PLAYER SPOTLIGHT' : type === 'weekly_recap' ? 'WEEK IN REVIEW' : type === 'signing' ? 'NEW SIGNING' : 'CLUB EXCLUSIVE';
+  const subheadlineLines = completeLineBlock(story.subheadline, 58, 2, `${team.label} make today’s ${shortLeague(team)} headlines.`);
 
   const svg = `<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -215,22 +260,22 @@ async function renderNewspaper(options) {
       <linearGradient id="club" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0A3767"/><stop offset=".5" stop-color="${colors.accent2}"/><stop offset="1" stop-color="#071D35"/></linearGradient>
     </defs>
     <rect width="1024" height="1536" fill="${colors.paper}"/>
-    <rect width="1024" height="1536" filter="url(#paper)" opacity=".7"/>
+    <rect width="1024" height="1536" filter="url(#paper)" opacity="${colors.textureOpacity}"/>
     <rect x="16" y="238" width="992" height="34" fill="#F7F3EA" stroke="${colors.ink}" stroke-width="2"/>
-    <text x="26" y="261" font-family="Nimbus Sans Narrow" font-size="17" font-weight="900" letter-spacing="1" fill="${colors.ink}">${escapeXml(displayDate(date))}</text>
-    <text x="548" y="261" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="12" font-weight="800" letter-spacing="1" fill="${colors.ink}">TRANSFERS  |  MATCHDAY  |  CLUB UPDATES  |  COMMUNITY</text>
-    <text x="996" y="261" text-anchor="end" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="${colors.ink}">ISSUE #${escapeXml(String(issueNumber).replace(/^0+/, '') || '1')}</text>
+    <text x="26" y="261" font-family="Nimbus Sans Narrow" font-size="17" font-weight="900" letter-spacing="1" fill="#101216">${escapeXml(displayDate(date))}</text>
+    <text x="548" y="261" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="12" font-weight="800" letter-spacing="1" fill="#101216">TRANSFERS  |  MATCHDAY  |  CLUB UPDATES  |  COMMUNITY</text>
+    <text x="996" y="261" text-anchor="end" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#101216">ISSUE #${escapeXml(String(issueNumber).replace(/^0+/, '') || '1')}</text>
     <rect x="16" y="281" width="992" height="79" fill="url(#club)"/>
     <text x="${brandBuffer ? 124 : 42}" y="334" font-family="Nimbus Sans Narrow" font-size="48" font-weight="900" letter-spacing="1" fill="#F7F3EA">${escapeXml(team.label.toUpperCase())}</text>
     ${textLines(wrapLines(team.league.toUpperCase(), 20, 2), 760, 312, 23, `font-family="Nimbus Sans Narrow" font-size="18" font-weight="800" letter-spacing=".5" fill="#F7F3EA"`)}
     ${headline.wrapped.map((line, index) => `<text x="34" y="${headlineStart + index * headline.height}" font-family="Nimbus Sans Narrow" font-size="${headline.size}" font-weight="900" letter-spacing="-3" filter="url(#rough)" fill="${index === headline.wrapped.length - 1 && headline.wrapped.length > 1 ? colors.accent2 : colors.ink}">${escapeXml(line)}</text>`).join('')}
-    ${textLines(wrapLines(story.subheadline, 58, 2), 36, subY, 28, `font-family="Nimbus Sans Narrow" font-size="23" font-weight="900" letter-spacing=".2" fill="${colors.ink}"`)}
+    ${textLines(subheadlineLines, 36, subY, 28, `font-family="Nimbus Sans Narrow" font-size="23" font-weight="900" letter-spacing=".2" fill="${colors.ink}"`)}
     <line x1="30" y1="${subY + 40}" x2="994" y2="${subY + 40}" stroke="${colors.ink}" stroke-width="3"/>
 
-    <rect x="30" y="${mainTop}" width="211" height="${mainHeight}" fill="#EEE8DB"/>
+    <rect x="30" y="${mainTop}" width="211" height="${mainHeight}" fill="${colors.copyPanel}"/>
     <text x="42" y="${mainTop + 28}" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="2" fill="${colors.accent2}">${escapeXml(editionLabel)}</text>
     <line x1="42" y1="${mainTop + 40}" x2="222" y2="${mainTop + 40}" stroke="${colors.ink}" stroke-width="2"/>
-    ${paragraphs.map((paragraph, index) => textLines(wrapLines(paragraph, 19, 5), 42, mainTop + 75 + index * 118, 21, `font-family="DejaVu Serif" font-size="18" font-weight="600" fill="${colors.ink}"`)).join('')}
+    ${paragraphs.map((paragraph, index) => textLines(wrapLines(paragraph, 16, 5), 42, mainTop + 75 + index * 118, 21, `font-family="DejaVu Serif" font-size="18" font-weight="600" fill="${colors.ink}"`)).join('')}
     <line x1="42" y1="${mainTop + 176}" x2="98" y2="${mainTop + 176}" stroke="${colors.accent2}" stroke-width="3"/>
     <line x1="42" y1="${mainTop + 294}" x2="98" y2="${mainTop + 294}" stroke="${colors.accent2}" stroke-width="3"/>
     <rect x="254" y="${mainTop}" width="488" height="${mainHeight}" fill="#07111B"/>
@@ -240,20 +285,19 @@ async function renderNewspaper(options) {
     ${rows.map(([label, value], index) => {
       const y = mainTop + 72 + index * 92;
       return `<line x1="775" y1="${y}" x2="976" y2="${y}" stroke="${colors.accent}" stroke-width="1" opacity=".65"/>
-        <circle cx="793" cy="${y + 35}" r="18" fill="none" stroke="#F7F3EA" stroke-width="3"/>
-        <text x="793" y="${y + 42}" text-anchor="middle" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#F7F3EA">${index + 1}</text>
-        <text x="821" y="${y + 26}" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#F7F3EA">${escapeXml(label)}</text>
-        ${textLines(wrapLines(value, 18, 2), 821, y + 49, 18, `font-family="Nimbus Sans Narrow" font-size="15" font-weight="600" fill="#DDE8F0"`)}`;
+        <text x="775" y="${y + 26}" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" fill="#F7F3EA">${escapeXml(label)}</text>
+        ${textLines(wrapLines(value, 25, index === 3 ? 2 : 3), 775, y + 49, 17, `font-family="Nimbus Sans Narrow" font-size="14" font-weight="600" fill="#DDE8F0"`)}`;
     }).join('')}
 
-    <rect x="24" y="1124" width="718" height="308" fill="${colors.dark}" stroke="${colors.ink}" stroke-width="4"/>
+    <rect x="24" y="1124" width="718" height="308" fill="${colors.featurePanel}" stroke="${colors.frame}" stroke-width="4"/>
     <path d="M24 1124 L742 1124 L742 1180 L24 1180 Z" fill="url(#club)"/>
-    <path d="M205 1180 L742 1180 L742 1432 L150 1432 Z" fill="#071421" opacity=".9"/>
+    <path d="M24 1180 L205 1180 L150 1432 L24 1432 Z" fill="${colors.dark}"/>
+    <path d="M205 1180 L742 1180 L742 1432 L150 1432 Z" fill="${colors.featurePanel}" opacity=".96"/>
     <path d="M220 1191 L730 1191" stroke="${colors.accent}" stroke-width="4" opacity=".85"/>
-    <text x="220" y="1228" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="3" fill="#F7F3EA">${escapeXml(editionLabel)}</text>
-    <text x="220" y="1281" font-family="Nimbus Sans Narrow" font-size="55" font-weight="900" font-style="italic" fill="${colors.accent}" filter="url(#rough)">${escapeXml(cleanText(story.playerName || team.label).toUpperCase())}</text>
-    <text x="220" y="1318" font-family="Nimbus Sans Narrow" font-size="24" font-weight="900" letter-spacing="2" fill="#F7F3EA">${escapeXml(story.playerNumber ? `NUMBER ${cleanText(story.playerNumber)}` : shortLeague(team))}${escapeXml(story.position ? `  •  ${cleanText(story.position).toUpperCase()}` : '')}</text>
-    ${textLines(wrapLines(lowerCopy, 48, 2), 220, 1352, 20, `font-family="DejaVu Serif" font-size="15" font-weight="600" fill="#F7F3EA"`)}
+    <text x="220" y="1228" font-family="Nimbus Sans Narrow" font-size="18" font-weight="900" letter-spacing="3" fill="${colors.featureText}">${escapeXml(editionLabel)}</text>
+    <text x="220" y="1281" font-family="Nimbus Sans Narrow" font-size="${featureSize}" font-weight="900" font-style="italic" fill="${colors.accent}" filter="url(#rough)">${escapeXml(featureName)}</text>
+    <text x="220" y="1318" font-family="Nimbus Sans Narrow" font-size="24" font-weight="900" letter-spacing="2" fill="${colors.featureText}">${escapeXml(story.playerNumber ? `NUMBER ${cleanText(story.playerNumber)}` : shortLeague(team))}${escapeXml(story.position ? `  •  ${cleanText(story.position).toUpperCase()}` : '')}</text>
+    ${textLines(wrapLines(lowerCopy, 48, 2), 220, 1352, 20, `font-family="DejaVu Serif" font-size="15" font-weight="600" fill="${colors.featureText}"`)}
     ${textLines(wrapLines(quote, 42, 2), 220, 1408, 22, `font-family="DejaVu Serif" font-size="18" font-weight="700" font-style="italic" fill="${colors.accent}"`)}
     <rect x="756" y="1124" width="238" height="308" fill="${colors.dark}"/>
     <rect x="756" y="1124" width="238" height="46" fill="${colors.accent2}"/>
@@ -280,7 +324,7 @@ async function renderNewspaper(options) {
       .modulate({ brightness: 0.94, saturation: 0.94 }).png().toBuffer();
     composites.push({ input: hero, left: 258, top: mainTop + 4 });
   }
-  const frame = `<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg"><rect x="254" y="${mainTop}" width="488" height="${mainHeight}" fill="none" stroke="${colors.ink}" stroke-width="4"/></svg>`;
+  const frame = `<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg"><rect x="254" y="${mainTop}" width="488" height="${mainHeight}" fill="none" stroke="${colors.frame}" stroke-width="4"/></svg>`;
   composites.push({ input: Buffer.from(frame), left: 0, top: 0 });
   if (brandBuffer) {
     const brand = await sharp(brandBuffer).rotate().resize(70, 68, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
@@ -292,6 +336,6 @@ async function renderNewspaper(options) {
 }
 
 module.exports = {
-  renderNewspaper, palette, wrapLines, limitWords, completeSentences, headlineLayout,
-  storyParagraphs, sidebarRows, lowerSidebarRows, lowerFeatureCopy, WIDTH, HEIGHT,
+  renderNewspaper, palette, wrapLines, completeLineBlock, limitWords, completeSentences, headlineLayout,
+  storyParagraphs, sidebarRows, lowerSidebarRows, lowerFeatureCopy, featureNameSize, exactQuoteExcerpt, WIDTH, HEIGHT,
 };
