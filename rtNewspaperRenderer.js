@@ -172,7 +172,9 @@ async function renderNewspaper({ team = {}, teamKey = 'birmingham', type = 'club
     <text x="625" y="1455" text-anchor="middle" font-family="DejaVu Sans" font-size="19" font-weight="800" letter-spacing="3" fill="#FFFFFF">${teamKey === 'crownfc' ? 'MORE THAN A CLUB.' : 'BIGGER STAGE. SAME AMBITION.'}</text>
   </svg>`;
 
-  return sharp({ input: Buffer.from(svg) }).composite(composites).png().toBuffer();
+  const base = sharp(Buffer.from(svg));
+  if (composites.length) base.composite(composites);
+  return base.png().toBuffer();
 }
 
 module.exports = { renderNewspaper };
