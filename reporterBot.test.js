@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const sharp = require('sharp');
 const { publicationDate, safePublicText, normalizeStory, normalizeSquadNumber, newspaperGraphic, playerRegistrationModal } = require('../reporterBot');
-const { headlineLayout, limitWords } = require('../rtNewspaperRenderer');
+const { headlineLayout, limitWords, storyParagraphs, sidebarRows } = require('../rtNewspaperRenderer');
 
 test('newspaper date follows Eastern Time instead of UTC', () => {
   assert.equal(publicationDate('2026-09-21T02:30:00.000Z'), 'SEP 20, 2026');
@@ -50,8 +50,8 @@ test('approved RT Media renderer creates a Discord-readable vertical front page'
   }, { player: 'Test Player' });
   const buffer = await newspaperGraphic(team, 'signing', story, null, { publishedAt: '2026-09-21T18:00:00.000Z', issueNumber: 27 });
   const metadata = await sharp(buffer).metadata();
-  assert.equal(metadata.width, 1080);
-  assert.equal(metadata.height, 1350);
+  assert.equal(metadata.width, 1024);
+  assert.equal(metadata.height, 1536);
   assert.equal(metadata.format, 'png');
 });
 
@@ -62,5 +62,19 @@ test('newspaper typography keeps full headlines and limits print copy', () => {
   assert.equal(layout.wrapped.join(' ').includes('…'), false);
   const longCopy = Array.from({ length: 100 }, (_, index) => `word${index}`).join(' ');
   assert.equal(limitWords(longCopy, 52).split(' ').length, 52);
-  assert.equal(limitWords(longCopy, 52).endsWith('…'), true);
+  assert.equal(limitWords(longCopy, 52).includes('…'), false);
+});
+
+test('signing front page uses distinct complete copy without repeated sidebar summaries', () => {
+  const team = { label: 'Birmingham City', league: 'Masters Premier League • League 1', reporter: 'Raine at St. Andrew’s' };
+  const story = {
+    playerName: 'Tru', playerNumber: '22', position: 'CDM', previousClub: '',
+    article: 'This deliberately long article should not be copied into every panel.',
+  };
+  const paragraphs = storyParagraphs(team, 'signing', story);
+  assert.equal(paragraphs.every(value => /[.!?]$/.test(value)), true);
+  assert.equal(paragraphs.some(value => value.includes('…') || value.includes('...')), false);
+  const rows = sidebarRows(team, 'signing', story);
+  assert.deepEqual(rows.map(row => row[0]), ['OFFICIAL MOVE', 'SQUAD FILE', 'PLAYER’S WORD', 'LEAGUE DESK']);
+  assert.equal(rows.filter(row => row[1].includes('Tru')).length, 0);
 });

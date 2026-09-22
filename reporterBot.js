@@ -399,6 +399,8 @@ function normalizeStory(team, type, value, facts) {
     subheadline: clean(source.subheadline || team.label + ' make the news in ' + team.league, 140),
     playerName,
     playerNumber: clean(source.playerNumber || facts.number || '', 8),
+    position: clean(source.position || facts.position || '', 60),
+    previousClub: clean(source.previousClub || facts.previousClub || '', 100),
     article,
     body: clean(source.body || article, 700),
     playerQuote,
@@ -442,16 +444,17 @@ async function aiArticle(team, type, facts, graphic) {
           'For a match, identify visible teams, score, ratings, goals, assists, saves, cards, and other stats. ' +
           'For a signing, first use any player name, position, number, club, league, and signing angle supplied in the Discord caption, ' +
           'then read the player name, visible shirt number, club branding, league branding, and any other ' +
-          'legible announcement details. If the player name is Tru, the all-caps headline must be exactly “A SIGNING THAT ' +
-          'CHANGES EVERYTHING”. If the player name is Trap, the all-caps headline must be exactly “THE OFFENSIVE GAME-CHANGER ' +
-          'ARRIVES” and the story must frame him as a major playmaking addition who can bring creativity and improve the attack, ' +
-          'without inventing statistics or career history. For every other player, create a fresh headline suited to that particular ' +
+          'legible announcement details. If the player name is Tru, use the factual all-caps headline “TRU TAKES NUMBER 22”. ' +
+          'If the player name is Trap, use the factual all-caps headline “TRAP JOINS THE ATTACK” and describe only the verified ' +
+          'position and role supplied by management, without inventing impact, statistics, promises, or career history. ' +
+          'For every other player, create a fresh factual headline suited to that particular ' +
           'signing and do not reuse “Marquee Signing” as a generic label. Create concise copy for a readable newspaper front page—not a long Discord article. ' +
           'Return only valid JSON with exactly these keys: headline, subheadline, playerName, playerNumber, article, body, playerQuote, ' +
           'leadershipQuote, leadershipRole, reporterNote. The headline must be all caps and no more than 9 words. The subheadline ' +
-          'must be no more than 18 words. The article must be 220–350 words of professional reporting. The body must be a separate ' +
-          '50–70-word front-page summary covering the announcement plus what it could mean for ' +
-          'the squad using only visible or supplied facts. Each quote must be 12–24 words. The reporterNote must be one sentence ' +
+          'must be no more than 18 words. The article must be 90–140 words of concise professional reporting made entirely of ' +
+          'complete sentences. The body must be a separate 35–50-word front-page summary covering the verified announcement. ' +
+          'Do not repeat a sentence or fact merely to fill space. Each quote must preserve the genuine supplied wording and may be ' +
+          'shorter than 12 words. The reporterNote must be one complete sentence ' +
           'of no more than 22 words in the reporter’s voice. ' +
           'Use genuine supplied comments verbatim when available. Never create, paraphrase, or simulate a quote. Return an empty ' +
           'playerQuote or leadershipQuote when that quote was not supplied. Attribute a supplied leadership quote only to its ' +
@@ -823,8 +826,14 @@ async function newspaperGraphic(team, type, story, graphic, options = {}) {
   const resolvedHero = heroSource || (graphic ? await fetchImage(graphic) : null);
   const teamKey = team === TEAMS.crownfc ? 'crownfc' : 'birmingham';
   const crownCrestPath = path.join(__dirname, 'assets', 'crownfc-crest.png');
-  const brandBuffer = teamKey === 'crownfc' && fs.existsSync(crownCrestPath) ? fs.readFileSync(crownCrestPath) : null;
-  const issue = String(options.issueNumber || Math.max(1, Math.floor(Date.now() / 86400000) % 10000)).padStart(4, '0');
+  const birminghamKitPath = path.join(__dirname, 'assets', 'birmingham-city-kit.jpg');
+  let brandBuffer = null;
+  if (teamKey === 'crownfc' && fs.existsSync(crownCrestPath)) {
+    brandBuffer = fs.readFileSync(crownCrestPath);
+  } else if (teamKey === 'birmingham' && fs.existsSync(birminghamKitPath)) {
+    brandBuffer = await sharp(birminghamKitPath).extract({ left: 330, top: 155, width: 105, height: 145 }).png().toBuffer();
+  }
+  const issue = String(options.issueNumber || Math.max(1, Math.floor(Date.now() / 86400000) % 10000)).replace(/^0+/, '') || '1';
   return renderNewspaper({ team, teamKey, type, story, date, issueNumber: issue, heroBuffer: resolvedHero, brandBuffer, editionSeed: options.editionSeed });
 }
 
@@ -1261,11 +1270,15 @@ async function startBot() {
     for (const record of stateStore.listStories()) {
       if (['published', 'cancelled'].includes(record.state)) continue;
       let recovered = record;
-      if (exactTru(record.selectedUserId, record.selectedPlayerName) && record.selectedPlayerName !== 'Tru') {
+      if (exactTru(record.selectedUserId, record.selectedPlayerName) &&
+          (record.selectedPlayerName !== 'Tru' || record.story?.headline === 'A SIGNING THAT CHANGES EVERYTHING')) {
         recovered = stateStore.putStory({
           ...record,
           selectedPlayerName: 'Tru',
-          story: replacePlayerNameInStory(record.story, record.selectedPlayerName, 'Tru'),
+          story: {
+            ...replacePlayerNameInStory(record.story, record.selectedPlayerName, 'Tru'),
+            ...(record.type === 'signing' ? { headline: 'TRU TAKES NUMBER 22' } : {}),
+          },
           posterPath: null,
         });
       }
