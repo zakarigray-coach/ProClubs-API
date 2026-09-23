@@ -51,7 +51,17 @@ const { runPrivateDryRun } = require('./stagingSuite');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
-const { applyMatchCenterSetup } = require('./matchCenterSetup');
+const {
+  MLPC_SCHEDULE_2026,
+  importSchedule,
+  handleAvailability,
+  recordResult,
+  cancelMatch,
+  editMatch,
+  runReminders,
+  nextMatchText,
+  scheduleText,
+} = require('./matchSchedule');
 
 let OpenAI;
 let toFile;
@@ -178,10 +188,41 @@ const setupServer = new SlashCommandBuilder()
   .setDescription('Create the RT Football Media category and reporter channels')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
-const setupMatchCenters = new SlashCommandBuilder()
-  .setName('setup-match-centers')
-  .setDescription('Owner-only: convert both club Match Centers to protected forums')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+function scheduleClubOption(command) {
+  return command.addStringOption(o => o.setName('club').setDescription('Club').setRequired(true)
+    .addChoices(
+      { name: 'Birmingham City', value: 'birmingham' },
+      { name: 'CrownFC', value: 'crownfc' },
+    ));
+}
+
+const importMlpcSchedule = new SlashCommandBuilder()
+  .setName('import-mlpc-schedule')
+  .setDescription('Import the official CrownFC MLPC schedule')
+  .addStringOption(o => o.setName('schedule').setDescription('Optional Date | Time | Opponent | Home/Away rows; blank uses the official 34-match schedule'))
+  .addIntegerOption(o => o.setName('year').setDescription('Schedule year').setMinValue(2026).setMaxValue(2100));
+
+const importMplSchedule = new SlashCommandBuilder()
+  .setName('import-mpl-schedule')
+  .setDescription('Import Birmingham City MPL fixtures when the official schedule arrives')
+  .addStringOption(o => o.setName('schedule').setDescription('Date | Time | Opponent | Home/Away rows').setRequired(true))
+  .addIntegerOption(o => o.setName('year').setDescription('Schedule year').setMinValue(2026).setMaxValue(2100));
+
+const nextMatch = scheduleClubOption(new SlashCommandBuilder().setName('nextmatch').setDescription('Show a club’s next official fixture'));
+const viewSchedule = scheduleClubOption(new SlashCommandBuilder().setName('schedule').setDescription('Show a club’s next eight official fixtures'));
+const result = scheduleClubOption(new SlashCommandBuilder().setName('result').setDescription('Record an official match result'))
+  .addStringOption(o => o.setName('opponent').setDescription('Opponent name exactly as scheduled').setRequired(true))
+  .addIntegerOption(o => o.setName('our_score').setDescription('Our final score').setRequired(true).setMinValue(0).setMaxValue(99))
+  .addIntegerOption(o => o.setName('opponent_score').setDescription('Opponent final score').setRequired(true).setMinValue(0).setMaxValue(99));
+const editMatchCommand = scheduleClubOption(new SlashCommandBuilder().setName('edit-match').setDescription('Edit a saved upcoming fixture'))
+  .addStringOption(o => o.setName('opponent').setDescription('Current opponent name').setRequired(true))
+  .addStringOption(o => o.setName('new_opponent').setDescription('Corrected opponent name'))
+  .addStringOption(o => o.setName('date').setDescription('Corrected date, such as Oct 19'))
+  .addStringOption(o => o.setName('time').setDescription('Corrected Eastern time, such as 8:30 PM'))
+  .addStringOption(o => o.setName('home_away').setDescription('Corrected location').addChoices({name:'Home',value:'Home'},{name:'Away',value:'Away'}))
+  .addIntegerOption(o => o.setName('year').setDescription('Schedule year').setMinValue(2026).setMaxValue(2100));
+const cancelMatchCommand = scheduleClubOption(new SlashCommandBuilder().setName('cancel-match').setDescription('Cancel an upcoming fixture without deleting its post'))
+  .addStringOption(o => o.setName('opponent').setDescription('Opponent name exactly as scheduled').setRequired(true));
 
 const streamlineServer = new SlashCommandBuilder()
   .setName('streamline-server')
@@ -245,8 +286,9 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
   .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const commands = [match, sign, signBatch, signing, release, setupServer, setupMatchCenters, streamlineServer, auditServer, stagingSuite,
-  correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar].map(command => command.toJSON());
+const commands = [match, sign, signBatch, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
+  correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
+  importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand].map(command => command.toJSON());
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -1749,12 +1791,17 @@ async function startBot() {
     await runDueScheduledOperations().catch(error => console.error('Initial scheduled media check failed:', error));
     const statsGuild = await configuredGuild().catch(() => null);
     if (statsGuild) {
+      await runReminders({ guild: statsGuild, store: stateStore }).catch(error =>
+        console.error('Initial match reminder check failed:', error.message)
+      );
       await Promise.all(Object.keys(TEAMS).map(teamKey => refreshPublicStatsBoard(statsGuild, teamKey).catch(error =>
         console.error(`Could not refresh ${teamKey} public stats board:`, error.message)
       )));
     }
     const schedulerTimer = setInterval(() => {
       runDueScheduledOperations().catch(error => console.error('Scheduled media check failed:', error));
+      configuredGuild().then(guild => runReminders({ guild, store: stateStore }))
+        .catch(error => console.error('Match reminder check failed:', error.message));
     }, 60 * 1000);
     schedulerTimer.unref?.();
   });
@@ -2819,6 +2866,9 @@ async function startBot() {
   function teamForRecord(record) { return TEAMS[record.teamKey]; }
 
   async function handleInteraction(interaction) {
+    if (interaction.isButton() && interaction.customId.startsWith('match_availability:')) {
+      return handleAvailability(interaction, stateStore);
+    }
     if (interaction.isButton() && interaction.customId === 'club_registration:start') {
       const activeId = stateStore.getMetadata(`onboardingActive:${interaction.guildId}:${interaction.user.id}`);
       const active = activeId ? stateStore.getMetadata(`onboardingRequest:${activeId}`) : null;
@@ -4202,24 +4252,57 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'setup-match-centers', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
-    const privateCommand = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'setup-match-centers', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
+    const knownCommands = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar', 'import-mlpc-schedule', 'import-mpl-schedule', 'nextmatch', 'schedule', 'result', 'edit-match', 'cancel-match'];
+    if (!knownCommands.includes(interaction.commandName)) return;
+    const privateCommand = !['nextmatch', 'schedule'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
-    if (interaction.commandName === 'setup-match-centers') {
-      if (interaction.user.id !== ownerId) return interaction.editReply('Only the Castle & Crown Collective owner can run this temporary setup command.');
-      const report = await applyMatchCenterSetup(interaction.guild, { managementRoleId: FOOTBALL_OPS_ROLE_ID });
-      stateStore.addManagementLog({ action: 'match_center_forums_configured', requesterUserId: interaction.user.id, report });
+    const scheduleManager = interaction.user.id === ownerId ||
+      interaction.member?.roles?.cache?.has(FOOTBALL_OPS_ROLE_ID) ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+    const scheduleManagementCommands = ['import-mlpc-schedule', 'import-mpl-schedule', 'result', 'edit-match', 'cancel-match'];
+    if (scheduleManagementCommands.includes(interaction.commandName) && !scheduleManager) {
+      return interaction.editReply('Only the server owner or approved football operations management can use this command.');
+    }
+    if (['nextmatch', 'schedule'].includes(interaction.commandName)) {
+      const teamKey = interaction.options.getString('club');
+      const roleId = process.env[TEAMS[teamKey]?.alertRoleEnv];
+      if (!scheduleManager && (!roleId || !interaction.member?.roles?.cache?.has(roleId))) {
+        return interaction.editReply(`Only ${TEAMS[teamKey]?.label || 'club'} members and management can view this schedule.`);
+      }
+      return interaction.editReply(interaction.commandName === 'nextmatch'
+        ? nextMatchText(stateStore, teamKey, interaction.guild.id)
+        : scheduleText(stateStore, teamKey, interaction.guild.id));
+    }
+    if (interaction.commandName === 'import-mlpc-schedule' || interaction.commandName === 'import-mpl-schedule') {
+      const teamKey = interaction.commandName === 'import-mlpc-schedule' ? 'crownfc' : 'birmingham';
+      const supplied = interaction.options.getString('schedule');
+      const year = interaction.options.getInteger('year') || 2026;
+      const text = supplied || (teamKey === 'crownfc' ? MLPC_SCHEDULE_2026 : '');
+      const report = await importSchedule({ guild: interaction.guild, store: stateStore, teamKey, text, year });
+      stateStore.addManagementLog({ action: 'official_schedule_imported', teamKey, requesterUserId: interaction.user.id, imported: report.imported, duplicates: report.duplicates, invalid: report.invalid.length, postsCreated: report.postsCreated, eventsCreated: report.eventsCreated });
+      const invalidLines = report.invalid.slice(0, 8).map(item => `Line ${item.line}: ${item.reason}`).join('\n');
       return interaction.editReply(
-        '**Match Center forum update complete.**\n' +
-        'Created: ' + (report.created.join(', ') || 'none; existing forums updated') + '\n' +
-        'Renamed: ' + (report.renamed.join(', ') || 'none') + '\n' +
-        'Moved to Club Archive: ' + (report.moved.join(', ') || 'none') + '\n' +
-        'Tags on each forum: ' + report.tags.crownfc.join(', ') + '\n' +
-        'Permissions: players can reply but cannot create posts; management and RT Football Media can create and manage posts.\n' +
-        'Nothing was deleted.'
+        `**${TEAMS[teamKey].label} schedule import complete.**\n` +
+        `Fixtures imported: ${report.imported}\nDuplicates skipped: ${report.duplicates}\nInvalid rows: ${report.invalid.length}\nForum posts created: ${report.postsCreated}\nScheduled events created: ${report.eventsCreated}` +
+        (invalidLines ? `\n\n**Invalid rows**\n${invalidLines}` : '')
       );
+    }
+    if (interaction.commandName === 'result') {
+      const outcome = await recordResult({ guild: interaction.guild, store: stateStore, teamKey: interaction.options.getString('club'), opponent: interaction.options.getString('opponent'), ourScore: interaction.options.getInteger('our_score'), opponentScore: interaction.options.getInteger('opponent_score') });
+      stateStore.addManagementLog({ action: 'official_result_recorded', requesterUserId: interaction.user.id, fixtureId: outcome.fixture.fixtureId, result: outcome.fixture.result });
+      return interaction.editReply(`Result saved: **${outcome.fixture.club} ${outcome.fixture.ourScore}-${outcome.fixture.opponentScore} ${outcome.fixture.opponent}**. The Match Center tags, event, and RT Media recap facts were updated.`);
+    }
+    if (interaction.commandName === 'edit-match') {
+      const fixture = await editMatch({ guild: interaction.guild, store: stateStore, teamKey: interaction.options.getString('club'), opponent: interaction.options.getString('opponent'), newOpponent: interaction.options.getString('new_opponent'), date: interaction.options.getString('date'), time: interaction.options.getString('time'), homeAway: interaction.options.getString('home_away'), year: interaction.options.getInteger('year') || 2026 });
+      stateStore.addManagementLog({ action: 'official_fixture_edited', requesterUserId: interaction.user.id, fixtureId: fixture.fixtureId });
+      return interaction.editReply(`Fixture updated: **${fixture.club} vs ${fixture.opponent} — ${fixture.dateLabel}, ${fixture.timeLabel} ET (${fixture.homeAway})**.`);
+    }
+    if (interaction.commandName === 'cancel-match') {
+      const fixture = await cancelMatch({ guild: interaction.guild, store: stateStore, teamKey: interaction.options.getString('club'), opponent: interaction.options.getString('opponent') });
+      stateStore.addManagementLog({ action: 'official_fixture_cancelled', requesterUserId: interaction.user.id, fixtureId: fixture.fixtureId });
+      return interaction.editReply(`Fixture cancelled and preserved in the Match Center archive: **${fixture.club} vs ${fixture.opponent}**.`);
     }
     if (['match', 'sign', 'sign-batch', 'signing', 'release'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
       return interaction.editReply('Only the Castle & Crown Collective owner can start an RT Football Media publication workflow.');
