@@ -3,13 +3,12 @@ const path = require('path');
 const Module = require('module');
 
 /**
- * Loads reporterBot.js with a small, fail-fast source patch that preserves the
- * original Discord image URL alongside the /data cached copy. This lets a
- * regenerated story restore its player/source image automatically if the
- * local cached file is ever missing.
+ * Loads reporterBot.js with small, fail-fast source patches that preserve the
+ * original Discord image URL alongside the /data cached copy and attach the
+ * CrownFC Virtualeagues schedule sync without destabilizing the main bot file.
  *
- * Kept separate so the production hotfix is explicit and easy to remove once
- * the same changes are folded directly into reporterBot.js.
+ * Kept separate so production hotfixes are explicit and easy to fold directly
+ * into reporterBot.js later.
  */
 function loadReporterBot() {
   const filename = path.join(__dirname, 'reporterBot.js');
@@ -26,7 +25,16 @@ function loadReporterBot() {
       from: `async function cacheGraphic(id, graphic) {\n  if (!graphic || (!graphic.url && !graphic.localPath)) return null;\n  if (graphic.localPath && fs.existsSync(graphic.localPath)) return graphic;\n  const source = await fetchImage(graphic.url);\n  const localPath = storyPath(id, 'source.png');\n  await sharp(source).rotate().png().toFile(localPath);\n  return { contentType: 'image/png', localPath };\n}`,
       to: `async function cacheGraphic(id, graphic) {\n  if (!graphic) return null;\n  const sourceUrl = graphic.url || graphic.sourceUrl || '';\n  if (!sourceUrl && !graphic.localPath) return null;\n  if (graphic.localPath && fs.existsSync(graphic.localPath)) {\n    return { ...graphic, sourceUrl: sourceUrl || graphic.sourceUrl || '' };\n  }\n  if (!sourceUrl) return null;\n  const source = await fetchImage(sourceUrl);\n  if (!source || !source.length) throw new Error('The saved player/source image could not be recovered.');\n  const localPath = storyPath(id, 'source.png');\n  await sharp(source).rotate().png().toFile(localPath);\n  return { contentType: 'image/png', localPath, sourceUrl };\n}`,
     },
-
+    {
+      name: 'Virtualeagues schedule module import',
+      from: `const { createAwardVideo } = require('./awardVideo');`,
+      to: `const { createAwardVideo } = require('./awardVideo');\nconst { startVirtualeaguesSchedule } = require('./virtualeaguesSchedule');`,
+    },
+    {
+      name: 'Virtualeagues schedule startup',
+      from: `  client.once('clientReady', async () => {\n    console.log('RT Football Media logged in as ' + client.user.tag);\n    try {\n      await setupMplLeagueNewsFeed(client);`,
+      to: `  client.once('clientReady', async () => {\n    console.log('RT Football Media logged in as ' + client.user.tag);\n    try {\n      await startVirtualeaguesSchedule(client, stateStore);\n    } catch (error) {\n      console.error('Virtualeagues CrownFC schedule setup failed:', error.message);\n    }\n    try {\n      await setupMplLeagueNewsFeed(client);`,
+    },
   ];
 
   for (const replacement of replacements) {
@@ -40,7 +48,7 @@ function loadReporterBot() {
   patched.filename = filename;
   patched.paths = Module._nodeModulePaths(__dirname);
   patched._compile(source, filename);
-  console.log('RT Football Media source-image persistence patch loaded.');
+  console.log('RT Football Media runtime patches loaded.');
   return patched.exports;
 }
 
