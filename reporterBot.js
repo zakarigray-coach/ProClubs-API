@@ -1423,6 +1423,49 @@ async function startBot() {
       }
     }
     console.log('Recovered ' + pendingSignings.size + ' pending RT Football Media stories.');
+    try {
+      const guild = process.env.DISCORD_GUILD_ID
+        ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null)
+        : client.guilds.cache.first();
+      const ownerId = process.env.BOT_OWNER_ID || (guild && guild.ownerId);
+      const owner = ownerId ? await client.users.fetch(ownerId).catch(() => null) : null;
+      if (owner && pendingSignings.size) {
+        const recoveredRecords = [...pendingSignings.values()];
+        await owner.send('**RT FOOTBALL MEDIA — RECOVERED DATA REPORT**\nI recovered ' + recoveredRecords.length + ' pending record' + (recoveredRecords.length === 1 ? '' : 's') + '. Below is everything currently saved. Nothing listed as missing needs to be resubmitted if it is already shown as saved.');
+        for (const record of recoveredRecords) {
+          const teamKeys = Array.isArray(record.signingTeamKeys) && record.signingTeamKeys.length ? record.signingTeamKeys : [record.teamKey].filter(Boolean);
+          const numbers = record.signingNumbers || {};
+          const numberLines = teamKeys.map(key => {
+            const value = normalizeSquadNumber(numbers[key] || (key === record.teamKey ? record.playerNumber : ''));
+            return (TEAMS[key]?.label || key) + ': ' + (value ? '#' + value : 'MISSING');
+          }).join('\n');
+          const localPhoto = record.graphic?.localPath && fs.existsSync(record.graphic.localPath);
+          const remotePhoto = record.graphic?.sourceUrl || record.graphic?.url || null;
+          const attachment = localPhoto ? new AttachmentBuilder(record.graphic.localPath, { name: 'recovered-player-photo.png' }) : null;
+          const missing = [];
+          if (!record.selectedPlayerName) missing.push('name');
+          if (!record.announcementName) missing.push('nickname');
+          if (!record.position) missing.push('position');
+          if (teamKeys.some(key => !normalizeSquadNumber(numbers[key] || (key === record.teamKey ? record.playerNumber : '')))) missing.push('squad number');
+          if (!record.graphic) missing.push('player photo');
+          await owner.send({
+            content:
+              '**Recovered Signing Record**\n' +
+              '**Player:** ' + (record.selectedPlayerName || 'MISSING') + '\n' +
+              '**Nickname:** ' + (record.announcementName || 'MISSING') + '\n' +
+              '**Position:** ' + (record.position || 'MISSING') + '\n' +
+              '**Club(s):** ' + (teamKeys.map(key => TEAMS[key]?.label || key).join(' + ') || 'Unknown') + '\n' +
+              '**Number(s):**\n' + (numberLines || 'MISSING') + '\n' +
+              '**Photo:** ' + (record.graphic ? (attachment ? 'RECOVERED — attached' : (remotePhoto ? 'RECOVERED — cached reference saved' : 'RECOVERED record; local file unavailable')) : 'MISSING') + '\n' +
+              '**Still missing:** ' + (missing.length ? missing.join(', ') : 'Nothing'),
+            files: attachment ? [attachment] : [],
+            allowedMentions: { parse: [] },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Recovered data report failed:', error.message);
+    }
     const auditVersion = 'professional-clubhouse-2026-09-21-v2';
     if (stateStore.getMetadata('lastProfessionalAuditVersion') !== auditVersion) {
       try {
