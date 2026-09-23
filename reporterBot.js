@@ -1397,6 +1397,17 @@ async function startBot() {
         });
       }
       pendingSignings.set(recovered.id, recovered);
+      if (recovered.type === 'signing' && ['waiting_for_quote', 'waiting_for_package'].includes(recovered.state)) {
+        try {
+          const forwarded = await maybeForwardSigningPackage(recovered);
+          if (forwarded) {
+            console.log('Recovered and forwarded completed signing package: ' + recovered.id);
+            continue;
+          }
+        } catch (error) {
+          console.error('Recovered signing package forward failed for ' + recovered.id + ':', error.message);
+        }
+      }
       if (['waiting_for_quote', 'waiting_for_package'].includes(recovered.state) && recovered.selectedUserId) {
         pendingPlayerQuotes.set(recovered.selectedUserId, recovered.id);
         if (Number(recovered.quoteExpiresAt) <= Date.now()) {
