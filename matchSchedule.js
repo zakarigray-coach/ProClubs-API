@@ -190,15 +190,26 @@ async function reorderMatchCenterForum({guild,store,teamKey,version='visible-mat
   for(const original of [...chronological].reverse()){
     let fixture=getFixture(store,original.fixtureId);
     if(fixture.forumOrderVersion===version)continue;
-    const oldThreadId=fixture.forumPostId;
-    const oldThread=oldThreadId?await guild.channels.fetch(oldThreadId).catch(()=>null):null;
-    fixture=saveFixture(store,{...fixture,forumPostId:null,forumChannelId:null});
-    fixture=await createOrUpdateDiscord(guild,store,fixture);
-    fixture=saveFixture(store,{...fixture,forumOrderVersion:version,previousForumPostIds:[...new Set([...(fixture.previousForumPostIds||[]),oldThreadId].filter(Boolean))]});
-    migrated++;
-    if(oldThread&&oldThread.id!==fixture.forumPostId){
-      await oldThread.delete('Owner-approved replacement with chronologically ordered Match Center post').then(()=>{deleted++;});
+    // Persist both IDs while the replacement is in progress. If Railway or
+    // Discord interrupts the migration, startup can resume without creating a
+    // second replacement or forgetting which old post still needs deletion.
+    const oldThreadId=fixture.forumReorderOldThreadId||fixture.forumPostId;
+    let replacement=fixture.forumReorderReplacementId
+      ?await guild.channels.fetch(fixture.forumReorderReplacementId).catch(()=>null)
+      :null;
+    if(!replacement){
+      fixture=saveFixture(store,{...fixture,forumReorderOldThreadId:oldThreadId,forumPostId:null,forumChannelId:null});
+      fixture=await createOrUpdateDiscord(guild,store,fixture);
+      fixture=saveFixture(store,{...fixture,forumReorderOldThreadId:oldThreadId,forumReorderReplacementId:fixture.forumPostId});
+      replacement=await guild.channels.fetch(fixture.forumPostId).catch(()=>null);
+      migrated++;
     }
+    const oldThread=oldThreadId?await guild.channels.fetch(oldThreadId).catch(()=>null):null;
+    if(oldThread&&oldThread.id!==fixture.forumPostId){
+      await oldThread.delete('Owner-approved replacement with chronologically ordered Match Center post');
+      deleted++;
+    }
+    fixture=saveFixture(store,{...fixture,forumOrderVersion:version,forumReorderOldThreadId:null,forumReorderReplacementId:null,previousForumPostIds:[...new Set([...(fixture.previousForumPostIds||[]),oldThreadId].filter(Boolean))]});
   }
   store.setMetadata(marker,{version,teamKey,migrated,deleted,completedAt:new Date().toISOString()});
   return {teamKey,skipped:false,migrated,deleted};

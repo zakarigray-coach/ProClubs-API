@@ -1716,7 +1716,6 @@ async function startBot() {
       }
     }
 
-    await runDueScheduledOperations().catch(error => console.error('Initial scheduled media check failed:', error));
     const statsGuild = await configuredGuild().catch(() => null);
     if (statsGuild) {
       for (const teamKey of ['crownfc','birmingham']) {
@@ -1731,6 +1730,7 @@ async function startBot() {
         console.error(`Could not refresh ${teamKey} public stats board:`, error.message)
       )));
     }
+    await runDueScheduledOperations().catch(error => console.error('Initial scheduled media check failed:', error));
     const schedulerTimer = setInterval(() => {
       runDueScheduledOperations().catch(error => console.error('Scheduled media check failed:', error));
       configuredGuild().then(guild => runReminders({ guild, store: stateStore }))
