@@ -2241,6 +2241,25 @@ async function startBot() {
     }, remaining);
   }
 
+  async function ensureSigningClubRoles(record, member) {
+    const keys = Array.isArray(record.signingTeamKeys) && record.signingTeamKeys.length ? record.signingTeamKeys : [record.teamKey];
+    const added = [];
+    const alreadyHad = [];
+    for (const key of keys) {
+      const roleId = process.env[TEAMS[key].alertRoleEnv];
+      if (!roleId) throw new Error(TEAMS[key].label + ' club role is not configured.');
+      const role = await member.guild.roles.fetch(roleId).catch(() => null);
+      if (!role) throw new Error(TEAMS[key].label + ' club role could not be found.');
+      if (member.roles.cache.has(roleId)) {
+        alreadyHad.push(TEAMS[key].label);
+        continue;
+      }
+      await member.roles.add(role, 'Selected by club owner through RT Football Media /sign');
+      added.push(TEAMS[key].label);
+    }
+    return { added, alreadyHad };
+  }
+
   async function contactPlayer(record, member) {
     const team = TEAMS[record.teamKey];
     record = remember({
@@ -2287,14 +2306,11 @@ async function startBot() {
     const guild = interaction.guild;
     const requesterUserId = process.env.BOT_OWNER_ID || interaction.user.id;
     await guild.members.fetch().catch(() => {});
-    const memberMap = new Map();
-    for (const key of teamKeys) {
-      const roleId = process.env[TEAMS[key].alertRoleEnv];
-      const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
-      if (role) for (const member of role.members.values()) if (!member.user.bot) memberMap.set(member.id, member);
-    }
-    const members = [...memberMap.values()].sort((a,b) => a.displayName.localeCompare(b.displayName)).slice(0,24);
-    if (!members.length) throw new Error('No eligible players were found in the configured club roles.');
+    const members = [...guild.members.cache.values()]
+      .filter(member => !member.user.bot)
+      .sort((a,b) => a.displayName.localeCompare(b.displayName))
+      .slice(0,25);
+    if (!members.length) throw new Error('No non-bot members were found on the server.');
     const menu = new StringSelectMenuBuilder()
       .setCustomId('signing_player:' + id)
       .setPlaceholder('Select the player who signed')
@@ -2314,7 +2330,7 @@ async function startBot() {
     });
     const clubLabel = teamKeys.length > 1 ? 'Birmingham City + CrownFC' : primaryTeam.label;
     const row = new ActionRowBuilder().addComponents(menu);
-    await interaction.editReply({ content:'Select the player signing for **' + clubLabel + '**. The reporter will DM them once to collect player name, nickname, clear FC27 Pro photo, and squad number selection for ' + (teamKeys.length > 1 ? 'each club' : 'the club') + '.', components:[row] });
+    await interaction.editReply({ content:'Select any non-bot server member signing for **' + clubLabel + '**. The reporter will DM them once to collect player name, nickname, clear FC27 Pro photo, and squad number selection for ' + (teamKeys.length > 1 ? 'each club' : 'the club') + '.', components:[row] });
   }
   async function startSignBatchCommand(interaction, team, teamKey) {
     const capacity = rosterCapacity(teamKey);
@@ -2991,10 +3007,12 @@ async function startBot() {
       if (!member || member.user.bot) {
         return interaction.update({ content: 'That player could not be found. Use “Player not listed” and enter them manually.', components: [] });
       }
-      const existingAssignment = existingSquadAssignmentForPlayer(pending.teamKey, member.id, member.displayName);
-      if (existingAssignment) {
-        return interaction.update({ content: `${member.displayName} is already on the active ${TEAMS[pending.teamKey].label} roster as #${existingAssignment.number}. A duplicate signing was blocked.`, components: [] });
+      const signingKeys = Array.isArray(pending.signingTeamKeys) && pending.signingTeamKeys.length ? pending.signingTeamKeys : [pending.teamKey];
+      const duplicate = signingKeys.map(key => ({ key, assignment: existingSquadAssignmentForPlayer(key, member.id, member.displayName) })).find(item => item.assignment);
+      if (duplicate) {
+        return interaction.update({ content: member.displayName + ' is already on the active ' + TEAMS[duplicate.key].label + ' roster as #' + duplicate.assignment.number + '. A duplicate signing was blocked.', components: [] });
       }
+      const roleResult = await ensureSigningClubRoles(pending, member);
       pending = remember({
         ...pending,
         selectedUserId: member.id,
@@ -3004,7 +3022,10 @@ async function startBot() {
         manualPlayer: false,
       });
       await contactPlayer(pending, member);
-      return interaction.update({ content: 'Player selected. ' + TEAMS[pending.teamKey].reporter + ' has privately contacted ' + member.displayName + ' for their photo, squad number and announcement name.', components: [] });
+      const roleNote = roleResult.added.length
+        ? ' Club role' + (roleResult.added.length > 1 ? 's' : '') + ' assigned: ' + roleResult.added.join(' + ') + '.'
+        : ' Required club role' + (roleResult.alreadyHad.length > 1 ? 's were' : ' was') + ' already assigned, so no duplicate role was added.';
+      return interaction.update({ content: 'Player selected. ' + TEAMS[pending.teamKey].reporter + ' has privately contacted ' + member.displayName + ' for their signing package.' + roleNote, components: [] });
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('signing_facts:')) {
