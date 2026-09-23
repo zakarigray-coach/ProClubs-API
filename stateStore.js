@@ -155,6 +155,12 @@ class StateStore {
     return this.getMetadata(key);
   }
 
+  listMetadata(prefix = '') {
+    return Object.entries(this.state.metadata)
+      .filter(([key]) => !prefix || key.startsWith(prefix))
+      .map(([key, value]) => ({ key, value: clone(value) }));
+  }
+
   putMatchRecord(record, options = {}) {
     const scope = this.operationsScope(options);
     if (!record || !record.id) throw new Error('A match record requires an id.');
