@@ -51,7 +51,7 @@ const { runPrivateDryRun } = require('./stagingSuite');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
-const { signingTeamKeys, packageComplete, runIndependentBatch } = require('./signingPackage');
+const { signingTeamKeys, packageMissingFields, packageComplete, runIndependentBatch } = require('./signingPackage');
 const {
   MLPC_SCHEDULE_2026,
   importSchedule,
