@@ -51,6 +51,7 @@ const { runPrivateDryRun } = require('./stagingSuite');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
+const { signingTeamKeys, packageComplete, runIndependentBatch } = require('./signingPackage');
 const {
   MLPC_SCHEDULE_2026,
   importSchedule,
@@ -79,6 +80,7 @@ const pendingSignings = new Map();
 const pendingPlayerQuotes = new Map();
 const pendingSpotlightResponses = new Map();
 const pendingOperations = new Map();
+const forwardingSigningPackages = new Set();
 const DATA_DIRECTORY = process.env.RT_DATA_DIR || (process.env.RAILWAY_ENVIRONMENT ? '/data' : path.join(__dirname, '.data'));
 const stateStore = new StateStore(path.join(DATA_DIRECTORY, 'rt-football-media-state.json'));
 const quoteMinutesOverride = Number(process.env.QUOTE_WAIT_MINUTES);
@@ -174,8 +176,18 @@ const sign = new SlashCommandBuilder().setName('sign').setDescription('Collect a
   .addUserOption(o => o.setName('player').setDescription('Search and select any server member').setRequired(true))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const signBatch = clubOption(new SlashCommandBuilder().setName('sign-batch').setDescription('Prepare one unified announcement for 2–5 signings'))
-  .addUserOption(o => o.setName('marquee').setDescription('Optional marquee player; must also be selected in the signing class'))
+const signBatch = new SlashCommandBuilder().setName('sign-batch').setDescription('Collect individual signing packages for 2–5 players')
+  .addStringOption(o => o.setName('club').setDescription('Club(s)').setRequired(true)
+    .addChoices(
+      { name: 'Birmingham City (Raine)', value: 'birmingham' },
+      { name: 'CrownFC (Teagan)', value: 'crownfc' },
+      { name: 'Both — Birmingham City + CrownFC', value: 'both' },
+    ))
+  .addUserOption(o => o.setName('player1').setDescription('Player 1').setRequired(true))
+  .addUserOption(o => o.setName('player2').setDescription('Player 2').setRequired(true))
+  .addUserOption(o => o.setName('player3').setDescription('Player 3'))
+  .addUserOption(o => o.setName('player4').setDescription('Player 4'))
+  .addUserOption(o => o.setName('player5').setDescription('Player 5'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
@@ -289,6 +301,7 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
 const commands = [match, sign, signBatch, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
   importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand].map(command => command.toJSON());
+const COMMAND_NAMES = commands.map(command => command.name);
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max || 1000);
@@ -372,7 +385,7 @@ function seasonIsActive(teamKey) {
 
 function exactTru(userId, playerName) {
   if (process.env.TRU_USER_ID) return userId === process.env.TRU_USER_ID;
-  return /^tru$/i.test(clean(playerName, 40));
+  return /^(tru|codeman|codeman22_?)$/i.test(clean(playerName, 40));
 }
 
 function preferredPlayerName(member, fallback = '') {
@@ -419,8 +432,9 @@ function squadNumberConflict(teamKey, number, excludeStoryId, userId, playerName
   const assigned = stateStore.getSquadNumber(teamKey, number);
   if (assigned && assigned.storyId !== excludeStoryId && !sameSquadPlayer(assigned, userId, playerName)) return assigned;
   return stateStore.listStories().find(record =>
-    record.id !== excludeStoryId && record.type === 'signing' && record.teamKey === teamKey &&
-    normalizeSquadNumber(record.playerNumber) === number && !['cancelled', 'failed'].includes(record.state) &&
+    record.id !== excludeStoryId && record.type === 'signing' &&
+    normalizeSquadNumber((record.signingNumbers || {})[teamKey] || (record.teamKey === teamKey ? record.playerNumber : '')) === number &&
+    !['cancelled', 'failed'].includes(record.state) &&
     !sameSquadPlayer(record, userId, playerName)
   ) || null;
 }
@@ -454,12 +468,16 @@ function storyPath(id, suffix) {
 }
 
 async function cacheGraphic(id, graphic) {
-  if (!graphic || (!graphic.url && !graphic.localPath)) return null;
-  if (graphic.localPath && fs.existsSync(graphic.localPath)) return graphic;
-  const source = await fetchImage(graphic.url);
+  if (!graphic) return null;
+  const sourceUrl = graphic.url || graphic.sourceUrl || '';
+  if (!sourceUrl && !graphic.localPath) return null;
+  if (graphic.localPath && fs.existsSync(graphic.localPath)) return { ...graphic, sourceUrl };
+  if (!sourceUrl) return null;
+  const source = await fetchImage(sourceUrl);
+  if (!source || !source.length) throw new Error('The saved player/source image could not be recovered.');
   const localPath = storyPath(id, 'source.png');
   await sharp(source).rotate().png().toFile(localPath);
-  return { contentType: 'image/png', localPath };
+  return { contentType: 'image/png', localPath, sourceUrl, cachedAt: new Date().toISOString() };
 }
 
 function extractJson(value) {
@@ -709,7 +727,7 @@ async function fetchImage(url) {
   if (url && typeof url === 'object' && url.localPath && fs.existsSync(url.localPath)) {
     return fs.readFileSync(url.localPath);
   }
-  if (url && typeof url === 'object') url = url.url;
+  if (url && typeof url === 'object') url = url.url || url.sourceUrl;
   if (!url) return null;
   const response = await fetch(url);
   if (!response.ok) throw new Error('Unable to download the supplied graphic (' + response.status + ').');
@@ -961,7 +979,7 @@ function signingIdentityModal(id, record) {
     .addComponents(
       textInput('player_name', 'Player name', { required: true, max: 40, value: record.selectedPlayerName || '' }),
       textInput('nickname', 'Nickname', { required: true, max: 40, placeholder: 'Example: The General' }),
-      textInput('position', 'Position', { required: true, max: 20, value: record.position || '', placeholder: 'Example: ST, CAM, CDM, CB, GK' })
+      textInput('position', 'Position', { required: true, max: 60, value: record.position || '', placeholder: 'Example: ST, CAM, CDM, CB, GK' })
     );
 }
 
@@ -1458,6 +1476,10 @@ async function startBot() {
       }
       if (['waiting_for_quote', 'waiting_for_package'].includes(recovered.state) && recovered.selectedUserId) {
         pendingPlayerQuotes.set(recovered.selectedUserId, recovered.id);
+        if (recovered.quickSign) {
+          // Package-only signings never expire and never require a quote.
+          continue;
+        }
         if (Number(recovered.quoteExpiresAt) <= Date.now()) {
           await requestOwnerDecisionWithoutQuote(recovered.id, 'The player quote window expired while the bot was offline.').catch(console.error);
         } else {
@@ -2157,38 +2179,43 @@ async function startBot() {
     record = pendingSignings.get(record.id) || stateStore.getStory(record.id) || record;
     if (!record || record.state === 'package_forwarded') return false;
     if (!['waiting_for_quote', 'waiting_for_package'].includes(record.state)) return false;
+    if (forwardingSigningPackages.has(record.id)) return false;
 
-    const teamKeys = Array.isArray(record.signingTeamKeys) && record.signingTeamKeys.length ? record.signingTeamKeys : [record.teamKey];
+    const teamKeys = signingTeamKeys(record);
     const numbers = record.signingNumbers || {};
-    const hasNumbers = teamKeys.every(key => normalizeSquadNumber(numbers[key] || (key === record.teamKey ? record.playerNumber : '')));
-    if (!record.graphic || !record.selectedPlayerName || !record.announcementName || !record.position || !hasNumbers) return false;
+    const photoPath = record.graphic?.localPath;
+    if (!packageComplete(record)) return false;
 
-    const owner = await ownerFor(record);
-    if (!owner) throw new Error('The configured bot owner could not be contacted.');
-    const source = record.graphic?.localPath && fs.existsSync(record.graphic.localPath)
-      ? new AttachmentBuilder(record.graphic.localPath, { name: 'player-photo.png' })
-      : null;
-    const numberLines = teamKeys.map(key => {
-      const number = numbers[key] || (key === record.teamKey ? record.playerNumber : '');
-      return teamKeys.length > 1 ? '**' + TEAMS[key].label + ' number:** #' + number : '**Squad number:** #' + number;
-    }).join('\n');
-    const clubLabel = teamKeys.map(key => TEAMS[key].label).join(' + ');
-
-    await owner.send({
-      content:
-        '**RT FOOTBALL MEDIA — SIGNING PACKAGE**\n' +
-        '**Club:** ' + clubLabel + '\n' +
-        '**Name:** ' + record.selectedPlayerName + '\n' +
-        '**Nickname:** ' + record.announcementName + '\n' +
-        '**Position:** ' + record.position + '\n' +
-        numberLines + '\n\n' +
-        'The original player photo is attached and the package is ready for you to create the signing graphic.',
-      files: source ? [source] : [],
-      allowedMentions: { parse: [] },
-    });
-    pendingPlayerQuotes.delete(record.selectedUserId);
-    remember({ ...record, state: 'package_forwarded', packageForwardedAt: new Date().toISOString() });
-    return true;
+    forwardingSigningPackages.add(record.id);
+    try {
+      record = stateStore.getStory(record.id) || record;
+      if (record.packageForwardedAt || record.state === 'package_forwarded') return false;
+      const owner = await ownerFor(record);
+      if (!owner) throw new Error('The configured bot owner could not be contacted.');
+      const numberLines = teamKeys.map(key => {
+        const number = numbers[key] || (key === record.teamKey ? record.playerNumber : '');
+        return teamKeys.length > 1 ? '**' + TEAMS[key].label + ' number:** #' + number : '**Squad number:** #' + number;
+      }).join('\n');
+      const clubLabel = teamKeys.map(key => TEAMS[key].label).join(' + ');
+      record = remember({ ...record, packageForwardingAt: new Date().toISOString() });
+      const sent = await owner.send({
+        content:
+          '**RT FOOTBALL MEDIA — SIGNING PACKAGE**\n' +
+          '**Club:** ' + clubLabel + '\n' +
+          '**Name:** ' + record.selectedPlayerName + '\n' +
+          '**Nickname:** ' + record.announcementName + '\n' +
+          '**Position:** ' + record.position + '\n' +
+          numberLines + '\n\n' +
+          'The original player photo is attached and the package is ready for you to create the signing graphic.',
+        files: [new AttachmentBuilder(photoPath, { name: 'player-photo.png' })],
+        allowedMentions: { parse: [] },
+      });
+      pendingPlayerQuotes.delete(record.selectedUserId);
+      remember({ ...record, state: 'package_forwarded', packageForwardedAt: new Date().toISOString(), packageMessageId: sent.id, packageForwardingAt: null });
+      return true;
+    } finally {
+      forwardingSigningPackages.delete(record.id);
+    }
   }
 
   async function renderEdition(record, options = {}) {
@@ -2473,43 +2500,53 @@ async function startBot() {
       selectedUserId: member.id,
       selectedPlayerName: record.selectedPlayerName || preferredPlayerName(member),
       state: 'waiting_for_package',
-      quoteExpiresAt: Date.now() + QUOTE_WAIT_MS,
-      reminderSent: false,
+      collectionStartedAt: new Date().toISOString(),
+      dmContactFailedAt: null,
     });
     pendingPlayerQuotes.set(member.id, record.id);
     try {
+      const numberButtons = teamKeysForRecord(record).map(key =>
+        new ButtonBuilder().setCustomId('number:start:' + key + ':' + record.id)
+          .setLabel('Choose ' + (record.multiClub ? TEAMS[key].label + ' ' : '') + 'Number')
+          .setStyle(ButtonStyle.Secondary)
+      );
       await member.send({
         content: 'Hi ' + member.displayName + '—this is ' + team.reporter + ' from RT Football Media, covering ' +
           team.label + ' in ' + team.reporterCompetition + '. We’re collecting the information for your signing announcement.\n\n' +
           '1) Send one clear full-body FC27 Pro screenshot (head to boots, face visible).\n' +
           '2) Tap **Enter Player Info** and enter your name, nickname, and position.\n' +
-          '3) Tap **Choose Squad Number** and select from the numbers still available for your club.\n\n' +
+          (record.multiClub
+            ? '3) Choose one independently available squad number for Birmingham City and one for CrownFC. The same number may be used for both if available in each club.\n\n'
+            : '3) Choose your squad number from the numbers still available for your club.\n\n') +
           'Once all three are received, I’ll forward the complete package privately to club management. The bot will NOT generate or publish the signing graphic.',
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('signing_identity:start:' + record.id).setLabel('Enter Player Info').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('number:start:decline:' + record.id).setLabel('Choose Squad Number').setStyle(ButtonStyle.Secondary)
+            ...numberButtons
           )
         ],
         allowedMentions: { parse: [] },
       });
-      scheduleQuoteTimers(record);
       return true;
-    } catch {
+    } catch (error) {
       pendingPlayerQuotes.delete(member.id);
-      await requestOwnerDecisionWithoutQuote(record.id, member.displayName + ' has DMs disabled, so the reporter could not collect the signing photo and quote.');
+      remember({ ...record, dmContactFailedAt: new Date().toISOString(), dmContactError: clean(error.message, 200) });
       return false;
     }
   }
 
-  async function startSignCommand(interaction, team, teamKey) {
+  function teamKeysForRecord(record) {
+    return signingTeamKeys(record);
+  }
+
+  async function startSignCommand(interaction, team, teamKey, selectedUserOverride = null, suppressReply = false) {
     const teamKeys = teamKey === 'both' ? ['birmingham', 'crownfc'] : [teamKey];
     for (const key of teamKeys) {
       const capacity = rosterCapacity(key);
       if (capacity.full) throw new Error(`${TEAMS[key].label} has reached its ${capacity.limit}-player roster limit. Publish a release before starting another signing.`);
     }
     const guild = interaction.guild;
-    const selectedUser = interaction.options.getUser('player');
+    const selectedUser = selectedUserOverride || interaction.options.getUser('player');
     if (!selectedUser || selectedUser.bot) throw new Error('Select a non-bot server member.');
     const member = await guild.members.fetch(selectedUser.id).catch(() => null);
     if (!member || member.user.bot) throw new Error('That player is not a non-bot member of this server.');
@@ -2520,6 +2557,11 @@ async function startBot() {
     if (duplicate) {
       throw new Error(member.displayName + ' is already on the active ' + TEAMS[duplicate.key].label + ' roster as #' + duplicate.assignment.number + '. A duplicate signing was blocked.');
     }
+    const activeRequest = stateStore.listStories().find(item =>
+      item.type === 'signing' && item.quickSign && item.selectedUserId === member.id &&
+      !['package_forwarded', 'cancelled', 'failed'].includes(item.state)
+    );
+    if (activeRequest) throw new Error(member.displayName + ' already has an active signing collection (' + activeRequest.id + '). Resume that package instead of creating a duplicate.');
 
     const id = storyId();
     const requesterUserId = process.env.BOT_OWNER_ID || interaction.user.id;
@@ -2542,13 +2584,18 @@ async function startBot() {
 
     const roleResult = await ensureSigningClubRoles(record, member);
     record = remember(record);
-    await contactPlayer(record, member);
+    const contacted = await contactPlayer(record, member);
 
     const clubLabel = teamKeys.length > 1 ? 'Birmingham City + CrownFC' : primaryTeam.label;
     const roleNote = roleResult.added.length
       ? ' Assigned club role' + (roleResult.added.length > 1 ? 's' : '') + ': ' + roleResult.added.join(' + ') + '.'
       : ' Required club role' + (roleResult.alreadyHad.length > 1 ? 's were' : ' was') + ' already assigned.';
-    await interaction.editReply('Signing workflow started for **' + member.displayName + '** → **' + clubLabel + '**. The reporter has DMed the player for their signing package.' + roleNote);
+    const completion = contacted
+      ? 'Signing workflow started for **' + member.displayName + '** → **' + clubLabel + '**. The reporter has DMed the player for their signing package.' + roleNote
+      : 'Signing record created for **' + member.displayName + '** → **' + clubLabel + '**, but the player could not be DMed. Their partial record was preserved.' + roleNote;
+    const result = { memberName: member.displayName, clubLabel, contacted, recordId: record.id, completion };
+    if (!suppressReply) await interaction.editReply(completion);
+    return result;
   }
   async function startSignBatchCommand(interaction, team, teamKey) {
     const capacity = rosterCapacity(teamKey);
@@ -3304,7 +3351,7 @@ async function startBot() {
         ...record,
         selectedPlayerName: safePublicText(interaction.fields.getTextInputValue('player_name'), 40),
         announcementName: safePublicText(interaction.fields.getTextInputValue('nickname'), 40),
-        position: safePublicText(interaction.fields.getTextInputValue('position'), 20).toUpperCase(),
+        position: safePublicText(interaction.fields.getTextInputValue('position'), 60).toUpperCase(),
       });
       const forwarded = await maybeForwardSigningPackage(record);
       await interaction.reply(forwarded
@@ -3314,15 +3361,17 @@ async function startBot() {
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('number:start:')) {
-      const [, , action, id] = interaction.customId.split(':');
+      const [, , selector, id] = interaction.customId.split(':');
       const record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) {
         return interaction.reply('This signing request is no longer active.');
       }
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
+      const numberTeamKey = TEAMS[selector] ? selector : record.teamKey;
+      if (!teamKeysForRecord(record).includes(numberTeamKey)) return interaction.reply('That club is not part of this signing request.');
       const selectorReply = {
-        content: 'Choose from all 99 squad numbers below. Assigned numbers remain visible as TAKEN and will be rejected if selected.',
-        components: squadNumberRows(record, action),
+        content: 'Choose an available ' + TEAMS[numberTeamKey].label + ' squad number. Availability is checked again when you submit it.',
+        components: squadNumberRows(record, numberTeamKey, numberTeamKey),
       };
       if (interaction.inGuild()) selectorReply.flags = MessageFlags.Ephemeral;
       return interaction.reply(selectorReply);
@@ -3348,27 +3397,34 @@ async function startBot() {
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('number_select:')) {
-      const [, action, id] = interaction.customId.split(':');
+      const [, selector, id] = interaction.customId.split(':');
       let record = pendingSignings.get(id) || stateStore.getStory(id);
       if (!record || !['waiting_for_quote', 'waiting_for_package'].includes(record.state)) {
         return interaction.reply('This signing request is no longer active.');
       }
       if (interaction.user.id !== record.selectedUserId) return interaction.reply('This signing request belongs to the selected player.');
+      const numberTeamKey = TEAMS[selector] ? selector : record.teamKey;
+      if (!teamKeysForRecord(record).includes(numberTeamKey)) return interaction.reply('That club is not part of this signing request.');
       const submittedNumber = normalizeSquadNumber(interaction.values[0]);
-      const numberOwner = squadNumberConflict(record.teamKey, submittedNumber, id, record.selectedUserId, record.selectedPlayerName);
+      const numberOwner = squadNumberConflict(numberTeamKey, submittedNumber, id, record.selectedUserId, record.selectedPlayerName);
       if (numberOwner) {
         const ownerName = safePublicText(numberOwner.playerName || numberOwner.selectedPlayerName || 'another player', 40);
         const conflictReply = {
-          content: `#${submittedNumber} is already assigned to ${ownerName} for ${TEAMS[record.teamKey].label}. Choose an available number.`,
+          content: `#${submittedNumber} is already assigned to ${ownerName} for ${TEAMS[numberTeamKey].label}. Choose an available number.`,
         };
         if (interaction.inGuild()) conflictReply.flags = MessageFlags.Ephemeral;
         return interaction.reply(conflictReply);
       }
-      record = remember({ ...record, playerNumber: submittedNumber, signingNumbers: { ...(record.signingNumbers || {}), [record.teamKey]: submittedNumber } });
+      record = remember({
+        ...record,
+        playerNumber: numberTeamKey === record.teamKey ? submittedNumber : record.playerNumber,
+        signingNumbers: { ...(record.signingNumbers || {}), [numberTeamKey]: submittedNumber },
+      });
       const forwarded = await maybeForwardSigningPackage(record);
+      const remaining = teamKeysForRecord(record).filter(key => !normalizeSquadNumber((record.signingNumbers || {})[key] || (key === record.teamKey ? record.playerNumber : '')));
       await interaction.update({ content: forwarded
-        ? '#' + submittedNumber + ' is reserved. Your complete signing package has been sent privately to club management.'
-        : '#' + submittedNumber + ' is reserved. Send your clear player photo and enter your name, nickname and position if you have not already.', components: [] });
+        ? '#' + submittedNumber + ' is reserved for ' + TEAMS[numberTeamKey].label + '. Your complete signing package has been sent privately to club management.'
+        : '#' + submittedNumber + ' is reserved for ' + TEAMS[numberTeamKey].label + '. ' + (remaining.length ? 'Still choose a number for ' + remaining.map(key => TEAMS[key].label).join(' and ') + '. ' : '') + 'Send your clear player photo and enter your name, nickname and position if you have not already.', components: [] });
       return;
     }
 
@@ -4252,8 +4308,7 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    const knownCommands = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar', 'import-mlpc-schedule', 'import-mpl-schedule', 'nextmatch', 'schedule', 'result', 'edit-match', 'cancel-match'];
-    if (!knownCommands.includes(interaction.commandName)) return;
+    if (!COMMAND_NAMES.includes(interaction.commandName)) return;
     const privateCommand = !['nextmatch', 'schedule'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
@@ -4743,13 +4798,24 @@ async function startBot() {
       await startSignCommand(interaction, selectedClub === 'both' ? TEAMS.birmingham : TEAMS[selectedClub], selectedClub);
       return;
     }
+    if (interaction.commandName === 'sign-batch') {
+      if (!['birmingham', 'crownfc', 'both'].includes(selectedClub)) return interaction.editReply('That club selection is not configured.');
+      const selected = ['player1', 'player2', 'player3', 'player4', 'player5'].map(name => interaction.options.getUser(name)).filter(Boolean);
+      const duplicateIds = selected.filter((user, index) => selected.findIndex(item => item.id === user.id) !== index).map(user => user.id);
+      if (duplicateIds.length) return interaction.editReply('The same player cannot be selected twice in one batch. Nothing was started.');
+      const primaryTeam = selectedClub === 'both' ? TEAMS.birmingham : TEAMS[selectedClub];
+      const batchResult = await runIndependentBatch(selected, user => startSignCommand(interaction, primaryTeam, selectedClub, user, true));
+      const started = batchResult.started.map(result => result.memberName);
+      const failed = batchResult.failed.map(item => (item.result?.memberName || item.user.globalName || item.user.username) + ' (' + clean(item.error, 160) + ')');
+      return interaction.editReply(
+        `Batch signing collection processed for **${selected.length} players** → **${selectedClub === 'both' ? 'Birmingham City + CrownFC' : primaryTeam.label}**.\n` +
+        `Successfully contacted: ${started.length}${started.length ? ' — ' + started.join(', ') : ''}\n` +
+        `Could not contact/start: ${failed.length}${failed.length ? ' — ' + failed.join('; ') : ''}\n` +
+        'Each player has an independent persistent record. No signing graphic or public post will be generated.'
+      );
+    }
     const team = TEAMS[selectedClub];
     if (!team) return interaction.editReply('That club is not configured.');
-    if (interaction.commandName === 'sign-batch') {
-      const teamKey = interaction.options.getString('club');
-      await startSignBatchCommand(interaction, team, teamKey);
-      return;
-    }
 
     let facts;
     if (interaction.commandName === 'match') {
@@ -4838,6 +4904,8 @@ async function startBot() {
 
 module.exports = {
   startBot,
+  commands,
+  COMMAND_NAMES,
   spotlightGraphic,
   batchSigningGraphic,
   publicationDate,
