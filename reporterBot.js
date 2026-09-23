@@ -2559,9 +2559,20 @@ async function startBot() {
     }
     const activeRequest = stateStore.listStories().find(item =>
       item.type === 'signing' && item.quickSign && item.selectedUserId === member.id &&
-      !['package_forwarded', 'cancelled', 'failed'].includes(item.state)
+      !['package_forwarded', 'cancelled', 'failed'].includes(item.state) &&
+      signingTeamKeys(item).some(key => teamKeys.includes(key))
     );
-    if (activeRequest) throw new Error(member.displayName + ' already has an active signing collection (' + activeRequest.id + '). Resume that package instead of creating a duplicate.');
+    if (activeRequest) {
+      const roleResult = await ensureSigningClubRoles(activeRequest, member);
+      const contacted = await contactPlayer(activeRequest, member);
+      const activeTeams = signingTeamKeys(activeRequest);
+      const clubLabel = activeTeams.length > 1 ? 'Birmingham City + CrownFC' : TEAMS[activeTeams[0] || activeRequest.teamKey].label;
+      const completion = contacted
+        ? 'Resumed the existing signing collection for **' + member.displayName + '** → **' + clubLabel + '**. The reporter re-sent the saved package prompts.'
+        : 'The existing signing collection for **' + member.displayName + '** was preserved, but the player could not be DMed. Ask them to enable server-member DMs and run the command again.';
+      if (!suppressReply) await interaction.editReply(completion);
+      return { memberName: member.displayName, contacted, recordId: activeRequest.id, resumed: true, roleResult };
+    }
 
     const id = storyId();
     const requesterUserId = process.env.BOT_OWNER_ID || interaction.user.id;
