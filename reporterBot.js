@@ -1423,6 +1423,23 @@ async function startBot() {
       }
     }
     console.log('Recovered ' + pendingSignings.size + ' pending RT Football Media stories.');
+    try {
+      const recoveryNames = ['sealy', 'mario', 'skayo'];
+      const matches = stateStore.listStories().filter(r => recoveryNames.some(n => JSON.stringify(r).toLowerCase().includes(n)));
+      const metaMatches = stateStore.listMetadata().filter(e => recoveryNames.some(n => (e.key + ' ' + JSON.stringify(e.value)).toLowerCase().includes(n)));
+      console.log('Named signing recovery probe: stories=' + matches.length + ', metadata=' + metaMatches.length);
+      const guild2 = process.env.DISCORD_GUILD_ID ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null) : client.guilds.cache.first();
+      const ownerId2 = process.env.BOT_OWNER_ID || (guild2 && guild2.ownerId);
+      const owner2 = ownerId2 ? await client.users.fetch(ownerId2).catch(() => null) : null;
+      if (owner2) {
+        await owner2.send('RT FOOTBALL MEDIA — SEALY / MARIO / SKAYO RECOVERY CHECK\\nSaved story matches: ' + matches.length + '\\nSaved metadata matches: ' + metaMatches.length);
+        for (const r of matches) {
+          const photo = r.graphic?.localPath && fs.existsSync(r.graphic.localPath);
+          await owner2.send({content:'Recovered named entry\\nName: '+(r.selectedPlayerName||r.playerName||'MISSING')+'\\nNickname: '+(r.announcementName||'MISSING')+'\\nPosition: '+(r.position||'MISSING')+'\\nNumber: '+(r.playerNumber||'MISSING')+'\\nDiscord ID: '+(r.selectedUserId||'MISSING')+'\\nState: '+(r.state||'MISSING')+'\\nRecord ID: '+r.id+'\\nPhoto: '+(r.graphic?(photo?'RECOVERED - attached':'record exists; cached file unavailable'):'MISSING'),files:photo?[new AttachmentBuilder(r.graphic.localPath,{name:'recovered-player-photo.png'})]:[],allowedMentions:{parse:[]}});
+        }
+        for (const e of metaMatches) await owner2.send({content:'Recovered named metadata\\nKey: '+e.key+'\\n'+JSON.stringify(e.value,null,2).slice(0,1700),allowedMentions:{parse:[]}});
+      }
+    } catch (error) { console.error('Named signing recovery probe failed:', error.message); }
     const recoveredBatchMetadata = stateStore.listMetadata('signingBatch:');
     console.log('Recovered ' + recoveredBatchMetadata.length + ' signing batch metadata records.');
     try {
