@@ -190,6 +190,11 @@ const signBatch = new SlashCommandBuilder().setName('sign-batch').setDescription
   .addUserOption(o => o.setName('player5').setDescription('Player 5'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+const signingStatus = new SlashCommandBuilder()
+  .setName('signing-status')
+  .setDescription('Privately show saved signing packages and missing information')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
 const release = clubOption(new SlashCommandBuilder().setName('release').setDescription('Publish a player departure'))
   .addStringOption(o => o.setName('player').setDescription('Player name or gamer tag').setRequired(true))
   .addStringOption(o => o.setName('details').setDescription('Optional farewell note'))
@@ -298,7 +303,7 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
   .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const commands = [match, sign, signBatch, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
+const commands = [match, sign, signBatch, signingStatus, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
   importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand].map(command => command.toJSON());
 const COMMAND_NAMES = commands.map(command => command.name);
@@ -4224,6 +4229,31 @@ async function startBot() {
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
+    if (interaction.commandName === 'signing-status') {
+      if (interaction.user.id !== ownerId) return interaction.editReply('Only the Castle & Crown Collective owner can review signing-package status.');
+      const initial = stateStore.listStories().filter(record => record.type === 'signing' && record.quickSign);
+      for (const record of initial) {
+        if (!record.packageForwardedAt && packageComplete(record)) {
+          await maybeForwardSigningPackage(record).catch(error => console.error('Signing status auto-forward failed for ' + record.id + ':', error.message));
+        }
+      }
+      const records = stateStore.listStories().filter(record => record.type === 'signing' && record.quickSign)
+        .sort((a,b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      if (!records.length) return interaction.editReply('No `/sign` or `/sign-batch` signing collections are saved.');
+      const sourceCounts = new Map();
+      for (const record of records) sourceCounts.set(record.sourceMessageId, (sourceCounts.get(record.sourceMessageId) || 0) + 1);
+      const lines = records.map(record => {
+        const teams = signingTeamKeys(record);
+        const numbers = record.signingNumbers || {};
+        const numberText = teams.map(key => `${TEAMS[key]?.label || key} ${numbers[key] || (key === record.teamKey ? record.playerNumber : '') ? '#' + (numbers[key] || record.playerNumber) : 'number missing'}`).join(' / ');
+        const missing = packageMissingFields(record).map(field => field === 'photo' ? 'photo' : field === 'name' ? 'name' : field === 'nickname' ? 'nickname' : field === 'position' ? 'position' : field.replace('Number',' number'));
+        const origin = (sourceCounts.get(record.sourceMessageId) || 0) > 1 ? 'batch' : 'single';
+        const status = record.packageForwardedAt ? 'FORWARDED' : missing.length ? `WAITING: ${missing.join(', ')}` : 'COMPLETE — forwarding retry needed';
+        return `• **${clean(record.selectedPlayerName || 'Unknown player', 45)}** (<@${record.selectedUserId}>) — ${teams.map(key => TEAMS[key]?.label || key).join(' + ')} — ${numberText || 'number missing'} — ${origin} — **${status}**`;
+      });
+      const content = `**RT FOOTBALL MEDIA — SIGNING STATUS**\nSaved collections: ${records.length}\n\n${lines.join('\n')}`;
+      return interaction.editReply(content.length <= 1950 ? content : content.slice(0, 1900) + '\n\nAdditional records exist; run the command again after the listed packages are completed.');
+    }
     const scheduleManager = interaction.user.id === ownerId ||
       interaction.member?.roles?.cache?.has(FOOTBALL_OPS_ROLE_ID) ||
       interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
