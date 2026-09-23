@@ -51,6 +51,7 @@ const { runPrivateDryRun } = require('./stagingSuite');
 const { renderSpotlight, selectSpotlightLayout } = require('./rtSpotlightRenderer');
 const { batchComposition, validateBatchSigningData, renderBatchSigningPoster } = require('./rtBatchSigningRenderer');
 const { createAwardVideo } = require('./awardVideo');
+const { applyMatchCenterSetup } = require('./matchCenterSetup');
 
 let OpenAI;
 let toFile;
@@ -177,6 +178,11 @@ const setupServer = new SlashCommandBuilder()
   .setDescription('Create the RT Football Media category and reporter channels')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
+const setupMatchCenters = new SlashCommandBuilder()
+  .setName('setup-match-centers')
+  .setDescription('Owner-only: convert both club Match Centers to protected forums')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+
 const streamlineServer = new SlashCommandBuilder()
   .setName('streamline-server')
   .setDescription('Preview and apply the professional five-section club layout')
@@ -239,7 +245,7 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
   .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const commands = [match, sign, signBatch, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
+const commands = [match, sign, signBatch, signing, release, setupServer, setupMatchCenters, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar].map(command => command.toJSON());
 
 function clean(value, max) {
@@ -4196,11 +4202,25 @@ async function startBot() {
     }
 
     if (!interaction.isChatInputCommand()) return;
-    if (!['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
-    const privateCommand = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
+    if (!['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'setup-match-centers', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName)) return;
+    const privateCommand = ['match', 'sign', 'sign-batch', 'signing', 'release', 'setup-server', 'setup-match-centers', 'streamline-server', 'audit-server', 'staging-suite', 'correct-stats', 'award-shortlists', 'archive-media', 'run-schedules', 'award-presentation', 'season-calendar'].includes(interaction.commandName);
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
+    if (interaction.commandName === 'setup-match-centers') {
+      if (interaction.user.id !== ownerId) return interaction.editReply('Only the Castle & Crown Collective owner can run this temporary setup command.');
+      const report = await applyMatchCenterSetup(interaction.guild, { managementRoleId: FOOTBALL_OPS_ROLE_ID });
+      stateStore.addManagementLog({ action: 'match_center_forums_configured', requesterUserId: interaction.user.id, report });
+      return interaction.editReply(
+        '**Match Center forum update complete.**\n' +
+        'Created: ' + (report.created.join(', ') || 'none; existing forums updated') + '\n' +
+        'Renamed: ' + (report.renamed.join(', ') || 'none') + '\n' +
+        'Moved to Club Archive: ' + (report.moved.join(', ') || 'none') + '\n' +
+        'Tags on each forum: ' + report.tags.crownfc.join(', ') + '\n' +
+        'Permissions: players can reply but cannot create posts; management and RT Football Media can create and manage posts.\n' +
+        'Nothing was deleted.'
+      );
+    }
     if (['match', 'sign', 'sign-batch', 'signing', 'release'].includes(interaction.commandName) && interaction.user.id !== ownerId) {
       return interaction.editReply('Only the Castle & Crown Collective owner can start an RT Football Media publication workflow.');
     }
