@@ -73,7 +73,7 @@ const stateStore = new StateStore(path.join(DATA_DIRECTORY, 'rt-football-media-s
 const quoteMinutesOverride = Number(process.env.QUOTE_WAIT_MINUTES);
 const QUOTE_WAIT_MS = Number.isFinite(quoteMinutesOverride) && quoteMinutesOverride > 0
   ? Math.max(2, quoteMinutesOverride) * 60 * 1000
-  : Math.max(1, Number(process.env.QUOTE_WAIT_HOURS) || 12) * 60 * 60 * 1000;
+  : Math.max(1, Number(process.env.QUOTE_WAIT_HOURS) || 4) * 60 * 60 * 1000;
 const QUOTE_REMINDER_MS = Math.min(QUOTE_WAIT_MS / 2, 6 * 60 * 60 * 1000);
 const APPROVAL_WAIT_MS = Math.max(1, Number(process.env.APPROVAL_WAIT_HOURS) || 48) * 60 * 60 * 1000;
 const NEWS_TIMEZONE = process.env.NEWS_TIMEZONE || 'America/New_York';
