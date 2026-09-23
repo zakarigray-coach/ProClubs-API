@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Collection, ChannelType, GuildScheduledEventStatus } = require('discord.js');
+const { Collection, ChannelType, ForumLayoutType, GuildScheduledEventStatus, SortOrderType } = require('discord.js');
 const { StateStore } = require('../stateStore');
 const {
   MLPC_SCHEDULE_2026,
@@ -14,6 +14,8 @@ const {
   recordResult,
   runReminders,
   handleAvailability,
+  nextMatchText,
+  scheduleText,
 } = require('../matchSchedule');
 
 function fakeDiscord() {
@@ -24,6 +26,7 @@ function fakeDiscord() {
   const forum = {
     id: 'forum-crown', name: '📅・mlpc-match-center', type: ChannelType.GuildForum,
     availableTags: ['Upcoming','Home','Away','Completed','Win','Loss','Draw'].map((name, i) => ({ name, id: `tag-${i}` })),
+    edit: async data => { forum.defaults = data; return forum; },
     threads: { create: async data => {
       const id = `thread-${++sequence}`;
       const thread = { id, name:data.name, messages:[], setName:async name=>{thread.name=name;}, setAppliedTags:async tags=>{thread.tags=tags;}, fetchStarterMessage:async()=>starter(thread), send:async data=>{thread.messages.push(data);} };
@@ -62,10 +65,31 @@ test('MLPC import is idempotent across persistent reloads', async () => {
   const first = await importSchedule({ guild:fake.guild, store, teamKey:'crownfc', text:MLPC_SCHEDULE_2026, year:2026 });
   assert.deepEqual({ imported:first.imported, duplicates:first.duplicates, posts:first.postsCreated, events:first.eventsCreated }, { imported:34, duplicates:0, posts:34, events:34 });
   assert.equal(fixtures(store,'crownfc').length, 34);
+  const ordered = fixtures(store,'crownfc').sort((a,b)=>a.matchNumber-b.matchNumber);
+  assert.deepEqual(ordered.map(item=>item.matchNumber), Array.from({length:34},(_,index)=>index+1));
+  assert.equal(ordered[0].opponent, 'dream chaserz');
+  assert.equal(ordered[0].forumPostId, 'thread-1');
+  assert.equal(ordered.at(-1).opponent, 'KTW Squad');
+  assert.equal(ordered.at(-1).forumPostId, 'thread-34');
+  assert.equal(fake.threads.get('thread-1').name, 'Match 01 — Oct 19 — CrownFC vs dream chaserz — 8:00 PM');
+  assert.equal(fake.threads.get('thread-34').name, 'Match 34 — Dec 14 — CrownFC vs KTW Squad — 8:30 PM');
+  assert.equal(fake.guild.channels.get('forum-crown').defaults.defaultForumLayout, ForumLayoutType.ListView);
+  assert.equal(fake.guild.channels.get('forum-crown').defaults.defaultSortOrder, SortOrderType.CreationDate);
   const reloaded = new StateStore(file);
   const second = await importSchedule({ guild:fake.guild, store:reloaded, teamKey:'crownfc', text:MLPC_SCHEDULE_2026, year:2026 });
   assert.deepEqual({ imported:second.imported, duplicates:second.duplicates, posts:second.postsCreated, events:second.eventsCreated }, { imported:0, duplicates:34, posts:0, events:0 });
   assert.equal(fixtures(reloaded,'crownfc').length, 34);
+});
+
+test('schedule import sorts by date and kickoff before assigning stable numbers', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-schedule-order-'));
+  const store = new StateStore(path.join(dir, 'state.json')); const fake = fakeDiscord();
+  const unordered = 'Oct 21 | 8:30 PM | Third FC | Away\nOct 19 | 8:30 PM | Second FC | Home\nOct 19 | 8:00 PM | First FC | Home';
+  await importSchedule({guild:fake.guild,store,teamKey:'crownfc',text:unordered,year:2026});
+  const ordered = fixtures(store,'crownfc').sort((a,b)=>a.matchNumber-b.matchNumber);
+  assert.deepEqual(ordered.map(item=>[item.matchNumber,item.opponent,item.forumPostId]), [[1,'First FC','thread-1'],[2,'Second FC','thread-2'],[3,'Third FC','thread-3']]);
+  assert.match(nextMatchText(store,'crownfc',fake.guild.id), /MATCH 01/);
+  assert.match(scheduleText(store,'crownfc',fake.guild.id), /MATCH 01/);
 });
 
 test('availability totals count only each player latest saved response', () => {

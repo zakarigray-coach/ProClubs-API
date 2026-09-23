@@ -4252,6 +4252,7 @@ async function startBot() {
       return interaction.editReply(
         `**${TEAMS[teamKey].label} schedule import complete.**\n` +
         `Fixtures imported: ${report.imported}\nDuplicates skipped: ${report.duplicates}\nInvalid rows: ${report.invalid.length}\nForum posts created: ${report.postsCreated}\nScheduled events created: ${report.eventsCreated}` +
+        `\nMatch numbering: ${report.numberingValid ? 'VALID' : 'NEEDS REVIEW'}\nCreation order: ${report.creationOrderValid ? 'VALID' : 'NEEDS REVIEW'}` +
         (invalidLines ? `\n\n**Invalid rows**\n${invalidLines}` : '')
       );
     }

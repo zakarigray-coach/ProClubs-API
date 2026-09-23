@@ -7,7 +7,9 @@ const {
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
+  ForumLayoutType,
   PermissionFlagsBits,
+  SortOrderType,
 } = require('discord.js');
 
 const TIMEZONE = 'America/New_York';
@@ -58,6 +60,7 @@ function metadataKey(id) { return `fixture:${id}`; }
 function fixtures(store, teamKey) { return store.listMetadata('fixture:').map(item => item.value).filter(item => item && (!teamKey || item.teamKey === teamKey)); }
 function getFixture(store, id) { return store.getMetadata(metadataKey(id)); }
 function saveFixture(store, value) { return store.setMetadata(metadataKey(value.fixtureId), { ...value, updatedAt: new Date().toISOString() }); }
+function matchLabel(value) { return String(Number(value) || 0).padStart(2, '0'); }
 
 function easternParts(date) {
   return Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23' }).formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
@@ -113,7 +116,7 @@ function buttonsFor(fixture) {
 }
 function forumFor(guild, teamKey) { return guild.channels.cache.find(c => c.type === ChannelType.GuildForum && norm(c.name) === CLUBS[teamKey].forum); }
 function tagIds(forum, names) { return names.map(name => forum.availableTags.find(t => t.name.toLowerCase() === name.toLowerCase())?.id).filter(Boolean); }
-function titleFor(f) { return `${CLUBS[f.teamKey].label} vs ${f.opponent} — ${f.dateLabel}`.slice(0,100); }
+function titleFor(f) { return `Match ${matchLabel(f.matchNumber)} — ${f.dateLabel} — ${CLUBS[f.teamKey].label} vs ${f.opponent} — ${f.timeLabel}`.slice(0,100); }
 
 async function createOrUpdateDiscord(guild, store, fixture) {
   const club = CLUBS[fixture.teamKey]; const forum = forumFor(guild, fixture.teamKey);
@@ -148,16 +151,26 @@ async function importSchedule({guild,store,teamKey,text,year=2026}) {
   if (botMember?.permissions && (!botMember.permissions.has(PermissionFlagsBits.CreateEvents) || !botMember.permissions.has(PermissionFlagsBits.ManageEvents))) {
     throw new Error('RT Football Media needs Create Events and Manage Events permissions before schedules can be imported. No fixtures were changed.');
   }
-  const parsed=parseSchedule(text,{year}); const report={imported:0,duplicates:0,invalid:parsed.invalid,postsCreated:0,eventsCreated:0,fixtures:[]};
+  const parsed=parseSchedule(text,{year});
+  parsed.rows.sort((a,b)=>a.kickoffAt.localeCompare(b.kickoffAt) || a.opponent.localeCompare(b.opponent));
+  const forum=forumFor(guild,teamKey);
+  if(!forum) throw new Error(`${club.label} Match Center forum was not found. Ask management to verify the forum channel name and bot access.`);
+  if(typeof forum.edit==='function') await forum.edit({defaultForumLayout:ForumLayoutType.ListView,defaultSortOrder:SortOrderType.CreationDate,reason:'Official Match Center chronological archive'});
+  const report={imported:0,duplicates:0,invalid:parsed.invalid,postsCreated:0,eventsCreated:0,fixtures:[]};
   const seen=new Set();
-  for(const row of parsed.rows){
+  for(const [index,row] of parsed.rows.entries()){
     const id=fixtureKey(teamKey,row.kickoffAt,row.opponent); if(seen.has(id)){report.duplicates++;continue;} seen.add(id);
     let fixture=getFixture(store,id); const existing=Boolean(fixture);
-    if(!fixture) fixture={fixtureId:id,teamKey,club:club.label,league:club.league,season:String(year),opponent:row.opponent,date:row.dateLabel,kickoff:row.timeLabel,dateLabel:row.dateLabel,timeLabel:row.timeLabel,kickoffAt:row.kickoffAt,timezone:TIMEZONE,homeAway:row.homeAway,status:'upcoming',result:null,ourScore:null,opponentScore:null,availability:{},reminder24hSent:false,reminder30mSent:false,createdAt:new Date().toISOString()};
+    const officialNumber=index+1;
+    if(!fixture) fixture={matchNumber:officialNumber,fixtureId:id,teamKey,club:club.label,league:club.league,season:String(year),opponent:row.opponent,date:row.dateLabel,kickoff:row.timeLabel,dateLabel:row.dateLabel,timeLabel:row.timeLabel,kickoffAt:row.kickoffAt,timezone:TIMEZONE,homeAway:row.homeAway,status:'upcoming',result:null,ourScore:null,opponentScore:null,availability:{},reminder24hSent:false,reminder30mSent:false,createdAt:new Date().toISOString()};
+    else fixture={...fixture,matchNumber:fixture.matchNumber||officialNumber,date:fixture.date||row.dateLabel,kickoff:fixture.kickoff||row.timeLabel,opponent:fixture.opponent||row.opponent,homeAway:fixture.homeAway||row.homeAway};
     const hadPost=fixture.forumPostId, hadEvent=fixture.discordEventId; fixture=await createOrUpdateDiscord(guild,store,fixture);
     if(existing) report.duplicates++; else report.imported++;
     if(!hadPost&&fixture.forumPostId)report.postsCreated++; if(!hadEvent&&fixture.discordEventId)report.eventsCreated++; report.fixtures.push(fixture);
   }
+  const numbered=report.fixtures.map(f=>Number(f.matchNumber));
+  report.numberingValid=numbered.length===parsed.rows.length && new Set(numbered).size===numbered.length && numbered.every((number,index)=>number===index+1);
+  report.creationOrderValid=report.fixtures.every((fixture,index)=>Number(fixture.matchNumber)===index+1);
   return report;
 }
 
@@ -184,7 +197,7 @@ async function runReminders({guild,store,now=new Date()}){const sent=[];for(let 
   }return sent;}
 function upcoming(store,teamKey,now=new Date()){return fixtures(store,teamKey).filter(f=>f.status==='upcoming'&&new Date(f.kickoffAt)>=now).sort((a,b)=>a.kickoffAt.localeCompare(b.kickoffAt));}
 function fixtureLink(guildId,f){return f.forumPostId?`https://discord.com/channels/${guildId}/${f.forumPostId}`:'Unavailable';}
-function nextMatchText(store,teamKey,guildId){const f=upcoming(store,teamKey)[0];if(!f)return `No upcoming ${CLUBS[teamKey].label} fixture is currently saved.`;const c=availabilityCounts(f);const lobby=new Date(new Date(f.kickoffAt)-30*60000).toLocaleTimeString('en-US',{timeZone:TIMEZONE,hour:'numeric',minute:'2-digit'});return `${CLUBS[teamKey].emoji} **${CLUBS[teamKey].label} Next Match**\n\nvs ${f.opponent}\n${f.dateLabel} • ${f.timeLabel} ET\n${f.homeAway}\nLobby: ${lobby} ET\n\nAvailable: ${c.available}\nMaybe: ${c.maybe}\nUnavailable: ${c.unavailable}\n\n[Match Center post](${fixtureLink(guildId,f)})${f.discordEventId?` • [Discord event](https://discord.com/events/${guildId}/${f.discordEventId})`:''}`;}
-function scheduleText(store,teamKey,guildId,limit=8){const list=upcoming(store,teamKey).slice(0,limit);if(!list.length)return `No upcoming ${CLUBS[teamKey].label} fixtures are currently saved.`;return `**${CLUBS[teamKey].label} — Upcoming Schedule**\n`+list.map(f=>`• **${f.dateLabel} • ${f.timeLabel} ET** — ${f.homeAway==='Home'?'vs':'at'} ${f.opponent}`).join('\n')+`\n\n[Open Match Center](${fixtureLink(guildId,list[0])})`;}
+function nextMatchText(store,teamKey,guildId){const f=upcoming(store,teamKey)[0];if(!f)return `No upcoming ${CLUBS[teamKey].label} fixture is currently saved.`;const c=availabilityCounts(f);const lobby=new Date(new Date(f.kickoffAt)-30*60000).toLocaleTimeString('en-US',{timeZone:TIMEZONE,hour:'numeric',minute:'2-digit'});return `${CLUBS[teamKey].emoji} **MATCH ${matchLabel(f.matchNumber)}**\n${CLUBS[teamKey].label} vs ${f.opponent}\n${f.dateLabel} • ${f.timeLabel} ET\n${f.homeAway}\nLobby: ${lobby} ET\n\nAvailable: ${c.available}\nMaybe: ${c.maybe}\nUnavailable: ${c.unavailable}\n\n[Match Center post](${fixtureLink(guildId,f)})${f.discordEventId?` • [Discord event](https://discord.com/events/${guildId}/${f.discordEventId})`:''}`;}
+function scheduleText(store,teamKey,guildId,limit=8){const list=upcoming(store,teamKey).slice(0,limit);if(!list.length)return `No upcoming ${CLUBS[teamKey].label} fixtures are currently saved.`;return `**${CLUBS[teamKey].label} — Upcoming Schedule**\n`+list.map(f=>`• **MATCH ${matchLabel(f.matchNumber)} — ${f.dateLabel} • ${f.timeLabel} ET** — ${f.homeAway==='Home'?'vs':'at'} ${f.opponent}`).join('\n')+`\n\n[Open Match Center](${fixtureLink(guildId,list[0])})`;}
 
-module.exports={CLUBS,TAGS,MLPC_SCHEDULE_2026,parseSchedule,fixtures,getFixture,importSchedule,handleAvailability,recordResult,cancelMatch,editMatch,runReminders,nextMatchText,scheduleText,availabilityCounts,fixtureKey};
+module.exports={CLUBS,TAGS,MLPC_SCHEDULE_2026,parseSchedule,fixtures,getFixture,importSchedule,handleAvailability,recordResult,cancelMatch,editMatch,runReminders,nextMatchText,scheduleText,availabilityCounts,fixtureKey,titleFor,matchLabel};
