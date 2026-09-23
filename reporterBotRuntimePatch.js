@@ -31,21 +31,6 @@ function loadReporterBot() {
       to: `const signBatch = new SlashCommandBuilder().setName('sign-batch').setDescription('Collect individual signing packages for 2–5 players')\n  .addStringOption(o => o.setName('club').setDescription('Club(s)').setRequired(true)\n    .addChoices(\n      { name: 'Birmingham City (Raine)', value: 'birmingham' },\n      { name: 'CrownFC (Teagan)', value: 'crownfc' },\n      { name: 'Both — Birmingham City + CrownFC', value: 'both' },\n    ))\n  .addUserOption(o => o.setName('player1').setDescription('Player 1').setRequired(true))\n  .addUserOption(o => o.setName('player2').setDescription('Player 2').setRequired(true))\n  .addUserOption(o => o.setName('player3').setDescription('Player 3'))\n  .addUserOption(o => o.setName('player4').setDescription('Player 4'))\n  .addUserOption(o => o.setName('player5').setDescription('Player 5'))\n  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);`,
     },
     {
-      name: 'signing identity includes position',
-      from: `function signingIdentityModal(id, record) {\n  return new ModalBuilder()\n    .setCustomId('signing_identity:' + id)\n    .setTitle('Your signing announcement')\n    .addComponents(\n      textInput('player_name', 'Player name', { required: true, max: 40, value: record.selectedPlayerName || '' }),\n      textInput('nickname', 'Nickname', { required: true, max: 40, placeholder: 'Example: The General' })\n    );\n}`,
-      to: `function signingIdentityModal(id, record) {\n  return new ModalBuilder()\n    .setCustomId('signing_identity:' + id)\n    .setTitle('Your signing announcement')\n    .addComponents(\n      textInput('player_name', 'Player name', { required: true, max: 40, value: record.selectedPlayerName || '' }),\n      textInput('nickname', 'Nickname', { required: true, max: 40, placeholder: 'Example: The General' }),\n      textInput('position', 'Position(s)', { required: true, max: 40, value: record.position || '', placeholder: 'Example: CDM / CB' })\n    );\n}`,
-    },
-    {
-      name: 'save player position from identity form',
-      from: `      record = remember({\n        ...record,\n        selectedPlayerName: safePublicText(interaction.fields.getTextInputValue('player_name'), 40),\n        announcementName: safePublicText(interaction.fields.getTextInputValue('nickname'), 40),\n      });\n      await interaction.reply('Saved. Player name: **' + record.selectedPlayerName + '** • Nickname: **' + record.announcementName + '**. Send your clear player photo and choose your squad number if you have not already.');`,
-      to: `      record = remember({\n        ...record,\n        selectedPlayerName: safePublicText(interaction.fields.getTextInputValue('player_name'), 40),\n        announcementName: safePublicText(interaction.fields.getTextInputValue('nickname'), 40),\n        position: safePublicText(interaction.fields.getTextInputValue('position'), 40),\n      });\n      await interaction.reply('Saved. Player name: **' + record.selectedPlayerName + '** • Nickname: **' + record.announcementName + '** • Position: **' + record.position + '**. Send your clear player photo and choose your squad number if you have not already.');`,
-    },
-    {
-      name: 'manual signing package includes position',
-      from: `          '**Nickname:** ' + pending.announcementName + '\\n' +\n          '**Squad number:** #' + pending.playerNumber + '\\n\\n' +\n          'The player photo is attached. This package is ready for you to create the signing announcement manually.',`,
-      to: `          '**Nickname:** ' + pending.announcementName + '\\n' +\n          '**Position:** ' + (pending.position || 'Not provided') + '\\n' +\n          '**Squad number:** #' + pending.playerNumber + '\\n\\n' +\n          'The player photo is attached. This package is ready for you to create the signing announcement manually.',`,
-    },
-    {
       name: 'startSignCommand accepts batch-selected user',
       from: `  async function startSignCommand(interaction, team, teamKey) {\n    const teamKeys = teamKey === 'both' ? ['birmingham', 'crownfc'] : [teamKey];`,
       to: `  async function startSignCommand(interaction, team, teamKey, selectedUserOverride = null, suppressReply = false) {\n    const teamKeys = teamKey === 'both' ? ['birmingham', 'crownfc'] : [teamKey];`,
