@@ -1423,6 +1423,48 @@ async function startBot() {
       }
     }
     console.log('Recovered ' + pendingSignings.size + ' pending RT Football Media stories.');
+    const recoveredBatchMetadata = stateStore.listMetadata('signingBatch:');
+    console.log('Recovered ' + recoveredBatchMetadata.length + ' signing batch metadata records.');
+    try {
+      const guild = process.env.DISCORD_GUILD_ID ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null) : client.guilds.cache.first();
+      const ownerId = process.env.BOT_OWNER_ID || (guild && guild.ownerId);
+      const owner = ownerId ? await client.users.fetch(ownerId).catch(() => null) : null;
+      if (owner && recoveredBatchMetadata.length) {
+        await owner.send('**RT FOOTBALL MEDIA — LEGACY /SIGN-BATCH RECOVERY**\nFound **' + recoveredBatchMetadata.length + '** saved batch record(s). I am forwarding the saved batch data below.');
+        for (const entry of recoveredBatchMetadata) {
+          const batch = entry.value || {};
+          const ids = batch.selectedPlayerIds || batch.playerIds || batch.players || [];
+          const playerIds = Array.isArray(ids) ? ids.map(item => typeof item === 'string' ? item : item?.id).filter(Boolean) : [];
+          const linked = stateStore.listStories().filter(story =>
+            story.batchId === batch.id || story.signingBatchId === batch.id || playerIds.includes(story.selectedUserId)
+          );
+          const lines = [];
+          lines.push('**Batch ID:** ' + (batch.id || entry.key.replace('signingBatch:', '')));
+          lines.push('**Club:** ' + (TEAMS[batch.teamKey]?.label || batch.teamKey || 'Unknown'));
+          lines.push('**State:** ' + (batch.state || 'Unknown'));
+          if (playerIds.length) lines.push('**Saved player IDs:** ' + playerIds.map(id => '<@' + id + '>').join(', '));
+          if (batch.marqueePlayerId) lines.push('**Marquee:** <@' + batch.marqueePlayerId + '>');
+          lines.push('**Linked signing records found:** ' + linked.length);
+          await owner.send({ content: lines.join('\n'), allowedMentions: { parse: [] } });
+          for (const record of linked) {
+            const localPhoto = record.graphic?.localPath && fs.existsSync(record.graphic.localPath);
+            const file = localPhoto ? new AttachmentBuilder(record.graphic.localPath, { name: 'recovered-player-photo.png' }) : null;
+            await owner.send({
+              content: '**Recovered batch player**\n**Name:** ' + (record.selectedPlayerName || 'MISSING') +
+                '\n**Nickname:** ' + (record.announcementName || 'MISSING') +
+                '\n**Position:** ' + (record.position || 'MISSING') +
+                '\n**Number:** ' + (record.playerNumber ? '#' + record.playerNumber : 'MISSING') +
+                '\n**Discord:** <@' + (record.selectedUserId || 'unknown') + '>' +
+                '\n**Photo record:** ' + (record.graphic ? 'YES' : 'NO'),
+              files: file ? [file] : [],
+              allowedMentions: { parse: [] },
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Legacy sign-batch recovery report failed:', error.message);
+    }
     try {
       const guild = process.env.DISCORD_GUILD_ID
         ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null)
