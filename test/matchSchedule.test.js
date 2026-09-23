@@ -15,6 +15,7 @@ const {
   runReminders,
   handleAvailability,
   nextMatchText,
+  reorderMatchCenterForum,
   scheduleText,
 } = require('../matchSchedule');
 
@@ -29,7 +30,7 @@ function fakeDiscord() {
     edit: async data => { forum.defaults = data; return forum; },
     threads: { create: async data => {
       const id = `thread-${++sequence}`;
-      const thread = { id, name:data.name, messages:[], setName:async name=>{thread.name=name;}, setAppliedTags:async tags=>{thread.tags=tags;}, fetchStarterMessage:async()=>starter(thread), send:async data=>{thread.messages.push(data);} };
+      const thread = { id, name:data.name, messages:[], setName:async name=>{thread.name=name;}, setAppliedTags:async tags=>{thread.tags=tags;}, fetchStarterMessage:async()=>starter(thread), send:async data=>{thread.messages.push(data);}, edit:async data=>{Object.assign(thread,data);}, delete:async()=>{thread.deleted=true;threads.delete(id);} };
       threads.set(id, thread); return thread;
     } },
   };
@@ -68,11 +69,11 @@ test('MLPC import is idempotent across persistent reloads', async () => {
   const ordered = fixtures(store,'crownfc').sort((a,b)=>a.matchNumber-b.matchNumber);
   assert.deepEqual(ordered.map(item=>item.matchNumber), Array.from({length:34},(_,index)=>index+1));
   assert.equal(ordered[0].opponent, 'dream chaserz');
-  assert.equal(ordered[0].forumPostId, 'thread-1');
+  assert.equal(ordered[0].forumPostId, 'thread-34');
   assert.equal(ordered.at(-1).opponent, 'KTW Squad');
-  assert.equal(ordered.at(-1).forumPostId, 'thread-34');
-  assert.equal(fake.threads.get('thread-1').name, 'Match 01 — Oct 19 — CrownFC vs dream chaserz — 8:00 PM');
-  assert.equal(fake.threads.get('thread-34').name, 'Match 34 — Dec 14 — CrownFC vs KTW Squad — 8:30 PM');
+  assert.equal(ordered.at(-1).forumPostId, 'thread-1');
+  assert.equal(fake.threads.get('thread-34').name, 'Match 01 — Oct 19 — CrownFC vs dream chaserz — 8:00 PM');
+  assert.equal(fake.threads.get('thread-1').name, 'Match 34 — Dec 14 — CrownFC vs KTW Squad — 8:30 PM');
   assert.equal(fake.guild.channels.get('forum-crown').defaults.defaultForumLayout, ForumLayoutType.ListView);
   assert.equal(fake.guild.channels.get('forum-crown').defaults.defaultSortOrder, SortOrderType.CreationDate);
   const reloaded = new StateStore(file);
@@ -87,9 +88,26 @@ test('schedule import sorts by date and kickoff before assigning stable numbers'
   const unordered = 'Oct 21 | 8:30 PM | Third FC | Away\nOct 19 | 8:30 PM | Second FC | Home\nOct 19 | 8:00 PM | First FC | Home';
   await importSchedule({guild:fake.guild,store,teamKey:'crownfc',text:unordered,year:2026});
   const ordered = fixtures(store,'crownfc').sort((a,b)=>a.matchNumber-b.matchNumber);
-  assert.deepEqual(ordered.map(item=>[item.matchNumber,item.opponent,item.forumPostId]), [[1,'First FC','thread-1'],[2,'Second FC','thread-2'],[3,'Third FC','thread-3']]);
+  assert.deepEqual(ordered.map(item=>[item.matchNumber,item.opponent,item.forumPostId]), [[1,'First FC','thread-3'],[2,'Second FC','thread-2'],[3,'Third FC','thread-1']]);
   assert.match(nextMatchText(store,'crownfc',fake.guild.id), /MATCH 01/);
   assert.match(scheduleText(store,'crownfc',fake.guild.id), /MATCH 01/);
+});
+
+test('approved reorder replaces old posts safely and leaves Match 01 newest', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-reorder-'));
+  const store = new StateStore(path.join(dir, 'state.json')); const fake = fakeDiscord();
+  await importSchedule({guild:fake.guild,store,teamKey:'crownfc',text:'Oct 19 | 8:00 PM | First FC | Home\nOct 19 | 8:30 PM | Second FC | Home\nOct 21 | 8:00 PM | Third FC | Away',year:2026});
+  const oldIds = fixtures(store,'crownfc').map(item=>item.forumPostId);
+  // Simulate records/posts created by the pre-reorder implementation.
+  for (const fixture of fixtures(store,'crownfc')) store.setMetadata(`fixture:${fixture.fixtureId}`, {...fixture,forumOrderVersion:null});
+  const result = await reorderMatchCenterForum({guild:fake.guild,store,teamKey:'crownfc'});
+  assert.deepEqual({migrated:result.migrated,deleted:result.deleted},{migrated:3,deleted:3});
+  assert.equal(oldIds.every(id=>!fake.threads.has(id)),true);
+  const ordered = fixtures(store,'crownfc').sort((a,b)=>a.matchNumber-b.matchNumber);
+  assert.deepEqual(ordered.map(item=>item.forumPostId),['thread-6','thread-5','thread-4']);
+  const rerun = await reorderMatchCenterForum({guild:fake.guild,store,teamKey:'crownfc'});
+  assert.equal(rerun.skipped,true);
+  assert.equal(fake.threads.size,3);
 });
 
 test('availability totals count only each player latest saved response', () => {

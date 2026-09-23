@@ -55,6 +55,7 @@ const { signingTeamKeys, packageMissingFields, packageComplete, runIndependentBa
 const {
   MLPC_SCHEDULE_2026,
   importSchedule,
+  reorderMatchCenterForum,
   handleAvailability,
   recordResult,
   cancelMatch,
@@ -1718,6 +1719,11 @@ async function startBot() {
     await runDueScheduledOperations().catch(error => console.error('Initial scheduled media check failed:', error));
     const statsGuild = await configuredGuild().catch(() => null);
     if (statsGuild) {
+      for (const teamKey of ['crownfc','birmingham']) {
+        await reorderMatchCenterForum({guild:statsGuild,store:stateStore,teamKey}).then(result => {
+          if (!result.noFixtures) console.log('Match Center chronological reorder:', JSON.stringify(result));
+        }).catch(error => console.error(`Could not reorder ${teamKey} Match Center:`, error.message));
+      }
       await runReminders({ guild: statsGuild, store: stateStore }).catch(error =>
         console.error('Initial match reminder check failed:', error.message)
       );

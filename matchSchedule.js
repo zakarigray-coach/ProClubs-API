@@ -123,7 +123,8 @@ async function createOrUpdateDiscord(guild, store, fixture) {
   if (!forum) throw new Error(`${club.label} Match Center forum was not found. Ask management to verify the forum channel name and bot access.`);
   let thread = fixture.forumPostId ? await guild.channels.fetch(fixture.forumPostId).catch(()=>null) : null;
   if (!thread) {
-    thread = await forum.threads.create({ name:titleFor(fixture), message:{content:bodyFor(fixture),components:buttonsFor(fixture),allowedMentions:{parse:[]}}, appliedTags:tagIds(forum,['Upcoming',fixture.homeAway]), reason:'Official league fixture import' });
+    const initialTags = fixture.status === 'completed' ? ['Completed',fixture.result] : fixture.status === 'cancelled' ? [] : ['Upcoming',fixture.homeAway];
+    thread = await forum.threads.create({ name:titleFor(fixture), message:{content:bodyFor(fixture),components:buttonsFor(fixture),allowedMentions:{parse:[]}}, appliedTags:tagIds(forum,initialTags), reason:'Official league fixture import' });
     fixture.forumPostId = thread.id; fixture.forumChannelId = forum.id;
     // Persist the post immediately. If Discord event creation fails, a retry
     // reuses this post instead of creating a duplicate.
@@ -157,21 +158,50 @@ async function importSchedule({guild,store,teamKey,text,year=2026}) {
   if(!forum) throw new Error(`${club.label} Match Center forum was not found. Ask management to verify the forum channel name and bot access.`);
   if(typeof forum.edit==='function') await forum.edit({defaultForumLayout:ForumLayoutType.ListView,defaultSortOrder:SortOrderType.CreationDate,reason:'Official Match Center chronological archive'});
   const report={imported:0,duplicates:0,invalid:parsed.invalid,postsCreated:0,eventsCreated:0,fixtures:[]};
+  const orderedRows=parsed.rows.map((row,index)=>({row,officialNumber:index+1}));
   const seen=new Set();
-  for(const [index,row] of parsed.rows.entries()){
+  // Discord displays Creation Time newest-first. Creating Match 34 first and
+  // Match 01 last produces the requested visible Match 01 → Match 34 order.
+  for(const {row,officialNumber} of [...orderedRows].reverse()){
     const id=fixtureKey(teamKey,row.kickoffAt,row.opponent); if(seen.has(id)){report.duplicates++;continue;} seen.add(id);
     let fixture=getFixture(store,id); const existing=Boolean(fixture);
-    const officialNumber=index+1;
     if(!fixture) fixture={matchNumber:officialNumber,fixtureId:id,teamKey,club:club.label,league:club.league,season:String(year),opponent:row.opponent,date:row.dateLabel,kickoff:row.timeLabel,dateLabel:row.dateLabel,timeLabel:row.timeLabel,kickoffAt:row.kickoffAt,timezone:TIMEZONE,homeAway:row.homeAway,status:'upcoming',result:null,ourScore:null,opponentScore:null,availability:{},reminder24hSent:false,reminder30mSent:false,createdAt:new Date().toISOString()};
     else fixture={...fixture,matchNumber:fixture.matchNumber||officialNumber,date:fixture.date||row.dateLabel,kickoff:fixture.kickoff||row.timeLabel,opponent:fixture.opponent||row.opponent,homeAway:fixture.homeAway||row.homeAway};
     const hadPost=fixture.forumPostId, hadEvent=fixture.discordEventId; fixture=await createOrUpdateDiscord(guild,store,fixture);
     if(existing) report.duplicates++; else report.imported++;
     if(!hadPost&&fixture.forumPostId)report.postsCreated++; if(!hadEvent&&fixture.discordEventId)report.eventsCreated++; report.fixtures.push(fixture);
   }
-  const numbered=report.fixtures.map(f=>Number(f.matchNumber));
+  const numbered=report.fixtures.map(f=>Number(f.matchNumber)).sort((a,b)=>a-b);
   report.numberingValid=numbered.length===parsed.rows.length && new Set(numbered).size===numbered.length && numbered.every((number,index)=>number===index+1);
-  report.creationOrderValid=report.fixtures.every((fixture,index)=>Number(fixture.matchNumber)===index+1);
+  report.creationOrderValid=report.fixtures.every((fixture,index)=>Number(fixture.matchNumber)===parsed.rows.length-index);
   return report;
+}
+
+async function reorderMatchCenterForum({guild,store,teamKey,version='visible-matchday-order-v1'}){
+  const marker=`matchCenterOrder:${teamKey}`;
+  if(store.getMetadata(marker)?.version===version)return {teamKey,skipped:true,migrated:0,deleted:0};
+  const club=CLUBS[teamKey];if(!club)throw new Error('Unknown club.');
+  const forum=forumFor(guild,teamKey);if(!forum)throw new Error(`${club.label} Match Center forum was not found.`);
+  const chronological=fixtures(store,teamKey).sort((a,b)=>a.kickoffAt.localeCompare(b.kickoffAt));
+  if(!chronological.length)return {teamKey,skipped:true,migrated:0,deleted:0,noFixtures:true};
+  for(const [index,current] of chronological.entries())saveFixture(store,{...current,matchNumber:current.matchNumber||index+1});
+  if(typeof forum.edit==='function')await forum.edit({defaultForumLayout:ForumLayoutType.ListView,defaultSortOrder:SortOrderType.CreationDate,reason:'Display official matches in matchday order'});
+  let migrated=0,deleted=0;
+  for(const original of [...chronological].reverse()){
+    let fixture=getFixture(store,original.fixtureId);
+    if(fixture.forumOrderVersion===version)continue;
+    const oldThreadId=fixture.forumPostId;
+    const oldThread=oldThreadId?await guild.channels.fetch(oldThreadId).catch(()=>null):null;
+    fixture=saveFixture(store,{...fixture,forumPostId:null,forumChannelId:null});
+    fixture=await createOrUpdateDiscord(guild,store,fixture);
+    fixture=saveFixture(store,{...fixture,forumOrderVersion:version,previousForumPostIds:[...new Set([...(fixture.previousForumPostIds||[]),oldThreadId].filter(Boolean))]});
+    migrated++;
+    if(oldThread&&oldThread.id!==fixture.forumPostId){
+      await oldThread.delete('Owner-approved replacement with chronologically ordered Match Center post').then(()=>{deleted++;});
+    }
+  }
+  store.setMetadata(marker,{version,teamKey,migrated,deleted,completedAt:new Date().toISOString()});
+  return {teamKey,skipped:false,migrated,deleted};
 }
 
 async function handleAvailability(interaction, store) {
@@ -200,4 +230,4 @@ function fixtureLink(guildId,f){return f.forumPostId?`https://discord.com/channe
 function nextMatchText(store,teamKey,guildId){const f=upcoming(store,teamKey)[0];if(!f)return `No upcoming ${CLUBS[teamKey].label} fixture is currently saved.`;const c=availabilityCounts(f);const lobby=new Date(new Date(f.kickoffAt)-30*60000).toLocaleTimeString('en-US',{timeZone:TIMEZONE,hour:'numeric',minute:'2-digit'});return `${CLUBS[teamKey].emoji} **MATCH ${matchLabel(f.matchNumber)}**\n${CLUBS[teamKey].label} vs ${f.opponent}\n${f.dateLabel} • ${f.timeLabel} ET\n${f.homeAway}\nLobby: ${lobby} ET\n\nAvailable: ${c.available}\nMaybe: ${c.maybe}\nUnavailable: ${c.unavailable}\n\n[Match Center post](${fixtureLink(guildId,f)})${f.discordEventId?` • [Discord event](https://discord.com/events/${guildId}/${f.discordEventId})`:''}`;}
 function scheduleText(store,teamKey,guildId,limit=8){const list=upcoming(store,teamKey).slice(0,limit);if(!list.length)return `No upcoming ${CLUBS[teamKey].label} fixtures are currently saved.`;return `**${CLUBS[teamKey].label} — Upcoming Schedule**\n`+list.map(f=>`• **MATCH ${matchLabel(f.matchNumber)} — ${f.dateLabel} • ${f.timeLabel} ET** — ${f.homeAway==='Home'?'vs':'at'} ${f.opponent}`).join('\n')+`\n\n[Open Match Center](${fixtureLink(guildId,list[0])})`;}
 
-module.exports={CLUBS,TAGS,MLPC_SCHEDULE_2026,parseSchedule,fixtures,getFixture,importSchedule,handleAvailability,recordResult,cancelMatch,editMatch,runReminders,nextMatchText,scheduleText,availabilityCounts,fixtureKey,titleFor,matchLabel};
+module.exports={CLUBS,TAGS,MLPC_SCHEDULE_2026,parseSchedule,fixtures,getFixture,importSchedule,reorderMatchCenterForum,handleAvailability,recordResult,cancelMatch,editMatch,runReminders,nextMatchText,scheduleText,availabilityCounts,fixtureKey,titleFor,matchLabel};
