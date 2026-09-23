@@ -179,7 +179,8 @@ async function importSchedule({guild,store,teamKey,text,year=2026}) {
 
 async function reorderMatchCenterForum({guild,store,teamKey,version='visible-matchday-order-v1'}){
   const marker=`matchCenterOrder:${teamKey}`;
-  if(store.getMetadata(marker)?.version===version)return {teamKey,skipped:true,migrated:0,deleted:0};
+  const completed=store.getMetadata(marker);
+  if(completed?.version===version)return {...completed,teamKey,skipped:true};
   const club=CLUBS[teamKey];if(!club)throw new Error('Unknown club.');
   const forum=forumFor(guild,teamKey);if(!forum)throw new Error(`${club.label} Match Center forum was not found.`);
   const chronological=fixtures(store,teamKey).sort((a,b)=>a.kickoffAt.localeCompare(b.kickoffAt));
