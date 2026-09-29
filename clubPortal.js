@@ -73,7 +73,7 @@ function layout(title, content, clubKey = '') {
 <meta name="theme-color" content="${theme === 'blues' ? '#0057ff' : '#071729'}">
 <meta name="description" content="${escapeHtml(club?.story || 'Birmingham City and CrownFC · Castle & Crown Collective')}">
 <title>${escapeHtml(title)} · Castle & Crown Collective</title>
-<link rel="icon" href="/club-assets/crown-crest.png"><link rel="stylesheet" href="/club-assets/site.css">
+<link rel="icon" href="/club-assets/crownfc-crest.png"><link rel="stylesheet" href="/club-assets/site.css">
 </head><body class="${theme}"><a class="skip" href="#main">Skip to content</a>
 <header class="topbar"><a class="collective-mark" href="/clubs">C<span>&</span>C <small>COLLECTIVE</small></a>
 <nav aria-label="Club websites"><a href="/birmingham" ${clubKey === 'birmingham' ? 'aria-current="page"' : ''}>Birmingham City</a><a href="/crownfc" ${clubKey === 'crownfc' ? 'aria-current="page"' : ''}>CrownFC</a><a href="/clubs">My clubs</a></nav></header>
