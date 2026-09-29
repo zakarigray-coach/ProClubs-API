@@ -1,8 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { TextChannel, MessageFlags } = require('discord.js');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
-const { startBot } = require('./reporterBot');
+const reporterBot = require('./reporterBot');
+const { startBot } = reporterBot;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,6 +50,49 @@ app.listen(PORT, () => {
   console.log(`proclubs-custom-api running on port ${PORT}`);
 });
 
+function retireLegacySlashCommands() {
+  const retired = new Set(['signing']);
+  if (Array.isArray(reporterBot.commands)) {
+    for (let index = reporterBot.commands.length - 1; index >= 0; index -= 1) {
+      if (retired.has(reporterBot.commands[index]?.name)) reporterBot.commands.splice(index, 1);
+    }
+  }
+  if (Array.isArray(reporterBot.COMMAND_NAMES)) {
+    for (let index = reporterBot.COMMAND_NAMES.length - 1; index >= 0; index -= 1) {
+      if (retired.has(reporterBot.COMMAND_NAMES[index])) reporterBot.COMMAND_NAMES.splice(index, 1);
+    }
+  }
+  console.log('Safe Phase 2: retired legacy slash commands:', [...retired].join(', '));
+}
+
+function isZeroGameMl1StatsPayload(payload) {
+  const embed = payload?.embeds?.[0];
+  const data = typeof embed?.toJSON === 'function' ? embed.toJSON() : (embed?.data || embed || {});
+  const title = String(data.title || '');
+  const fields = Array.isArray(data.fields) ? data.fields : [];
+  const teamRecord = String(fields.find(field => String(field.name || '').toLowerCase() === 'team record')?.value || '');
+  return /^Birmingham City\s*•/i.test(title) && /\*\*GP:\*\*\s*0\b/i.test(teamRecord);
+}
+
+function suppressPrematureMl1StatsPosts() {
+  if (!TextChannel?.prototype?.send || TextChannel.prototype.send.__rtMl1StatsGuard) return;
+  const originalSend = TextChannel.prototype.send;
+  async function guardedSend(payload) {
+    const channelName = String(this.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
+    if (channelName.includes('ml1-stats') && isZeroGameMl1StatsPayload(payload)) {
+      console.log('ML1 stats post suppressed because no verified match has been played yet.');
+      return {
+        id: '0',
+        pin: async () => null,
+      };
+    }
+    return originalSend.call(this, payload);
+  }
+  guardedSend.__rtMl1StatsGuard = true;
+  guardedSend.__rtOriginalSend = originalSend;
+  TextChannel.prototype.send = guardedSend;
+}
+
 function disableLegacySigningChannelIntake(client) {
   if (!client) return;
 
@@ -83,8 +128,81 @@ function disableLegacySigningChannelIntake(client) {
   console.log('Legacy signing-channel intake disabled. /sign and /sign-batch remain the signing entry points.');
 }
 
-startBot().then(client => {
+function disableLegacySigningInteractions(client) {
+  if (!client) return;
+  const retiredPrefixes = [
+    'signing_player:',
+    'signing_facts:',
+    'announcement_name:',
+    'player_quote_only:',
+    'player_package:',
+    'quote:',
+    'quote_submit:',
+    'quote_owner:',
+    'owner_quote_submit:',
+    'number:start:quote:',
+    'number:start:decline:',
+  ];
+  const listeners = client.listeners('interactionCreate');
+  if (!listeners.length) return;
+
+  client.removeAllListeners('interactionCreate');
+  for (const listener of listeners) {
+    client.on('interactionCreate', async interaction => {
+      const customId = String(interaction.customId || '');
+      if (retiredPrefixes.some(prefix => customId.startsWith(prefix))) {
+        const payload = {
+          content: 'This old RT Media signing control has been retired. Start or resume the player through `/sign`, `/sign-batch`, or `/signing-status`.',
+        };
+        if (interaction.inGuild?.()) payload.flags = MessageFlags.Ephemeral;
+        try {
+          if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+          else await interaction.reply(payload);
+        } catch {}
+        return;
+      }
+      return listener(interaction);
+    });
+  }
+
+  console.log('Legacy signing quote/player-selection controls disabled.');
+}
+
+async function cleanupPrematureMl1Stats(client) {
+  if (!client?.user) return;
+  try {
+    const guild = process.env.DISCORD_GUILD_ID
+      ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID).catch(() => null)
+      : client.guilds.cache.first();
+    if (!guild) return;
+    await guild.channels.fetch();
+    const channel = guild.channels.cache.find(item =>
+      item.isTextBased?.() && String(item.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '').includes('ml1-stats')
+    );
+    if (!channel?.messages) return;
+    const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!recent) return;
+    const premature = recent.filter(message => {
+      if (message.author?.id !== client.user.id) return false;
+      const embed = message.embeds?.[0];
+      return isZeroGameMl1StatsPayload({ embeds: embed ? [embed] : [] });
+    });
+    for (const message of premature.values()) {
+      await message.delete().catch(() => {});
+    }
+    if (premature.size) console.log(`Removed ${premature.size} premature ML1 stats post(s).`);
+  } catch (error) {
+    console.error('ML1 stats cleanup failed:', error.message);
+  }
+}
+
+retireLegacySlashCommands();
+suppressPrematureMl1StatsPosts();
+
+startBot().then(async client => {
   disableLegacySigningChannelIntake(client);
+  disableLegacySigningInteractions(client);
+  await cleanupPrematureMl1Stats(client);
   botHealth.status = client ? 'ready' : 'disabled';
   botHealth.checkedAt = new Date().toISOString();
 }).catch(err => {
