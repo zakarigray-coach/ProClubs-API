@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { TextChannel, MessageFlags } = require('discord.js');
+const { TextChannel, Message, MessageFlags } = require('discord.js');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
 const reporterBot = require('./reporterBot');
 const { startBot } = reporterBot;
@@ -74,23 +74,43 @@ function isZeroGameMl1StatsPayload(payload) {
   return /^Birmingham City\s*•/i.test(title) && /\*\*GP:\*\*\s*0\b/i.test(teamRecord);
 }
 
+function isMl1StatsChannel(channel) {
+  const name = String(channel?.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
+  return name.includes('ml1-stats');
+}
+
 function suppressPrematureMl1StatsPosts() {
-  if (!TextChannel?.prototype?.send || TextChannel.prototype.send.__rtMl1StatsGuard) return;
-  const originalSend = TextChannel.prototype.send;
-  async function guardedSend(payload) {
-    const channelName = String(this.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
-    if (channelName.includes('ml1-stats') && isZeroGameMl1StatsPayload(payload)) {
-      console.log('ML1 stats post suppressed because no verified match has been played yet.');
-      return {
-        id: '0',
-        pin: async () => null,
-      };
+  if (TextChannel?.prototype?.send && !TextChannel.prototype.send.__rtMl1StatsGuard) {
+    const originalSend = TextChannel.prototype.send;
+    async function guardedSend(payload) {
+      if (isMl1StatsChannel(this) && isZeroGameMl1StatsPayload(payload)) {
+        console.log('ML1 stats post suppressed because no verified match has been played yet.');
+        return {
+          id: '0',
+          pin: async () => null,
+        };
+      }
+      return originalSend.call(this, payload);
     }
-    return originalSend.call(this, payload);
+    guardedSend.__rtMl1StatsGuard = true;
+    guardedSend.__rtOriginalSend = originalSend;
+    TextChannel.prototype.send = guardedSend;
   }
-  guardedSend.__rtMl1StatsGuard = true;
-  guardedSend.__rtOriginalSend = originalSend;
-  TextChannel.prototype.send = guardedSend;
+
+  if (Message?.prototype?.edit && !Message.prototype.edit.__rtMl1StatsGuard) {
+    const originalEdit = Message.prototype.edit;
+    async function guardedEdit(payload) {
+      if (isMl1StatsChannel(this.channel) && isZeroGameMl1StatsPayload(payload)) {
+        console.log('ML1 zero-game stats edit suppressed; removing the stale stats post until a verified match exists.');
+        await this.delete().catch(() => {});
+        return this;
+      }
+      return originalEdit.call(this, payload);
+    }
+    guardedEdit.__rtMl1StatsGuard = true;
+    guardedEdit.__rtOriginalEdit = originalEdit;
+    Message.prototype.edit = guardedEdit;
+  }
 }
 
 function disableLegacySigningChannelIntake(client) {
@@ -176,9 +196,7 @@ async function cleanupPrematureMl1Stats(client) {
       : client.guilds.cache.first();
     if (!guild) return;
     await guild.channels.fetch();
-    const channel = guild.channels.cache.find(item =>
-      item.isTextBased?.() && String(item.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '').includes('ml1-stats')
-    );
+    const channel = guild.channels.cache.find(item => item.isTextBased?.() && isMl1StatsChannel(item));
     if (!channel?.messages) return;
     const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
     if (!recent) return;
