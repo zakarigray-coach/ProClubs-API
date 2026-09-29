@@ -180,3 +180,41 @@ Official signing and newspaper artwork rotates deterministically between the sav
 
 Reporter posts can notify only the relevant club role instead of using `@everyone`. Add `BIRMINGHAM_ROLE_ID` and `MLPC_ROLE_ID` in Railway. Raine’s posts mention only the Birmingham role; Teagan’s posts mention only the MLPC role. The role must be mentionable, or the bot must have permission to mention roles.
 The approved setup gives only the RT bot permission to mention non-mentionable club roles inside the controlled club/media channels, so players cannot use those roles themselves.
+# Castle & Crown club websites
+
+The existing Railway service also serves two club websites:
+
+- `/birmingham` — Birmingham City, MPL League 1
+- `/crownfc` — CrownFC, MLPC
+- `/clubs` — the shared entry page
+
+The public club pages are separate. The `/members` area on each site requires
+Discord sign-in. On **every request**, the site checks the visitor's membership
+and their approved Birmingham or CrownFC role in the Castle & Crown Discord
+server. Someone with both roles can choose either club at `/my-clubs`. The
+site does not let visitors give themselves a roster role.
+
+The approved Discord roles are the source for the displayed rosters. The
+reporter bot's commands, signing workflow, and news posts are unchanged.
+
+## Complete sign-in setup
+
+1. In the Discord Developer Portal for the **existing** bot application, add
+   `https://proclubs-custom-api-production.up.railway.app/auth/discord/callback`
+   under OAuth2 Redirects. Preserve any existing redirects.
+2. In the Railway service, add `DISCORD_CLIENT_SECRET` from that application's
+   OAuth2 page. Enter it **in Railway**, never in a Discord message, GitHub file,
+   or chat. Add `CLUB_SITE_BASE_URL=https://proclubs-custom-api-production.up.railway.app`.
+   Optionally set a long random `CLUB_SITE_SESSION_SECRET`; until then the app
+   uses the existing server-side bot token for signing sessions.
+3. Confirm `DISCORD_GUILD_ID`, `BOT_OWNER_ID`, `BIRMINGHAM_ROLE_ID`, and
+   `MLPC_ROLE_ID` are present in Railway. They already exist in the current
+   production service. A server member needs the relevant approved club role
+   to enter that club's member area. The owner may enter both.
+4. Open `/clubs`, sign in with Discord, and verify a Birmingham-only account
+   sees only Birmingham, a Crown-only account sees only CrownFC, and a
+   dual-roster account sees both.
+
+Until the OAuth2 secret and redirect are set, public pages work but the
+sign-in page says that member access is being connected. The site never
+silently grants access on failed checks.

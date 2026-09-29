@@ -5,6 +5,7 @@ const { TextChannel, Message, MessageFlags } = require('discord.js');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
 const reporterBot = require('./reporterBot');
 const { startBot } = reporterBot;
+const { mountClubPortal } = require('./clubPortal');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,9 @@ const botHealth = { status: 'starting', checkedAt: new Date().toISOString(), err
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+app.set('trust proxy', 1);
+mountClubPortal(app, { getClient: () => portalClient });
+let portalClient = null;
 
 app.get('/health', (req, res) => {
   const ok = botHealth.status !== 'error';
@@ -218,6 +222,7 @@ retireLegacySlashCommands();
 suppressPrematureMl1StatsPosts();
 
 startBot().then(async client => {
+  portalClient = client;
   disableLegacySigningChannelIntake(client);
   disableLegacySigningInteractions(client);
   await cleanupPrematureMl1Stats(client);
