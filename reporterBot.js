@@ -42,6 +42,7 @@ function configureNewspaperFonts() {
 configureNewspaperFonts();
 const sharp = require('sharp');
 const { StateStore } = require('./stateStore');
+const { buildCommands: buildAuditorCommands, createServerAuditor } = require('./serverAuditor');
 const {
   ORGANIZATION, REPORTERS, normalizeMatchRecord, calculateSeasonTotals, calculateTeamTotals,
   buildAwardShortlists, spotlightQuestionSet, selectSpotlightCandidate,
@@ -84,6 +85,7 @@ const pendingOperations = new Map();
 const forwardingSigningPackages = new Set();
 const DATA_DIRECTORY = process.env.RT_DATA_DIR || (process.env.RAILWAY_ENVIRONMENT ? '/data' : path.join(__dirname, '.data'));
 const stateStore = new StateStore(path.join(DATA_DIRECTORY, 'rt-football-media-state.json'));
+const serverAuditor = createServerAuditor({ stateStore });
 const quoteMinutesOverride = Number(process.env.QUOTE_WAIT_MINUTES);
 const QUOTE_WAIT_MS = Number.isFinite(quoteMinutesOverride) && quoteMinutesOverride > 0
   ? Math.max(2, quoteMinutesOverride) * 60 * 1000
@@ -306,7 +308,8 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
 
 const commands = [match, sign, signBatch, signingStatus, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
-  importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand].map(command => command.toJSON());
+  importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand,
+  ...buildAuditorCommands()].map(command => command.toJSON());
 const COMMAND_NAMES = commands.map(command => command.name);
 
 function clean(value, max) {
@@ -2835,6 +2838,7 @@ async function startBot() {
   function teamForRecord(record) { return TEAMS[record.teamKey]; }
 
   async function handleInteraction(interaction) {
+    if (await serverAuditor.handleInteraction(interaction)) return;
     if (interaction.isButton() && interaction.customId.startsWith('match_availability:')) {
       return handleAvailability(interaction, stateStore);
     }
