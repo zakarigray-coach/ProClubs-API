@@ -17,3 +17,12 @@ test('production command set contains the repaired signing and schedule workflow
     assert.equal(COMMAND_NAMES.includes(name),true,name);
   }
 });
+
+test('existing bot registers all owner auditor commands without a second client', () => {
+  for (const name of require('../serverAuditor').COMMAND_NAMES) {
+    const command = commands.find(c => c.name === name);
+    assert.ok(command, name);
+    assert.equal(command.default_member_permissions, '0');
+    assert.equal(command.dm_permission, false);
+  }
+});
