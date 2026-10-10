@@ -12,6 +12,25 @@ from .notebook import TABLES
 log = logging.getLogger('gaffergpt')
 
 
+class SyncRejected(RuntimeError):
+    """Only safe HTTP status and known Google reason codes enter logs."""
+
+
+def rejection(response, action):
+    reason = 'unspecified'
+    try:
+        for detail in response.json().get('error', {}).get('details', []):
+            candidate = detail.get('reason', '')
+            if candidate in {'SERVICE_DISABLED', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT',
+                             'IAM_PERMISSION_DENIED', 'RATE_LIMIT_EXCEEDED',
+                             'API_KEY_INVALID', 'CONSUMER_INVALID'}:
+                reason = candidate
+                break
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return SyncRejected(f'{action}: HTTP {int(response.status_code)} ({reason})')
+
+
 def snapshot(db):
     result = {}
     with db.connect() as conn:
@@ -107,14 +126,14 @@ class GoogleNotebook:
         response = self.session.get(self.url, params={
             'fields': 'sheets.properties(sheetId,title,gridProperties)'}, timeout=30)
         if response.status_code != 200:
-            raise RuntimeError(f'Google notebook read failed (HTTP {response.status_code})')
+            raise rejection(response, 'read')
         now = datetime.now(timezone.utc).isoformat()
         payload = {'requests': update_requests(data, response.json(), now)}
         if len(json.dumps(payload).encode()) > 8_000_000:
             raise ValueError('Notebook is too large for a single safe sync')
         response = self.session.post(self.url + ':batchUpdate', json=payload, timeout=60)
         if response.status_code != 200:
-            raise RuntimeError(f'Google notebook write failed (HTTP {response.status_code})')
+            raise rejection(response, 'write')
         self.fingerprint = digest
         self.db.set_setting('notebook_last_synced_at', now)
         log.info('Pep notebook synced: matches=%s reports=%s',
@@ -128,5 +147,6 @@ class GoogleNotebook:
                 await asyncio.to_thread(self.sync)
             except Exception as error:
                 # Never print credentials, tokens, Google responses or recap text.
-                log.error('Pep notebook sync failed: %s', type(error).__name__)
+                log.error('Pep notebook sync failed: %s',
+                          str(error) if isinstance(error, SyncRejected) else type(error).__name__)
             await asyncio.sleep(120)
