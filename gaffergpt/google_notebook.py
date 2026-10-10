@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime, timezone
 from .notebook import TABLES
+from .sheet_links import process_rows
 
 log = logging.getLogger('gaffergpt')
 
@@ -140,9 +141,59 @@ class GoogleNotebook:
                  len(data['Matches']) - 1, len(data['Reports']) - 1)
         return True
 
+    def link_rows(self):
+        response = self.session.get(self.url + "/values/'Link Players'!A4:D104",
+                                    params={'valueRenderOption': 'FORMULA'}, timeout=30)
+        if response.status_code != 200:
+            raise rejection(response, 'player links read')
+        values = response.json().get('values', [])
+        if not values or values[0] != ['OurProClubs player name', 'Discord User ID', 'Pep status', 'Saved at']:
+            raise ValueError('Keep the Link Players headers unchanged')
+        return values[1:]
+
+    def link_statuses(self, before, current, results):
+        updates = []
+        for i, (row, result) in enumerate(zip(before, results)):
+            # Do not attach a stale status to a name/ID edited while processing.
+            if i >= len(current) or (row + ['', ''])[:2] != (current[i] + ['', ''])[:2]:
+                continue
+            old_status = (current[i] + ['', '', '', ''])[2:4]
+            if old_status != result:
+                updates.append({'range': f"'Link Players'!C{i+5}:D{i+5}", 'values': [result]})
+        if not updates:
+            return
+        response = self.session.post(self.url + '/values:batchUpdate',
+                                     json={'valueInputOption': 'RAW', 'data': updates}, timeout=30)
+        if response.status_code != 200:
+            raise rejection(response, 'player links status')
+
+    async def import_links(self, bot):
+        async def member_name(user_id):
+            guild = bot.get_guild(bot.config.guild_id)
+            if guild is None:
+                raise RuntimeError('Discord guild unavailable')
+            try:
+                member = await guild.fetch_member(user_id)
+            except Exception as error:
+                if getattr(error, 'status', None) == 404:
+                    raise LookupError('Member not found') from None
+                raise
+            if member.bot:
+                raise LookupError('Bots cannot be players')
+            return member.name
+        rows = await asyncio.to_thread(self.link_rows)
+        results = await process_rows(self.db, rows, bot.config.owner_id, member_name)
+        current = await asyncio.to_thread(self.link_rows)
+        await asyncio.to_thread(self.link_statuses, rows, current, results)
+
     async def run(self, bot):
         await bot.wait_until_ready()
         while not bot.is_closed():
+            try:
+                await self.import_links(bot)
+            except Exception as error:
+                log.error('Pep sheet player linking failed: %s',
+                          str(error) if isinstance(error, SyncRejected) else type(error).__name__)
             try:
                 await asyncio.to_thread(self.sync)
             except Exception as error:
