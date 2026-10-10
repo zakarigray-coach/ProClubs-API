@@ -345,11 +345,24 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         for index in range(3):
             mid=self.add(str(index))[0];ids.append(mid);self.db.classify(mid,'Practice','Unknown',42)
             for metric,value in [('passes_completed',index+1),('passes_attempted',10)]:
-                self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value) VALUES (?,'player','Coach',?,?)",(mid,metric,value))
+                self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value) VALUES (?,'team','Birmingham City',?,?)",(mid,metric,value))
         obs=FactualGaffer().analyze([self.db.match(i) for i in ids],self.db.rows('SELECT * FROM match_statistics'))
         trend=next(t for t in obs['trends'] if t['metric']=='pass_completion')
         self.assertEqual(trend['values'],[10,20,30])
         self.assertEqual(trend['unit'],'%')
+
+    def test_development_excludes_individual_stats(self):
+        ids=[]
+        for index in range(3):
+            mid=self.add(str(index))[0];ids.append(mid);self.db.classify(mid,'Practice','Unknown',42)
+            self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value) VALUES (?,'player','DaddyGray10420','rating',?)",(mid,6+index))
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],self.db.rows('SELECT * FROM match_statistics'))
+        self.assertTrue(all(t['subject_type']=='team' for t in obs['trends']))
+        self.assertTrue(all(c['subject_type']=='team' for c in obs['comparisons']))
+        self.assertNotIn('DaddyGray10420',tracking_text(obs))
+        rid=self.report(ids);self.db.confirm_report(rid)
+        self.assertNotIn('DaddyGray10420',Reporter(self.db).generate(rid))
+        self.assertEqual(len(self.db.rows('SELECT * FROM match_statistics')),3)
 
     def test_report_development_disabled_and_unselected_excluded(self):
         practice=self.add('practice',text='Birmingham City 9-0 Chelsea')[0];self.db.classify(practice,'Practice','Unknown',42)

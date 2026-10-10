@@ -34,7 +34,7 @@ class FactualGaffer:
         ids={m['match_id'] for m in matches}
         metrics={}
         for stat in statistics:
-            if stat['match_id'] not in ids:
+            if stat['match_id'] not in ids or stat['subject_type']!='team':
                 continue
             key=(stat['subject_type'], ' '.join(stat['subject_key'].split()).casefold(),stat['metric'])
             metrics.setdefault(stat['match_id'],{})[key]=dict(stat)

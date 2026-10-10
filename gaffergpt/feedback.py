@@ -47,11 +47,5 @@ def player_feedback(db, user_id):
             recorded=[v[metric] for _,v in recent if metric in v]
             if recorded:
                 lines.append(f'{metric.capitalize()}: {sum(recorded):g} across {len(recorded)} matches with that metric recorded.')
-        if len(recent)>=2:
-            first_id,before=recent[0]; last_id,after=recent[-1]
-            if 'rating' in before and 'rating' in after:
-                lines.append(f'Rating change: #{first_id} {before["rating"]:g} → #{last_id} {after["rating"]:g}. Two endpoints alone do not prove a trend.')
-        else:
-            lines.append('Only one match available here; improvement needs more comparable matches.')
     lines.append('\nUnknown and ignored matches are excluded. Missing stats are not treated as zero. Practice never changes the official record.')
     return '\n'.join(lines)
