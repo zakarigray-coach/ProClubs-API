@@ -229,6 +229,7 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         await bot.close()
 
     def test_registration(self):
+        self.assertEqual(parse_registration('Pep, register me as a Striker with Advanced Forward role'),('Striker','Advanced Forward',None))
         self.assertEqual(parse_registration('Gaffer, register me as a Striker with Advanced Forward role'),('Striker','Advanced Forward',None))
         self.assertEqual(parse_registration('Gaffer, register me as a Striker with Advanced Forward role with Attack focus'),('Striker','Advanced Forward','Attack'))
 
@@ -246,6 +247,8 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bot.manager(SimpleNamespace(user=SimpleNamespace(id=999,roles=[]),guild_id=30)))
         self.assertTrue(bot.manager(SimpleNamespace(user=SimpleNamespace(id=42),guild_id=None)))
         commands={c.name for c in bot.tree.get_commands()}
+        self.assertIn('configurepep',commands)
+        self.assertNotIn('configuregaffer',commands)
         self.assertTrue({'status','matches','reviewmatches','match','weeklyreport','testweeklydm'}<=commands)
         await bot.close()
 

@@ -37,7 +37,7 @@ def parse_recap(text, club='Birmingham City'):
     return [fields]  # Do not guess a score or classify based on keywords.
 
 
-REGISTER = re.compile(r'^\s*gaffer(?:gpt)?[,!]?\s+register me as (?:a |an )?(.+?) with (?:an? )?(.+?) role(?:\s+(?:with |on )?(.+?) focus)?[.!]?\s*$',re.I)
+REGISTER = re.compile(r'^\s*(?:pep|gaffer(?:gpt)?)[,!]?\s+register me as (?:a |an )?(.+?) with (?:an? )?(.+?) role(?:\s+(?:with |on )?(.+?) focus)?[.!]?\s*$',re.I)
 
 
 def parse_registration(text):

@@ -1,4 +1,4 @@
-# GafferGPT
+# Pep — Birmingham Tactical Coach
 
 Gaffer is Birmingham City's assistant coach. Reporter is the writing service.
 Both use the same `GAFFER_DATABASE_PATH` SQLite file. No API key is needed for
@@ -69,7 +69,7 @@ Intent**, and invite it with `bot` and `applications.commands`. Give it View
 Channels, Read Message History, Send Messages and Attach Files where needed.
 The owner must permit DMs from the bot/server. Administrator is unnecessary.
 
-Once connected, use `/configuregaffer` to choose the recap channel and actual
+Once connected, use `/configurepep` to choose the recap channel and actual
 OurProClubs bot. Then run `/testweeklydm`: a persisted job should send a DM
 within 60–90 seconds. Verify its menus, restart behavior and private delivery
 before setting `GAFFER_FRIDAY_ENABLED=true`.
@@ -80,7 +80,7 @@ secret/environment editor, never into a PR, Discord message or chat transcript.
 ## Commands
 
 - `/status`: connectivity and review queue count.
-- `/configuregaffer`: owner chooses one recap channel and source bot.
+- `/configurepep`: owner chooses one recap channel and source bot.
 - `/matches`: recent entries.
 - `/reviewmatches`: next ten Unknown entries.
 - `/match match_id`: details and classification correction.
@@ -92,7 +92,7 @@ secret/environment editor, never into a PR, Discord message or chat transcript.
 - `/weeklyreport`: current week or custom YYYY-MM-DD start/end (end exclusive).
 - `/testweeklydm`: one-minute owner-only delivery test.
 
-Players can write: `Gaffer, register me as a Striker with Advanced Forward role`.
+Players can write: `Pep, register me as a Striker with Advanced Forward role`.
 They can append `with Attack focus`. This is a small language pattern, not an
 unrestricted AI conversation engine. Role/focus names are stored as supplied;
 no unverified FC 27 role list is hardcoded.

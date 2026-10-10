@@ -168,7 +168,7 @@ class DiscordDelivery:
 
     async def send(self, report_id, marker):
         channel=await self.channel()
-        embed=discord.Embed(title='GAFFERGPT — WEEKLY RECAP',description=self.bot.report_summary(report_id))
+        embed=discord.Embed(title='PEP — WEEKLY RECAP',description=self.bot.report_summary(report_id))
         embed.set_footer(text=marker)
         message=await channel.send(embed=embed,view=ReportView(self.bot,report_id),allowed_mentions=discord.AllowedMentions.none())
         return message.id
@@ -224,7 +224,7 @@ class GafferBot(discord.Client):
         log.error('Discord event %s failed: %s',event_method,type(error).__name__)
 
     async def on_ready(self):
-        log.info('GafferGPT connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
+        log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
 
     async def close(self):
         if self.worker:
@@ -308,13 +308,13 @@ class GafferBot(discord.Client):
                 raise app_commands.CheckFailure('Management only.')
             return True
 
-        @self.tree.command(name='status',description='Check GafferGPT and the match review queue')
+        @self.tree.command(name='status',description='Check Pep and the match review queue')
         @app_commands.check(authorized)
         async def status(interaction):
             unknown=self.db.one("SELECT COUNT(*) AS n FROM matches WHERE match_type='Unknown'")['n']
-            await interaction.response.send_message(f'Gaffer is online. {unknown} matches await review. Friday reminders: {"enabled" if self.config.schedule_enabled else "test mode"}.',ephemeral=True)
+            await interaction.response.send_message(f'Pep is online. {unknown} matches await review. Friday reminders: {"enabled" if self.config.schedule_enabled else "test mode"}.',ephemeral=True)
 
-        @self.tree.command(name='configuregaffer',description='Choose the OurProClubs text recap channel and source bot')
+        @self.tree.command(name='configurepep',description='Choose the OurProClubs text recap channel and source bot')
         @app_commands.check(authorized)
         async def configure(interaction,channel:discord.TextChannel,source_bot:discord.Member):
             if interaction.user.id!=self.config.owner_id:
