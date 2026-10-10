@@ -221,7 +221,10 @@ class GafferBot(discord.Client):
         await self.wait_until_ready()
         while not self.is_closed():
             try:
-                await asyncio.to_thread(daily_backup,self.db)
+                try:
+                    await asyncio.to_thread(daily_backup,self.db)
+                except Exception as error:
+                    log.error('Daily backup failed: %s',type(error).__name__)
                 # Always seed persisted jobs; production delivery remains gated.
                 now=datetime.now(timezone.utc)
                 self.scheduler.seed(now)

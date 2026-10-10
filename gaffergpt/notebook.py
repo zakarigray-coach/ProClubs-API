@@ -3,10 +3,13 @@ import csv
 import io
 import json
 import sqlite3
+import threading
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+
+BACKUP_LOCK=threading.Lock()
 
 TABLES={'Matches':'matches','Club_Stats':'match_statistics','Players':'players',
         'Player_Links':'player_links','Tactics':'squad_tactics','Reports':'weekly_reports',
@@ -39,6 +42,11 @@ def notebook(db):
 
 
 def daily_backup(db, now=None, refresh=False):
+    with BACKUP_LOCK:
+        return _daily_backup(db,now,refresh)
+
+
+def _daily_backup(db, now=None, refresh=False):
     now=now or datetime.now(timezone.utc)
     folder=Path(db.path).parent/'backups';folder.mkdir(exist_ok=True)
     target=folder/f'pep-{now.date().isoformat()}.sqlite3'
