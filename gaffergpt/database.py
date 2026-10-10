@@ -166,6 +166,10 @@ class Database:
                  data.get('opponent'),data.get('birmingham_score'),data.get('opponent_score'),text))
                 if cur.rowcount:
                     ids.append(cur.lastrowid)
+                    for stat in data.get('statistics',[]):
+                        db.execute('''INSERT OR IGNORE INTO match_statistics
+                        (match_id,subject_type,subject_key,metric,value,unit,source) VALUES (?,?,?,?,?,?,?)''',
+                        (cur.lastrowid,stat['subject_type'],stat['subject_key'],stat['metric'],stat['value'],stat.get('unit'),stat['source']))
         return ids
 
     def match(self, match_id):

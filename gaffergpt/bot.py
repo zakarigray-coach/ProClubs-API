@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from .config import Config
+from .feedback import player_feedback
 from .database import Database, utcnow
 from .parser import parse_recap, parse_registration
 from .reporter import Reporter, match_label
@@ -329,6 +330,15 @@ class GafferBot(discord.Client):
             except ValueError as error:
                 text=str(error)
             await interaction.response.send_message(text,ephemeral=True)
+
+        @self.tree.command(name='myfeedback',description='Get private coaching feedback from your classified match stats')
+        @app_commands.check(player_server)
+        async def myfeedback(interaction):
+            text=player_feedback(self.db,interaction.user.id)
+            if len(text)<=1900:
+                await interaction.response.send_message(text,ephemeral=True)
+            else:
+                await interaction.response.send_message('Your private player feedback:',file=discord.File(io.BytesIO(text.encode()),filename='pep-player-feedback.txt'),ephemeral=True)
 
         @self.tree.command(name='myplayer',description='Check which stats name is linked to you')
         @app_commands.check(player_server)

@@ -11,6 +11,7 @@ from gaffergpt.parser import parse_recap,parse_registration
 from gaffergpt.reporter import Reporter
 from gaffergpt.scheduler import WeeklyScheduler,week_window,friday_due
 from gaffergpt.config import Config
+from gaffergpt.feedback import player_feedback
 from gaffergpt.bot import GafferBot,ReportView,ReviewView,DraftView
 
 UTC=timezone.utc
@@ -106,6 +107,55 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await command.checks[0](interaction)
         await bot.close()
+
+    def stats_text(self,score='MPL BIRMINGHAM 1-3 AMADNESS FC'):
+        return score+'\nMatch Type: League Match\nPLAYER STATS\nDaddyGray10420 — Attacking Magician\nRAT: 6.4 | GLS: - | SHT: 1 | AST: - | 2AST: 1\nPAS: 14/19 | POS: 3/3 | TKL: 2/9\nOther Player — Midfield Boss\nRAT: 7.5 | PAS: 9/10\nTEAM STATS\nFINAL SCORE\nMPL Birmingham 1\nAmadness FC 3'
+
+    def test_stats_import_link_feedback_classification_and_dedupe(self):
+        self.db.link_player(42,'coach','daddygray10420',42)
+        ids=self.add(text=self.stats_text())
+        mid=ids[0]
+        self.assertEqual(self.db.match(mid)['birmingham_score'],1)
+        self.assertEqual(self.db.match(mid)['match_type'],'Unknown')
+        self.assertIn('no player stats',player_feedback(self.db,42))
+        self.db.classify(mid,'Practice','Unknown',42)
+        feedback=player_feedback(self.db,42)
+        self.assertIn('14/19',feedback)
+        self.assertIn('73.7%',feedback)
+        self.assertNotIn('7.5',feedback)
+        self.assertNotIn('Goals:',feedback)
+        count=len(self.db.rows('SELECT * FROM match_statistics'))
+        self.assertEqual(self.add(text=self.stats_text()),[])
+        self.assertEqual(len(self.db.rows('SELECT * FROM match_statistics')),count)
+        self.assertEqual(self.db.official_record()['played'],0)
+        self.db.classify(mid,'Ignored','Unknown',42)
+        self.assertIn('no player stats',player_feedback(self.db,42))
+
+    def test_feedback_separates_official_practice_and_no_link(self):
+        self.assertIn('/linkplayer',player_feedback(self.db,42))
+        self.db.link_player(42,'coach','DaddyGray10420',42)
+        for message,kind in [('1','Practice'),('2','Official')]:
+            mid=self.add(message,text=self.stats_text())[0]
+            self.db.classify(mid,kind,'Home',42)
+        feedback=player_feedback(self.db,42)
+        self.assertIn('OFFICIAL: 1',feedback)
+        self.assertIn('PRACTICE: 1',feedback)
+        self.assertEqual(self.db.official_record()['played'],1)
+
+    def test_ambiguous_multimatch_stats_not_assigned(self):
+        text=self.stats_text('MPL Birmingham 1-3 Amadness FC\nAmadness FC 2-2 MPL Birmingham')
+        ids=self.add(text=text)
+        self.assertEqual(len(ids),2)
+        self.assertEqual(self.db.rows('SELECT * FROM match_statistics'),[])
+
+    def test_partial_invalid_stats_and_zero(self):
+        text=self.stats_text().replace('RAT: 6.4','RAT: 16.4').replace('PAS: 14/19','PAS: 1.5/19').replace('SHT: 1','SHT: 0')
+        mid=self.add(text=text)[0]
+        stats={r['metric']:r['value'] for r in self.db.rows("SELECT * FROM match_statistics WHERE subject_key='DaddyGray10420'")}
+        self.assertNotIn('rating',stats)
+        self.assertNotIn('passes_completed',stats)
+        self.assertEqual(stats['shots'],0)
+        self.assertNotIn('goals',stats)
 
     def test_practice_excluded_official(self):
         mid=self.add()[0]; self.db.classify(mid,'Practice','Unknown',42)
