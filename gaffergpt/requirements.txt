@@ -1,1 +1,2 @@
 discord.py==2.7.1
+google-auth[requests]==2.61.0

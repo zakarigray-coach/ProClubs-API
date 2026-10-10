@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 from .config import Config
 from .notebook import notebook, daily_backup
+from .google_notebook import GoogleNotebook
 from .media_api import start_api
 from .feedback import player_feedback
 from .analysis import FactualGaffer, tracking_text
@@ -194,6 +195,7 @@ class GafferBot(discord.Client):
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None
+        self.notebook_worker=None
         self.media_runner=None
         self.register_commands()
 
@@ -216,6 +218,12 @@ class GafferBot(discord.Client):
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         self.worker=asyncio.create_task(self.work())
+        try:
+            mirror=GoogleNotebook.from_environment(self.db)
+            if mirror:
+                self.notebook_worker=asyncio.create_task(mirror.run(self))
+        except Exception as error:
+            log.error('Pep notebook setup failed: %s',type(error).__name__)
 
     async def work(self):
         await self.wait_until_ready()
@@ -245,6 +253,8 @@ class GafferBot(discord.Client):
         log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
 
     async def close(self):
+        if self.notebook_worker:
+            self.notebook_worker.cancel()
         if self.worker:
             self.worker.cancel()
         if self.media_runner:
