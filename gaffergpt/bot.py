@@ -179,6 +179,13 @@ class GafferBot(discord.Client):
         intents=discord.Intents.default(); intents.message_content=True
         super().__init__(intents=intents,allowed_mentions=discord.AllowedMentions.none())
         self.config=config; self.db=Database(config.database_path)
+        # Optional first-run owner link; never overwrite a later correction.
+        if config.owner_player_name and not self.db.player_link(config.owner_id) and not self.db.setting('owner_link_seeded'):
+            try:
+                self.db.link_player(config.owner_id,'Coach',config.owner_player_name,config.owner_id)
+                self.db.set_setting('owner_link_seeded','true')
+            except ValueError:
+                log.warning('Owner player link needs management correction.')
         self.reporter=Reporter(self.db)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
@@ -308,6 +315,50 @@ class GafferBot(discord.Client):
                 raise app_commands.CheckFailure('Management only.')
             return True
 
+        async def player_server(interaction):
+            if interaction.guild_id!=self.config.guild_id:
+                raise app_commands.CheckFailure('Use player commands in the club server.')
+            return True
+
+        @self.tree.command(name='linkplayer',description='Connect your Discord account to your exact OurProClubs player name')
+        @app_commands.check(player_server)
+        async def linkplayer(interaction,player_name:str):
+            try:
+                link=self.db.link_player(interaction.user.id,interaction.user.name,player_name,interaction.user.id)
+                text=f"Linked you to **{discord.utils.escape_markdown(link['player_name'])}**. This is your supplied stats name; it does not grant server roles. Use /myplayer to check it."
+            except ValueError as error:
+                text=str(error)
+            await interaction.response.send_message(text,ephemeral=True)
+
+        @self.tree.command(name='myplayer',description='Check which stats name is linked to you')
+        @app_commands.check(player_server)
+        async def myplayer(interaction):
+            link=self.db.player_link(interaction.user.id)
+            text=f"Your stats name: **{discord.utils.escape_markdown(link['player_name'])}**. Use /linkplayer to correct it or /unlinkplayer to remove it." if link else 'No player name linked yet. Use /linkplayer with your exact name from OurProClubs.'
+            await interaction.response.send_message(text,ephemeral=True)
+
+        @self.tree.command(name='unlinkplayer',description='Remove your player-name link without deleting match stats')
+        @app_commands.check(player_server)
+        async def unlinkplayer(interaction):
+            self.db.unlink_player(interaction.user.id)
+            await interaction.response.send_message('Your player link is removed. Saved match stats remain safe.',ephemeral=True)
+
+        @self.tree.command(name='setplayerlink',description='Management: correct or remove a member’s stats-name link')
+        @app_commands.check(authorized)
+        async def setplayerlink(interaction,member:discord.Member,player_name:str=''):
+            if member.guild.id!=self.config.guild_id or member.bot:
+                await interaction.response.send_message('Choose a player in this club server.',ephemeral=True); return
+            try:
+                if player_name:
+                    link=self.db.link_player(member.id,member.name,player_name,interaction.user.id)
+                    text=f"Saved {discord.utils.escape_markdown(member.display_name)} → {discord.utils.escape_markdown(link['player_name'])}."
+                else:
+                    self.db.unlink_player(member.id)
+                    text='Removed the link. Match stats remain saved.'
+            except ValueError as error:
+                text=str(error)
+            await interaction.response.send_message(text,ephemeral=True)
+
         @self.tree.command(name='status',description='Check Pep and the match review queue')
         @app_commands.check(authorized)
         async def status(interaction):
@@ -420,7 +471,7 @@ class GafferBot(discord.Client):
         @self.tree.error
         async def command_error(interaction,error):
             log.error('Command failed: %s',type(error).__name__)
-            text='This command is for management.' if isinstance(error,app_commands.CheckFailure) else 'That action failed. Your records are safe; please try again.'
+            text=str(error) if isinstance(error,app_commands.CheckFailure) else 'That action failed. Your records are safe; please try again.'
             if interaction.response.is_done():
                 await interaction.followup.send(text,ephemeral=True)
             else:

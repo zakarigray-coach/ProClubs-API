@@ -1,6 +1,7 @@
 """One shared, non-destructive SQLite store for Gaffer and Reporter."""
 import json
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,11 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS players (
  discord_user_id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL,
  preferred_position TEXT NOT NULL, player_role TEXT NOT NULL, player_focus TEXT
+);
+CREATE TABLE IF NOT EXISTS player_links (
+ discord_user_id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL,
+ player_name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
+ linked_by TEXT NOT NULL, linked_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS squad_tactics (
  tactic_id INTEGER PRIMARY KEY, tactic_name TEXT NOT NULL UNIQUE,
@@ -84,6 +90,7 @@ class Database:
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript(SCHEMA)
             db.execute('INSERT OR IGNORE INTO schema_migrations VALUES (1,?)', (utcnow(),))
+            db.execute('INSERT OR IGNORE INTO schema_migrations VALUES (2,?)', (utcnow(),))
 
     @contextmanager
     def connect(self):
@@ -120,6 +127,32 @@ class Database:
         username=excluded.username, preferred_position=excluded.preferred_position,
         player_role=excluded.player_role, player_focus=excluded.player_focus''',
         (str(user_id),username,position,role,focus))
+
+    @staticmethod
+    def player_name_key(name):
+        # Preserve display spelling; compare names without case/spacing differences.
+        display=' '.join(unicodedata.normalize('NFKC', name).split())
+        if not display or len(display)>80 or any(unicodedata.category(c).startswith('C') for c in display):
+            raise ValueError('Use your exact player name, between 1 and 80 characters.')
+        return display,display.casefold()
+
+    def player_link(self, user_id):
+        return self.one('SELECT * FROM player_links WHERE discord_user_id=?',(str(user_id),))
+
+    def link_player(self, user_id, username, player_name, actor_id):
+        display,key=self.player_name_key(player_name)
+        try:
+            self.execute('''INSERT INTO player_links VALUES (?,?,?,?,?,?)
+            ON CONFLICT(discord_user_id) DO UPDATE SET username=excluded.username,
+            player_name=excluded.player_name,name_key=excluded.name_key,
+            linked_by=excluded.linked_by,linked_at=excluded.linked_at''',
+            (str(user_id),username,display,key,str(actor_id),utcnow()))
+        except sqlite3.IntegrityError as error:
+            raise ValueError('That player name is already linked. Ask management to correct it.') from error
+        return self.player_link(user_id)
+
+    def unlink_player(self, user_id):
+        self.execute('DELETE FROM player_links WHERE discord_user_id=?',(str(user_id),))
 
     def ingest(self, message_id, channel_id, guild_id, timestamp, text, parsed):
         # Dedupe by source message, never opponent/date/score.

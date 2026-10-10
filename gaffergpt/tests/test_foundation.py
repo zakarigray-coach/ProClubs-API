@@ -49,6 +49,64 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.db.replace_page_selection(r['report_id'],ids,ids)
         return r['report_id']
 
+    async def test_owner_seed_does_not_override_or_restore_removed_link(self):
+        config=Config('fake',42,30,database_path=self.path,owner_player_name='DaddyGray10420')
+        bot=GafferBot(config)
+        self.assertEqual(bot.db.player_link(42)['player_name'],'DaddyGray10420')
+        bot.db.link_player(42,'coach','Corrected',42)
+        await bot.close()
+        bot=GafferBot(config)
+        self.assertEqual(bot.db.player_link(42)['player_name'],'Corrected')
+        bot.db.unlink_player(42)
+        await bot.close()
+        bot=GafferBot(config)
+        self.assertIsNone(bot.db.player_link(42))
+        await bot.close()
+
+    def test_link_preserves_registration_and_restart(self):
+        self.db.register_player(42,'coach','CAM','Playmaker','Attack')
+        self.db.link_player(42,'coach','DaddyGray10420',42)
+        reopened=Database(self.path)
+        self.assertEqual(reopened.player_link(42)['player_name'],'DaddyGray10420')
+        self.assertEqual(reopened.one('SELECT * FROM players')['preferred_position'],'CAM')
+
+    def test_link_unique_normalized_and_atomic(self):
+        self.db.link_player(42,'coach','DaddyGray10420',42)
+        self.db.link_player(43,'other','Another Name',43)
+        with self.assertRaises(ValueError):
+            self.db.link_player(43,'other','  daddygray10420  ',43)
+        self.assertEqual(self.db.player_link(43)['player_name'],'Another Name')
+        self.db.link_player(42,'coach','NewName',42)
+        self.db.link_player(43,'other','DaddyGray10420',42)
+        self.assertEqual(self.db.player_link(43)['linked_by'],'42')
+
+    def test_unlink_keeps_stats_and_can_reassign(self):
+        mid=self.add()[0]
+        self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value) VALUES (?,'player','DaddyGray10420','rating',6.4)",(mid,))
+        self.db.link_player(42,'coach','DaddyGray10420',42)
+        self.db.unlink_player(42)
+        self.db.link_player(43,'other','DaddyGray10420',42)
+        self.assertEqual(len(self.db.rows('SELECT * FROM match_statistics')),1)
+
+    def test_invalid_player_name(self):
+        for name in ('', '   ', 'x'*81, 'bad\x00name'):
+            with self.assertRaises(ValueError):
+                self.db.link_player(42,'coach',name,42)
+
+    async def test_link_commands_scope_and_permission(self):
+        bot=GafferBot(Config('fake',42,30,database_path=self.path))
+        interaction=SimpleNamespace(guild_id=30,user=SimpleNamespace(id=43,name='player',roles=[]),response=SimpleNamespace(send_message=AsyncMock()))
+        command=bot.tree.get_command('linkplayer')
+        self.assertTrue(await command.checks[0](interaction))
+        await command.callback(interaction,'DaddyGray10420')
+        self.assertEqual(bot.db.player_link(43)['player_name'],'DaddyGray10420')
+        with self.assertRaises(Exception):
+            await bot.tree.get_command('setplayerlink').checks[0](interaction)
+        interaction.guild_id=99
+        with self.assertRaises(Exception):
+            await command.checks[0](interaction)
+        await bot.close()
+
     def test_practice_excluded_official(self):
         mid=self.add()[0]; self.db.classify(mid,'Practice','Unknown',42)
         self.assertEqual(self.db.official_record()['played'],0)

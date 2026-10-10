@@ -13,6 +13,7 @@ class Config:
     management_role_ids: tuple[int,...] = ()
     database_path: str = 'gaffergpt.db'
     schedule_enabled: bool = False
+    owner_player_name: str = ''
 
     @classmethod
     def load(cls):
@@ -25,4 +26,5 @@ class Config:
                    int(os.getenv('OURPROCLUBS_BOT_ID','0')),
                    tuple(int(x.strip()) for x in os.getenv('GAFFER_MANAGEMENT_ROLE_IDS','').split(',') if x.strip()),
                    os.getenv('GAFFER_DATABASE_PATH',str(Path(__file__).resolve().parents[1]/'gaffergpt.db')),
-                   os.getenv('PEP_FRIDAY_RECAP',os.getenv('GAFFER_FRIDAY_ENABLED','false')).lower()=='true')
+                   os.getenv('PEP_FRIDAY_RECAP',os.getenv('GAFFER_FRIDAY_ENABLED','false')).lower()=='true',
+                   os.getenv('PEP_OWNER_PLAYER_NAME',''))

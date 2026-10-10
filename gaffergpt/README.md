@@ -161,3 +161,9 @@ The legacy RT bot has its own Friday scheduler and recap listener. After Gaffer
 is live and verified, explicitly transfer Birmingham recap ownership so both
 bots do not prompt Coach for the same workflow. CrownFC and other media features
 must remain untouched. Twitch/Zapier is outside this implementation.
+
+## Player linking
+
+Players run `/linkplayer player_name:ExactName` in the club server, then `/myplayer` to check their link. Names are self-reported, not proof of ownership. Each stats name can link to only one Discord account; case and extra spaces do not create duplicate identities. `/unlinkplayer` removes only the link, never match data. Management uses `/setplayerlink member:@Player player_name:ExactName` to correct links, or leaves the name empty to remove one. Remove an incorrect existing claim before assigning that name to the right player. These commands grant no Discord roles.
+
+Links live in the same persistent SQLite database as matches and reports, separately from position/role registration, so linking does not overwrite player preferences. Migration 2 adds the link table safely to existing databases. Stats ingestion and personalized feedback are separate follow-up features; linking alone does not parse new stats.
