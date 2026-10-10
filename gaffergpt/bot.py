@@ -19,6 +19,17 @@ from .reporter import Reporter, match_label
 from .scheduler import WeeklyScheduler, week_window
 
 log=logging.getLogger('gaffergpt')
+PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
+
+
+def branded_footer(marker):
+    # Retain the existing reference used to prevent duplicate review/reminder DMs.
+    return PEP_FOOTER+'\n'+marker
+
+
+def has_marker(embed,marker):
+    text=embed.footer.text if embed.footer else None
+    return text==marker or text==branded_footer(marker)
 
 
 class ManagedView(discord.ui.View):
@@ -167,14 +178,14 @@ class DiscordDelivery:
         channel=await self.channel()
         # Do not impose a small history cap: crash recovery must find older sends.
         async for message in channel.history(limit=None,after=datetime.fromisoformat(self.bot.db.setting('scheduler_first_week'))):
-            if message.author.id==self.bot.user.id and any(e.footer.text==marker for e in message.embeds if e.footer):
+            if message.author.id==self.bot.user.id and any(has_marker(e,marker) for e in message.embeds):
                 return message.id
         return None
 
     async def send(self, report_id, marker):
         channel=await self.channel()
         embed=discord.Embed(title='PEP — WEEKLY RECAP',description=self.bot.report_summary(report_id))
-        embed.set_footer(text=marker)
+        embed.set_footer(text=branded_footer(marker))
         message=await channel.send(embed=embed,view=ReportView(self.bot,report_id),allowed_mentions=discord.AllowedMentions.none())
         return message.id
 
@@ -227,6 +238,10 @@ class GafferBot(discord.Client):
 
     async def work(self):
         await self.wait_until_ready()
+        try:
+            await self.refresh_footers()
+        except Exception as error:
+            log.error('Existing footer refresh failed: %s',type(error).__name__)
         while not self.is_closed():
             try:
                 try:
@@ -295,13 +310,33 @@ class GafferBot(discord.Client):
             channel=owner.dm_channel or await owner.create_dm()
             existing=None
             async for message in channel.history(limit=None,after=datetime.fromisoformat(m['detected_at'])):
-                if message.author.id==self.user.id and any(e.footer.text==marker for e in message.embeds if e.footer):
+                if message.author.id==self.user.id and any(has_marker(e,marker) for e in message.embeds):
                     existing=message; break
             if existing is None:
                 embed=discord.Embed(title=f"Match Review #{m['match_id']}",description=match_label(m)+'\nStarts Unknown. Choose its classification below.')
-                embed.set_footer(text=marker)
+                embed.set_footer(text=branded_footer(marker))
                 existing=await owner.send(embed=embed,view=ReviewView(self,m['match_id']))
             self.db.execute('UPDATE matches SET review_message_id=? WHERE match_id=?',(str(existing.id),m['match_id']))
+
+    async def refresh_footers(self):
+        owner=await self.fetch_user(self.config.owner_id)
+        channel=owner.dm_channel or await owner.create_dm()
+        ids={r['review_message_id'] for r in self.db.rows('SELECT review_message_id FROM matches WHERE review_message_id IS NOT NULL')}
+        ids.update(r['message_id'] for r in self.db.rows('SELECT message_id FROM weekly_jobs WHERE message_id IS NOT NULL'))
+        for message_id in ids:
+            try:
+                message=await channel.fetch_message(int(message_id))
+                if message.author.id!=self.user.id:
+                    continue
+                changed=False
+                for embed in message.embeds:
+                    old=embed.footer.text if embed.footer else None
+                    if old and not old.startswith(PEP_FOOTER+'\n'):
+                        embed.set_footer(text=branded_footer(old));changed=True
+                if changed:
+                    await message.edit(embeds=message.embeds)
+            except discord.HTTPException:
+                continue
 
     async def on_message(self,message):
         await self.ingest_message(message)
