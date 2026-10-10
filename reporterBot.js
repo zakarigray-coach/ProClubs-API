@@ -1434,6 +1434,10 @@ async function startBot() {
     return null;
   }
 
+  if (process.env.PEP_CENTRAL_URL && process.env.PEP_REPORTER_TOKEN) {
+    await pepBridge.checkConnection().then(() => console.log('Pep central database connection verified (read-only).'))
+      .catch(() => console.warn('Pep bridge unavailable at startup; /pepreport will retry on demand.'));
+  }
   await registerCommands(token, clientId, process.env.DISCORD_GUILD_ID);
   const client = new Client({
     intents: [
@@ -4859,10 +4863,6 @@ async function startBot() {
     });
   });
 
-  if (process.env.PEP_CENTRAL_URL && process.env.PEP_REPORTER_TOKEN) {
-    await pepBridge.checkConnection().then(() => console.log('Pep central database connection verified (read-only).'))
-      .catch(() => console.warn('Pep bridge unavailable at startup; /pepreport will retry on demand.'));
-  }
   await client.login(token);
   return client;
 }
