@@ -180,3 +180,9 @@ Official signing and newspaper artwork rotates deterministically between the sav
 
 Reporter posts can notify only the relevant club role instead of using `@everyone`. Add `BIRMINGHAM_ROLE_ID` and `MLPC_ROLE_ID` in Railway. Raine’s posts mention only the Birmingham role; Teagan’s posts mention only the MLPC role. The role must be mentionable, or the bot must have permission to mention roles.
 The approved setup gives only the RT bot permission to mention non-mentionable club roles inside the controlled club/media channels, so players cannot use those roles themselves.
+
+
+## GafferGPT assistant coach foundation
+
+The Python assistant coach is documented in [gaffergpt/README.md](gaffergpt/README.md). It adds a shared SQLite match review/reporting database, management-selected weekly drafts, and a restart-safe Friday 8:00 AM Eastern DM workflow. The existing JavaScript media bot and its deployed service remain unchanged. Gaffer uses a separate Discord application; live deployment requires its token and owner/server IDs. Production Friday delivery defaults off until the private one-minute test succeeds.
+
