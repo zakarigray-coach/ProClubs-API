@@ -415,7 +415,7 @@ class GafferBot(discord.Client):
             self.scheduler.seed(now)
             report=self.db.open_report(*week_window(now),self.config.owner_id)
             self.scheduler.schedule_test(now)
-            await interaction.followup.send('One-minute scheduler test queued. The DM should arrive within 90 seconds. Friday scheduling remains disabled unless GAFFER_FRIDAY_ENABLED is true.',ephemeral=True)
+            await interaction.followup.send('One-minute scheduler test queued. The DM should arrive within 90 seconds. Friday scheduling remains disabled unless PEP_FRIDAY_RECAP is true.',ephemeral=True)
 
         @self.tree.error
         async def command_error(interaction,error):

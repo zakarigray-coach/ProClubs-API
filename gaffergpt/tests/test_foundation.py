@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from gaffergpt.database import Database
 from gaffergpt.parser import parse_recap,parse_registration
 from gaffergpt.reporter import Reporter
@@ -227,6 +227,15 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ReportView(bot,rid,0).is_persistent())
         self.assertTrue(ReportView(bot,rid,1).is_persistent())
         await bot.close()
+
+    def test_pep_recap_flag_takes_precedence(self):
+        base={'GAFFER_DISCORD_TOKEN':'test','OWNER_DISCORD_USER_ID':'42','GAFFER_GUILD_ID':'30'}
+        with patch.dict('os.environ',{**base,'PEP_FRIDAY_RECAP':'true'},clear=True):
+            self.assertTrue(Config.load().schedule_enabled)
+        with patch.dict('os.environ',{**base,'PEP_FRIDAY_RECAP':'false','GAFFER_FRIDAY_ENABLED':'true'},clear=True):
+            self.assertFalse(Config.load().schedule_enabled)
+        with patch.dict('os.environ',base,clear=True):
+            self.assertFalse(Config.load().schedule_enabled)
 
     def test_registration(self):
         self.assertEqual(parse_registration('Pep, register me as a Striker with Advanced Forward role'),('Striker','Advanced Forward',None))

@@ -62,7 +62,7 @@ Use a **new GafferGPT service** in the existing Railway project. Do not replace
 - `GAFFER_DATABASE_PATH=/data/gaffergpt.db`.
 - Set `GAFFER_DISCORD_TOKEN`, `OWNER_DISCORD_USER_ID`, `GAFFER_GUILD_ID`.
 - Optional management role IDs in `GAFFER_MANAGEMENT_ROLE_IDS` (comma-separated).
-- Keep `GAFFER_FRIDAY_ENABLED=false` initially.
+- Keep `PEP_FRIDAY_RECAP=false` initially.
 
 Create a separate Discord application named GafferGPT, enable **Message Content
 Intent**, and invite it with `bot` and `applications.commands`. Give it View
@@ -72,7 +72,7 @@ The owner must permit DMs from the bot/server. Administrator is unnecessary.
 Once connected, use `/configurepep` to choose the recap channel and actual
 OurProClubs bot. Then run `/testweeklydm`: a persisted job should send a DM
 within 60–90 seconds. Verify its menus, restart behavior and private delivery
-before setting `GAFFER_FRIDAY_ENABLED=true`.
+before setting `PEP_FRIDAY_RECAP=true`.
 
 A token is never printed, committed, or hardcoded. Add it through Railway's
 secret/environment editor, never into a PR, Discord message or chat transcript.
