@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
 from .config import Config
+from .notebook import notebook, daily_backup
+from .media_api import start_api
 from .feedback import player_feedback
 from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
@@ -192,6 +194,7 @@ class GafferBot(discord.Client):
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None
+        self.media_runner=None
         self.register_commands()
 
     def manager(self, interaction):
@@ -200,6 +203,8 @@ class GafferBot(discord.Client):
         return interaction.guild_id==self.config.guild_id and bool(set(self.config.management_role_ids)&{r.id for r in getattr(interaction.user,'roles',[])})
 
     async def setup_hook(self):
+        if self.config.reporter_secret:
+            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
         for m in self.db.rows('SELECT match_id FROM matches'):
             self.add_view(ReviewView(self,m['match_id']))
         for report in self.db.rows("SELECT * FROM weekly_reports WHERE status!='skipped'"):
@@ -216,6 +221,7 @@ class GafferBot(discord.Client):
         await self.wait_until_ready()
         while not self.is_closed():
             try:
+                await asyncio.to_thread(daily_backup,self.db)
                 # Always seed persisted jobs; production delivery remains gated.
                 now=datetime.now(timezone.utc)
                 self.scheduler.seed(now)
@@ -238,6 +244,8 @@ class GafferBot(discord.Client):
     async def close(self):
         if self.worker:
             self.worker.cancel()
+        if self.media_runner:
+            await self.media_runner.cleanup()
         await super().close()
 
     def recap_config(self):
@@ -369,6 +377,30 @@ class GafferBot(discord.Client):
             except ValueError as error:
                 text=str(error)
             await interaction.response.send_message(text,ephemeral=True)
+
+        @self.tree.command(name='notebook',description='Owner: download Pep’s Notebook for Excel or Google Sheets')
+        @app_commands.check(authorized)
+        async def export_notebook(interaction):
+            if interaction.user.id!=self.config.owner_id:
+                await interaction.response.send_message('Coach controls notebook downloads.',ephemeral=True); return
+            await interaction.response.defer(ephemeral=True)
+            try:
+                data=await asyncio.to_thread(notebook,self.db)
+                await interaction.followup.send('Pep’s Notebook — a snapshot of the central records:',
+                    file=discord.File(io.BytesIO(data),filename='Peps_Notebook.zip'),ephemeral=True)
+            except ValueError as error:
+                await interaction.followup.send(str(error),ephemeral=True)
+
+        @self.tree.command(name='backup',description='Owner: download a checked backup of Pep’s central database')
+        @app_commands.check(authorized)
+        async def backup_download(interaction):
+            if interaction.user.id!=self.config.owner_id:
+                await interaction.response.send_message('Only Coach can download the database.',ephemeral=True); return
+            await interaction.response.defer(ephemeral=True)
+            path=await asyncio.to_thread(daily_backup,self.db,refresh=True)
+            if path.stat().st_size>7_500_000:
+                await interaction.followup.send('Backup saved on Railway; it is too large for Discord.',ephemeral=True); return
+            await interaction.followup.send('Private database backup. Keep a copy outside Railway.',file=discord.File(path),ephemeral=True)
 
         @self.tree.command(name='development',description='Management: compare classified practices and official performances')
         @app_commands.check(authorized)

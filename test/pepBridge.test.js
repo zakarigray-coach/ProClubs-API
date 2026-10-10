@@ -1,0 +1,13 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {fetchReport,sendReview,checkConnection}=require('../pepBridge');
+const report={version:1,report_id:7,status:'draft',article:'Verified selected matches only',matches:[{match_id:1,match_type:'Practice'}]};
+const options={url:'http://pep.test:8080',token:'test-secret',fetchImpl:async(url,request)=>{
+ assert.equal(request.headers.Authorization,'Bearer test-secret');assert.equal(request.redirect,'error');
+ return {ok:true,json:async()=>url.pathname==='/health'?{ok:true,service:'pep-central-store'}:report};
+}};
+test('authenticated central report and health',async()=>{assert.deepEqual(await fetchReport(7,options),report);assert.equal(await checkConnection(options),true);});
+test('invalid or unavailable report fails safely',async()=>{await assert.rejects(fetchReport(0,options));await assert.rejects(fetchReport(7,{...options,fetchImpl:async()=>({ok:false,status:404})}));});
+test('private owner download never public send',async()=>{let reply;await sendReview({user:{id:'owner'},editReply:async r=>{reply=r;}},7,'owner',options);assert.equal(reply.files[0].attachment.toString(),report.article);assert.match(reply.content,/nothing has been published/);assert.deepEqual(reply.allowedMentions,{parse:[]});});
+test('non-owner cannot retrieve',async()=>{let called=false;await sendReview({user:{id:'other'},editReply:async()=>{}},7,'owner',{...options,fetchImpl:async()=>{called=true;}});assert.equal(called,false);});
+test('closed report rejected',async()=>{await assert.rejects(fetchReport(7,{...options,fetchImpl:async()=>({ok:true,json:async()=>({...report,status:'skipped'})})}));});

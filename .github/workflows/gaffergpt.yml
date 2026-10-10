@@ -1,13 +1,13 @@
-name: GafferGPT foundation
+name: Pep and RT Media checks
 on:
   push:
-    paths: ['gaffergpt/**', '.github/workflows/gaffergpt.yml']
+    paths: ['gaffergpt/**', 'pepBridge.js', 'reporterBot.js', 'test/**', '.github/workflows/gaffergpt.yml']
   pull_request:
-    paths: ['gaffergpt/**', '.github/workflows/gaffergpt.yml']
+    paths: ['gaffergpt/**', 'pepBridge.js', 'reporterBot.js', 'test/**', '.github/workflows/gaffergpt.yml']
 permissions:
   contents: read
 jobs:
-  test:
+  pep:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,3 +16,13 @@ jobs:
           python-version: '3.12'
       - run: pip install -r gaffergpt/requirements.txt
       - run: python -m unittest discover -s gaffergpt/tests -v
+  rt-media:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test

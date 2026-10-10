@@ -1,3 +1,4 @@
+const pepBridge = require('./pepBridge');
 const {
   Client,
   GatewayIntentBits,
@@ -306,7 +307,12 @@ const seasonCalendar = clubOption(new SlashCommandBuilder()
   .addStringOption(o => o.setName('season_name').setDescription('Season label, such as FC27 or Season 4'))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
-const commands = [match, sign, signBatch, signingStatus, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
+const pepReport = new SlashCommandBuilder().setName('pepreport')
+  .setDescription('Privately retrieve a selected weekly draft from Pep’s central database')
+  .addIntegerOption(o => o.setName('report_id').setDescription('Report number shown in Pep’s draft DM').setMinValue(1).setRequired(true))
+  .setDMPermission(false).setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
+const commands = [pepReport, match, sign, signBatch, signingStatus, signing, release, setupServer, streamlineServer, auditServer, stagingSuite,
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
   importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand,
   ...buildAuditorCommands()].map(command => command.toJSON());
@@ -4239,6 +4245,9 @@ async function startBot() {
     await interaction.deferReply(privateCommand ? { flags: MessageFlags.Ephemeral } : {});
 
     const ownerId = process.env.BOT_OWNER_ID || interaction.guild.ownerId;
+    if (interaction.commandName === 'pepreport') {
+      return pepBridge.sendReview(interaction, interaction.options.getInteger('report_id'), ownerId);
+    }
     if (interaction.commandName === 'signing-status') {
       if (interaction.user.id !== ownerId) return interaction.editReply('Only the Castle & Crown Collective owner can review signing-package status.');
       const initial = stateStore.listStories().filter(record => record.type === 'signing' && record.quickSign);
@@ -4850,6 +4859,10 @@ async function startBot() {
     });
   });
 
+  if (process.env.PEP_CENTRAL_URL && process.env.PEP_REPORTER_TOKEN) {
+    await pepBridge.checkConnection().then(() => console.log('Pep central database connection verified (read-only).'))
+      .catch(() => console.warn('Pep bridge unavailable at startup; /pepreport will retry on demand.'));
+  }
   await client.login(token);
   return client;
 }

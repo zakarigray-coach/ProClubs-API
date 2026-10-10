@@ -27,7 +27,7 @@ def parse_recap(text, club='Birmingham City'):
     if found:
         # Player blocks cannot safely be assigned across several scorelines.
         if len(found)==1:
-            found[0]['statistics']=parse_player_stats(text)
+            found[0]['statistics']=parse_player_stats(text)+parse_team_stats(text)
         return found
     fields={}
     for line in text.splitlines():
@@ -110,3 +110,36 @@ def parse_player_stats(text):
                 values[metric]=value
     flush()
     return result
+
+
+
+def parse_team_stats(text):
+    # Explicit club totals only. Direction/length counts are not possession percentages.
+    active=False; section=''; values={}; invalid=set()
+    labels={'shots':'shots','shots conceded':'shots_conceded','chances created':'chances_created',
+            'possession':'possession','pass accuracy':'pass_accuracy',
+            'on target inside box':'shots_on_target_inside_box'}
+    for raw in text.splitlines():
+        line=re.sub(r'[*`]','',raw).strip()
+        if line.upper()=='TEAM STATS': active=True; continue
+        if line.upper()=='FINAL SCORE': active=False
+        if not active: continue
+        if ':' not in line:
+            section=normalize(line).replace('—','-'); continue
+        label,raw_value=line.split(':',1);label=normalize(label);raw_value=raw_value.strip()
+        metric=labels.get(label)
+        if not metric:
+            if section in ('passing - direction','passing - length') and label in ('backwards','sideways','forwards','short','medium','long'):
+                metric='passes_'+label
+            elif section in ('possession won','possession lost') and label in ('defensive third','midfield third','attacking third'):
+                metric=section.replace(' ','_')+'_'+label.replace(' ','_')
+        match=re.fullmatch(r'(\d+(?:\.\d+)?)(%)?',raw_value)
+        if not metric or not match: continue
+        value=float(match.group(1));unit='%' if match.group(2) else 'count'
+        if metric in ('possession','pass_accuracy') and (unit!='%' or value>100): continue
+        if unit=='count' and not value.is_integer(): continue
+        if metric in values and values[metric]!=(value,unit): invalid.add(metric)
+        values[metric]=(value,unit)
+    return [{'subject_type':'team','subject_key':'Birmingham City','metric':metric,
+             'value':value,'unit':unit,'source':'ourproclubs_text'}
+            for metric,(value,unit) in values.items() if metric not in invalid]

@@ -183,3 +183,17 @@ Practice-to-later-official comparisons remain labeled separately. Two selected o
 Drafts now include a fact-based headline, result paragraphs, W/D/L and goal totals, two-fixture coverage when applicable, Gaffer observations and optional training/development sections. With development disabled, practice data cannot influence analysis or prose. Incomplete scores stay out of result totals. There are no invented player awards, quotes, injuries, highlights or upcoming fixtures. Approval still does not auto-publish. This is deterministic writing; an external AI provider is not required. The legacy RT bot connection remains a separate task.
 
 Development scope: club/team only. The analyst ignores individual-player metrics for trends, practice-to-official comparisons and weekly development sections. Player links, saved stats and basic `/myfeedback` remain available, but individual rating progression is removed. Existing drafts are not automatically rewritten; regenerate a draft to apply this scope.
+
+## Pep’s Notebook and backups
+
+Owner-only `/notebook` downloads a ZIP of CSV snapshots for matches, team stats, players, links, tactics, reports, report selections and scheduling history. Open them in Excel or import into Google Sheets. This is not a live Google Sheet. Discord IDs must be imported as text. Untrusted text is protected against spreadsheet formula execution. No secrets/settings are exported.
+
+Daily online SQLite snapshots are checked and retained for seven dates under `/data/backups`. `/backup` produces a fresh checked snapshot to download privately. Same-volume backups recover logical mistakes but do not protect against losing the Railway volume: keep a downloaded copy outside Railway. Restore only with the bot stopped, retain the current database first, verify the backup with `PRAGMA quick_check`, then copy it to the configured database path and restart; the automated restore tests use temporary files, not production.
+
+## RT Media central connection
+
+Pep hosts an authenticated, read-only API on private Railway networking, default port 8080. Configure `PEP_REPORTER_TOKEN` with a strong shared secret (never the Discord token), and `PEP_REPORTER_PORT` if needed. RT’s `PEP_CENTRAL_URL` points to Pep’s private host. RT uses `/pepreport report_id:N` to retrieve the current weekly article as a private owner-only download. It does not rewrite scores, add legacy match records, call paid AI, or publish. `/health` and `/reports/N` both require the secret. Only current draft/approved reports are accessible; changed classifications invalidate old drafts. Development-disabled reports exclude practice facts.
+
+Existing RT JSON files still hold unrelated signing/schedule history; they are not migrated or deleted. New weekly match analysis and articles have one source: Pep’s SQLite database. RT is a read-only consumer. Older RT commands keep their legacy behavior and should not be used as the new weekly-report intake.
+
+Club stats parsing now supports explicitly labeled counts and percentages within TEAM STATS, including the supplied direction, length, possession-third and shooting fields. It does not infer possession or pass accuracy from direction/length counts. A real automode recap format still requires live verification. No test fixtures are imported into production.

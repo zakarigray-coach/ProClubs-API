@@ -186,3 +186,7 @@ The approved setup gives only the RT bot permission to mention non-mentionable c
 
 The Python assistant coach is documented in [gaffergpt/README.md](gaffergpt/README.md). It adds a shared SQLite match review/reporting database, management-selected weekly drafts, and a restart-safe Friday 8:00 AM Eastern DM workflow. The existing JavaScript media bot and its deployed service remain unchanged. Gaffer uses a separate Discord application; live deployment requires its token and owner/server IDs. Production Friday delivery defaults off until the private one-minute test succeeds.
 
+
+## Pep central weekly reports
+
+RT can now read Pep’s current selected weekly report using owner-only `/pepreport report_id:N`. Set PEP_CENTRAL_URL to Pep’s private Railway endpoint and PEP_REPORTER_TOKEN to the same strong secret on both services. Pep is the sole SQLite match/report store; the bridge is read-only and returns a private text download, never publishing or updating legacy stats. See gaffergpt/README.md for /notebook CSV exports and checked daily backups.

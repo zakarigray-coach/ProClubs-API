@@ -14,6 +14,8 @@ class Config:
     database_path: str = 'gaffergpt.db'
     schedule_enabled: bool = False
     owner_player_name: str = ''
+    reporter_secret: str = ''
+    reporter_port: int = 8080
 
     @classmethod
     def load(cls):
@@ -27,4 +29,5 @@ class Config:
                    tuple(int(x.strip()) for x in os.getenv('GAFFER_MANAGEMENT_ROLE_IDS','').split(',') if x.strip()),
                    os.getenv('GAFFER_DATABASE_PATH',str(Path(__file__).resolve().parents[1]/'gaffergpt.db')),
                    os.getenv('PEP_FRIDAY_RECAP',os.getenv('GAFFER_FRIDAY_ENABLED','false')).lower()=='true',
-                   os.getenv('PEP_OWNER_PLAYER_NAME',''))
+                   os.getenv('PEP_OWNER_PLAYER_NAME',''),
+                   os.getenv('PEP_REPORTER_TOKEN',''),int(os.getenv('PEP_REPORTER_PORT','8080')))
