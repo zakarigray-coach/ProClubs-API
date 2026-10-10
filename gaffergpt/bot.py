@@ -4,11 +4,12 @@ import io
 import logging
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
 from .config import Config
 from .feedback import player_feedback
+from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
 from .parser import parse_recap, parse_registration
 from .reporter import Reporter, match_label
@@ -368,6 +369,19 @@ class GafferBot(discord.Client):
             except ValueError as error:
                 text=str(error)
             await interaction.response.send_message(text,ephemeral=True)
+
+        @self.tree.command(name='development',description='Management: compare classified practices and official performances')
+        @app_commands.check(authorized)
+        async def development(interaction,days:app_commands.Range[int,1,90]=30):
+            now=datetime.now(timezone.utc)
+            matches=self.db.period_matches((now-timedelta(days=days)).isoformat(),now.isoformat())
+            matches=[m for m in matches if m['match_type'] in ('Official','Practice')]
+            statistics=[]
+            for m in matches:
+                statistics.extend(self.db.rows('SELECT * FROM match_statistics WHERE match_id=?',(m['match_id'],)))
+            text=tracking_text(FactualGaffer().analyze(matches,statistics))
+            await interaction.response.send_message(f'Private development review for the last {days} days:',
+                file=discord.File(io.BytesIO(text.encode()),filename='pep-development.txt'),ephemeral=True)
 
         @self.tree.command(name='status',description='Check Pep and the match review queue')
         @app_commands.check(authorized)

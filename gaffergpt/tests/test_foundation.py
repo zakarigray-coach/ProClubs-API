@@ -12,6 +12,7 @@ from gaffergpt.reporter import Reporter
 from gaffergpt.scheduler import WeeklyScheduler,week_window,friday_due
 from gaffergpt.config import Config
 from gaffergpt.feedback import player_feedback
+from gaffergpt.analysis import FactualGaffer, direction, tracking_text
 from gaffergpt.bot import GafferBot,ReportView,ReviewView,DraftView
 
 UTC=timezone.utc
@@ -296,6 +297,72 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('7 to 10',article);self.assertIn('10 to 14',article)
         self.assertIn('FROM THE TRAINING GROUND',article)
         self.assertEqual(self.db.official_record()['played'],1)
+
+    def test_trend_direction_not_always_more_is_better(self):
+        self.assertEqual(direction('shots',[7,10,14]),'improving')
+        self.assertEqual(direction('goals_conceded',[3,2,1]),'improving')
+        self.assertEqual(direction('shots',[10,7,9]),'mixed')
+        self.assertEqual(direction('rating',[7,7,7]),'steady')
+        self.assertEqual(direction('dri',[5,6,7]),'increasing')
+
+    def test_three_practice_trend_and_official_separate(self):
+        ids=[]
+        for index,value in enumerate([7,10,14,20]):
+            mid=self.add(str(index),at=f'2026-10-0{5+index}T22:00:00+00:00')[0];ids.append(mid)
+            self.db.classify(mid,'Practice' if index<3 else 'Official','Home',42)
+            self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value,unit) VALUES (?,'team','Birmingham City','shots',?,'count')",(mid,value))
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],self.db.rows('SELECT * FROM match_statistics'))
+        trend=next(t for t in obs['trends'] if t['metric']=='shots')
+        self.assertEqual(trend['values'],[7,10,14])
+        self.assertEqual(trend['match_type'],'Practice')
+        self.assertEqual(trend['direction'],'improving')
+        self.assertIn('Practice to official',tracking_text(obs))
+
+    def test_trends_never_cross_units_or_opponents(self):
+        ids=[]
+        for index in range(3):
+            mid=self.add(str(index),text='Birmingham City 2-1 '+('Arsenal' if index==2 else 'Chelsea'))[0];ids.append(mid)
+            self.db.classify(mid,'Practice','Unknown',42)
+            self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value,unit) VALUES (?,'team','Birmingham City','passing',80,?)",(mid,'%' if index==0 else 'count'))
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],self.db.rows('SELECT * FROM match_statistics'))
+        self.assertFalse(any(t['metric']=='passing' for t in obs['trends']))
+        self.assertFalse(any(c['metric']=='passing' for c in obs['comparisons']))
+
+    def test_doubleheader_eastern_date_preserves_two_matches(self):
+        ids=[]
+        for index,(venue,at) in enumerate([('Home','2026-10-07T03:30:00+00:00'),('Away','2026-10-07T04:00:00+00:00')]):
+            mid=self.add(str(index),at=at)[0];ids.append(mid)
+            self.db.classify(mid,'Official',venue,42,'MPL')
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],[])
+        self.assertEqual(obs['doubleheaders'],[])  # 11:30pm and midnight ET are separate dates.
+        self.db.execute('UPDATE matches SET played_at=? WHERE match_id=?',('2026-10-07T03:59:00+00:00',ids[1]))
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],[])
+        self.assertEqual(obs['doubleheaders'][0]['match_ids'],ids)
+        self.assertEqual(obs['summaries']['Official']['scored_matches'],2)
+
+    def test_derived_ratios_skip_zero_and_missing_denominators(self):
+        ids=[]
+        for index in range(3):
+            mid=self.add(str(index))[0];ids.append(mid);self.db.classify(mid,'Practice','Unknown',42)
+            for metric,value in [('passes_completed',index+1),('passes_attempted',10)]:
+                self.db.execute("INSERT INTO match_statistics(match_id,subject_type,subject_key,metric,value) VALUES (?,'player','Coach',?,?)",(mid,metric,value))
+        obs=FactualGaffer().analyze([self.db.match(i) for i in ids],self.db.rows('SELECT * FROM match_statistics'))
+        trend=next(t for t in obs['trends'] if t['metric']=='pass_completion')
+        self.assertEqual(trend['values'],[10,20,30])
+        self.assertEqual(trend['unit'],'%')
+
+    def test_report_development_disabled_and_unselected_excluded(self):
+        practice=self.add('practice',text='Birmingham City 9-0 Chelsea')[0];self.db.classify(practice,'Practice','Unknown',42)
+        official=self.add('official',text='Birmingham City 2-1 Chelsea')[0];self.db.classify(official,'Official','Home',42)
+        unselected=self.add('unselected',text='Birmingham City 8-0 Arsenal')[0];self.db.classify(unselected,'Official','Away',42)
+        rid=self.report([practice,official]);self.db.execute('UPDATE weekly_reports SET include_development=0 WHERE report_id=?',(rid,))
+        self.db.confirm_report(rid);article=Reporter(self.db).generate(rid)
+        self.assertIn('1 win from 1 selected',article)
+        self.assertNotIn('9–0',article)
+        self.assertNotIn('Arsenal',article)
+        self.assertNotIn('FROM THE TRAINING GROUND',article)
+        self.assertNotIn('Practice',article)
+        self.assertIn('has not been published',article)
 
     async def test_confirmed_article_sent_privately_for_review(self):
         bot=GafferBot(Config('test',42,30,database_path=self.path))
