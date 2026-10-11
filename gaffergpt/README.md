@@ -335,3 +335,5 @@ The match identity check uses Eastern date, opponent and both scores. Ambiguous 
 receive no guessed stats. Missing metrics stay missing, zero-minute rows do not count as appearances,
 and passing percentages are weighted by recorded attempts, not averaged across games.
 This is factual reporting, not individual development advice. The club-only coaching policy is unchanged.
+
+Weekly articles now use the configured Pep AI provider for a story-led sports feature: original headline, rotating reporter voice, selective statistics and separate practice coverage. Typical four-match features target 450–650 words. Recent drafts inform wording variation. Provider failures keep confirmed facts available for retry; articles remain private drafts.

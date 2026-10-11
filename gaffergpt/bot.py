@@ -19,6 +19,7 @@ from .database import Database, utcnow
 from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
 from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
+from .article_writer import SportsWriter
 from .weekly_intake import save_submission, save_photo, content as report_content
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
@@ -190,7 +191,13 @@ class RecapConfirmView(ManagedView):
                     await interaction.response.send_message(str(error),ephemeral=True); return
                 saved['used']=True;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
                 await interaction.response.defer(ephemeral=True)
-                article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                try:
+                    article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
+                    saved['used']=False;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
+                    log.warning('Weekly sports writer unavailable; confirmed facts retained.')
+                    await interaction.followup.send('The sports writer could not finish. Your results are saved. Tap Confirm Results & Draft again to retry.',ephemeral=True)
+                    return
                 owner=await bot.fetch_user(bot.config.owner_id)
                 files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
                 if existing.get('photo'):
@@ -256,7 +263,12 @@ class ReportView(ManagedView):
             except ValueError as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
             await interaction.response.defer(ephemeral=True)
-            article=await asyncio.to_thread(bot.reporter.generate,report_id)
+            try:
+                article=await asyncio.to_thread(bot.reporter.generate,report_id)
+            except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
+                log.warning('Weekly sports writer unavailable; confirmed selections retained.')
+                await interaction.followup.send('The sports writer could not finish. Your selections are saved. Try Generate Report again.',ephemeral=True)
+                return
             owner=await bot.fetch_user(bot.config.owner_id)
             files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
             supplied=report_content(bot.db,report_id)
@@ -364,7 +376,7 @@ class GafferBot(discord.Client):
         self.coach=OpenAICoach.from_environment()
         self.coaching_lock=asyncio.Lock()
         self.recap_reader=RecapReader(self.coach) if self.coach else None
-        self.reporter=Reporter(self.db)
+        self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key,self.coach.model) if self.coach else None)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None

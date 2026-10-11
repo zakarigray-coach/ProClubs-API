@@ -1,5 +1,6 @@
 """Reporter reads the shared store and prepares drafts; it never publishes."""
 import json
+from .article_writer import period_label
 from .analysis import FactualGaffer
 from .weekly_intake import CONTENT_SCHEMA
 from .excel_stats import player_totals, stats_text
@@ -17,9 +18,10 @@ def match_label(m):
 
 
 class Reporter:
-    def __init__(self, db, analyst=None):
+    def __init__(self, db, analyst=None, writer=None):
         self.db=db
         self.analyst=analyst or FactualGaffer()
+        self.writer=writer
 
     def generate(self, report_id):
         # One transaction prevents classification changes racing draft creation.
@@ -108,6 +110,16 @@ class Reporter:
                 lines+=['','PLAYER OF THE WEEK',supplied['player_name']+' — '+supplied['player_evidence'], 'Selected by management. No interview was requested.']
             lines+=['','EDITORIAL NOTE','Scores and statistics come from the selected database records. No quotes, injuries, events or future fixtures have been invented. This draft has not been published.']
             article='\n'.join(lines)
+            if self.writer:
+                recent=[{'title':r['title'],'lead':(r['article'] or '')[:900]} for r in conn.execute(
+                    "SELECT title,article FROM weekly_reports WHERE report_id<>? AND article IS NOT NULL ORDER BY report_id DESC LIMIT 6",(report_id,))]
+                packet={'period':period_label(report),'reporter':editorial['reporter'],'style':editorial['style'],
+                        'matches':[{k:m.get(k) for k in ('played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')} for m in matches
+                                   if m['match_type']=='Official' or report['include_development']],
+                        'observations':observations,'management':{k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None,'recent_articles':recent}
+                title,body=self.writer.write(packet)
+                article='\n'.join(['RT FOOTBALL MEDIA',title,f"By {editorial['reporter']} | RT Football Media",
+                                   period_label(report),'DRAFT — awaiting Coach review','',body])
             observations['editorial']={key:editorial[key] for key in ('reporter','opening','style')}
             conn.execute("UPDATE weekly_reports SET title=?,article=?,observations=?,status='draft' WHERE report_id=?",(title,article,json.dumps(observations),report_id))
         return article
