@@ -10,10 +10,11 @@ test('registered command names are unique and match the dispatcher source of tru
 test('temporary and obsolete command surfaces are not registered', () => {
   assert.equal(COMMAND_NAMES.includes('setup-match-centers'), false);
   assert.equal(COMMAND_NAMES.includes('signing-batch'), false);
+  for (const name of ['import-mlpc-schedule','setup-server','streamline-server']) assert.equal(COMMAND_NAMES.includes(name),false,name);
 });
 
 test('production command set contains the repaired signing and schedule workflows', () => {
-  for (const name of ['sign','sign-batch','import-mlpc-schedule','import-mpl-schedule','nextmatch','schedule','result','edit-match','cancel-match']) {
+  for (const name of ['sign','sign-batch','import-mpl-schedule','nextmatch','schedule','result','edit-match','cancel-match']) {
     assert.equal(COMMAND_NAMES.includes(name),true,name);
   }
 });
@@ -26,3 +27,4 @@ test('existing bot registers all owner auditor commands without a second client'
     assert.equal(command.dm_permission, false);
   }
 });
+

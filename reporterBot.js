@@ -1,3 +1,4 @@
+const { ACTIVE_TEAM_KEYS, isActiveClub, activeCommands, RETIRED_COMMANDS } = require('./activeClubs');
 const { leagueChannelKeys } = require('./birminghamRebrand');
 const pepBridge = require('./pepBridge');
 const {
@@ -317,6 +318,7 @@ const commands = [pepReport, match, sign, signBatch, signingStatus, signing, rel
   correctStats, awards, archiveMedia, runSchedules, awardPresentation, seasonCalendar, importMlpcSchedule,
   importMplSchedule, nextMatch, viewSchedule, result, editMatchCommand, cancelMatchCommand,
   ...buildAuditorCommands()].map(command => command.toJSON());
+commands.splice(0,commands.length,...activeCommands(commands));
 const COMMAND_NAMES = commands.map(command => command.name);
 
 function clean(value, max) {
@@ -1468,6 +1470,7 @@ async function startBot() {
       if (owner) await owner.send('⚠️ Romano Times feed setup needs attention: ' + error.message).catch(() => {});
     }
     for (const record of stateStore.listStories()) {
+      if (!isActiveClub(record.teamKey)) continue;
       if (['published', 'cancelled'].includes(record.state)) continue;
       let recovered = record;
       if (exactTru(record.selectedUserId, record.selectedPlayerName) &&
@@ -1508,7 +1511,7 @@ async function startBot() {
       }
     }
     for (const selection of stateStore.listSpotlightSelections()) {
-      if (selection.state === 'awaiting_response' && selection.playerId) {
+      if (isActiveClub(selection.teamKey) && selection.state === 'awaiting_response' && selection.playerId) {
         pendingSpotlightResponses.set(selection.playerId, selection.id);
       }
     }
@@ -1732,22 +1735,22 @@ async function startBot() {
 
     const statsGuild = await configuredGuild().catch(() => null);
     if (statsGuild) {
-      for (const teamKey of ['crownfc','birmingham']) {
+      for (const teamKey of ACTIVE_TEAM_KEYS) {
         await reorderMatchCenterForum({guild:statsGuild,store:stateStore,teamKey}).then(result => {
           if (!result.noFixtures) console.log('Match Center chronological reorder:', JSON.stringify(result));
         }).catch(error => console.error(`Could not reorder ${teamKey} Match Center:`, error.message));
       }
-      await runReminders({ guild: statsGuild, store: stateStore }).catch(error =>
+      await runReminders({ guild: statsGuild, store: stateStore, teamKeys:ACTIVE_TEAM_KEYS }).catch(error =>
         console.error('Initial match reminder check failed:', error.message)
       );
-      await Promise.all(Object.keys(TEAMS).map(teamKey => refreshPublicStatsBoard(statsGuild, teamKey).catch(error =>
+      await Promise.all(ACTIVE_TEAM_KEYS.map(teamKey => refreshPublicStatsBoard(statsGuild, teamKey).catch(error =>
         console.error(`Could not refresh ${teamKey} public stats board:`, error.message)
       )));
     }
     await runDueScheduledOperations().catch(error => console.error('Initial scheduled media check failed:', error));
     const schedulerTimer = setInterval(() => {
       runDueScheduledOperations().catch(error => console.error('Scheduled media check failed:', error));
-      configuredGuild().then(guild => runReminders({ guild, store: stateStore }))
+      configuredGuild().then(guild => runReminders({ guild, store: stateStore, teamKeys:ACTIVE_TEAM_KEYS }))
         .catch(error => console.error('Match reminder check failed:', error.message));
     }, 60 * 1000);
     schedulerTimer.unref?.();
@@ -1815,6 +1818,7 @@ async function startBot() {
   }
 
   async function refreshPublicStatsBoard(guild, teamKey) {
+    if (!isActiveClub(teamKey)) return;
     const team = TEAMS[teamKey];
     const channel = statsChannelFor(guild, teamKey);
     if (!channel) throw new Error(`The ${team.label} stats channel is unavailable.`);
@@ -1895,6 +1899,7 @@ async function startBot() {
   }
 
   async function createScheduledDraft(guild, owner, teamKey, type, story, extras = {}) {
+    if (!isActiveClub(teamKey)) return;
     const team = TEAMS[teamKey];
     const destination = reporterChannelFor(guild, team);
     if (!destination) throw new Error(`Reporter channel for ${team.label} is unavailable.`);
@@ -1964,7 +1969,7 @@ async function startBot() {
   }
 
   async function runSpotlightDrafts(guild, owner) {
-    for (const teamKey of Object.keys(TEAMS)) {
+    for (const teamKey of ACTIVE_TEAM_KEYS) {
       const selections = stateStore.listSpotlightSelections(teamKey).filter(item => !item.draftStoryId);
       const selection = selections.at(-1);
       if (!selection) continue;
@@ -2047,7 +2052,7 @@ async function startBot() {
       if (!stateStore.claimScheduleRun(job.key, { job: job.name })) continue;
       try {
         if (job.name === 'spotlight-selection') {
-          for (const teamKey of Object.keys(TEAMS)) {
+          for (const teamKey of ACTIVE_TEAM_KEYS) {
             const teamRunKey = `${job.key}:${teamKey}`;
             if (!stateStore.claimScheduleRun(teamRunKey, { job: job.name, teamKey })) continue;
             try {
@@ -2059,7 +2064,7 @@ async function startBot() {
           }
         }
         if (job.name === 'weekly-recap-draft') {
-          for (const teamKey of Object.keys(TEAMS)) {
+          for (const teamKey of ACTIVE_TEAM_KEYS) {
             const teamRunKey = `${job.key}:${teamKey}`;
             if (!stateStore.claimScheduleRun(teamRunKey, { job: job.name, teamKey })) continue;
             try {
@@ -2461,7 +2466,7 @@ async function startBot() {
   }
 
   function teamKeysForRecord(record) {
-    return signingTeamKeys(record);
+    return signingTeamKeys(record).filter(isActiveClub);
   }
 
   async function startSignCommand(interaction, team, teamKey, selectedUserOverride = null, suppressReply = false) {
@@ -2790,7 +2795,7 @@ async function startBot() {
     let team = configuredSource ? TEAMS[configuredSource.teamKey] : null;
     if (!team && location.includes('mlpc')) team = TEAMS.crownfc;
     else if (!team && (location.includes('mpl') || location.includes('ml1'))) team = TEAMS.birmingham;
-    if (!team) return;
+    if (!team || team === TEAMS.crownfc) return;
 
     let type = configuredSource ? configuredSource.type : null;
     if (!type && (channelName.includes('match-results') || channelName.includes('match-center'))) type = 'match';
@@ -2849,6 +2854,15 @@ async function startBot() {
   function teamForRecord(record) { return TEAMS[record.teamKey]; }
 
   async function handleInteraction(interaction) {
+    if (interaction.isChatInputCommand()) {
+      const selectedClub=interaction.options.getString('club');
+      if (RETIRED_COMMANDS.has(interaction.commandName) || (selectedClub && !isActiveClub(selectedClub))) {
+        return interaction.reply({content:'CrownFC and the old dual-club setup are retired. Historical records are preserved; use Birmingham City commands.',flags:MessageFlags.Ephemeral});
+      }
+    }
+    if (interaction.isButton() && (/^registration_decision:(crownfc|both):/.test(interaction.customId) || interaction.customId.startsWith('server_streamline:'))) {
+      return interaction.reply({content:'This retired dual-club control is disabled. Use the current Birmingham workflow.',flags:MessageFlags.Ephemeral});
+    }
     if (await serverAuditor.handleInteraction(interaction)) return;
     if (interaction.isButton() && interaction.customId.startsWith('match_availability:')) {
       return handleAvailability(interaction, stateStore);
@@ -2902,15 +2916,13 @@ async function startBot() {
         .setTimestamp();
       const controls = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`registration_decision:birmingham:${requestId}`).setLabel('Approve Birmingham').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`registration_decision:crownfc:${requestId}`).setLabel('Approve CrownFC').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`registration_decision:both:${requestId}`).setLabel('Approve Both').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`registration_decision:trialist:${requestId}`).setLabel('Trialist').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`registration_decision:reject:${requestId}`).setLabel('Reject').setStyle(ButtonStyle.Danger)
       );
       const review = await managementChannel.send({ embeds: [embed], components: [controls], allowedMentions: { parse: [] } });
       stateStore.setMetadata(`onboardingRequest:${requestId}`, { ...request, reviewChannelId: managementChannel.id, reviewMessageId: review.id });
       stateStore.addManagementLog({ action: 'registration_submitted', requestId, userId: request.userId });
-      return interaction.reply({ content: 'Registration submitted privately. Management will choose Birmingham City, CrownFC, both clubs, trialist, or reject. You cannot assign the club roles yourself.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: 'Registration submitted privately. Management will choose Birmingham City, trialist, or reject. You cannot assign the club roles yourself.', flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('registration_decision:')) {
@@ -3992,7 +4004,7 @@ async function startBot() {
 
       console.log('RT server cleanup result:', JSON.stringify(results));
       stateStore.addManagementLog({ action: 'server_cleanup_applied', requesterUserId: interaction.user.id, results });
-      await Promise.all(Object.keys(TEAMS).map(teamKey => refreshPublicStatsBoard(guild, teamKey).catch(error => {
+      await Promise.all(ACTIVE_TEAM_KEYS.map(teamKey => refreshPublicStatsBoard(guild, teamKey).catch(error => {
         results.warnings.push(`${teamKey} public stats board`);
         console.error(`Could not create ${teamKey} public stats board:`, error.message);
       })));
