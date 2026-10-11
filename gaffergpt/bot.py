@@ -523,6 +523,11 @@ class GafferBot(discord.Client):
     async def rewrite_verified_report(self,request):
         try:
             report_id=int(request.split(':',1)[0])
+            if request.endswith(':inspect'):
+                audits=self.db.rows("SELECT state,source_hash,attempts,error FROM report_generation_audit WHERE report_id=? ORDER BY audit_id DESC LIMIT 1",(report_id,))
+                log.info('Owner-requested held article diagnostics: %s',json.dumps(audits,ensure_ascii=False))
+                self.db.set_setting('report_rewrite:'+request,'complete')
+                return
             selected=self.db.selected(report_id)
             if len(selected)!=4:raise ValueError('Four-match test requires exactly four selections.')
             stats=self.db.rows('SELECT s.* FROM match_statistics s JOIN report_matches r USING(match_id) WHERE r.report_id=?',(report_id,))

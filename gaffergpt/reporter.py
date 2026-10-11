@@ -140,6 +140,12 @@ class Reporter:
                     [m['match_id'] for m in matches]) if r['opponent'] not in {m['opponent'] for m in included}]
                 known_players={s['subject_key'] for s in packet['statistics'] if s['subject_type']=='player'}
                 packet['excluded_names'] += [r['subject_key'] for r in conn.execute("SELECT DISTINCT subject_key FROM match_statistics WHERE subject_type='player'") if r['subject_key'] not in known_players]
+                held=conn.execute("SELECT source_hash,attempts FROM report_generation_audit WHERE report_id=? AND state='held' ORDER BY audit_id DESC LIMIT 1",(report_id,)).fetchone()
+                if held:
+                    previous=json.loads(held['attempts'])
+                    drafts=[a for a in previous if isinstance(a.get('article'),dict)]
+                    if drafts:
+                        packet['recovery']={'source_hash':held['source_hash'],'article':drafts[-1]['article'],'error':drafts[-1].get('error','Complete all current checks.')}
                 # Release the write lock while the remote sports desk works.
                 conn.commit()
                 title,body=self.writer.write(packet)

@@ -114,6 +114,8 @@ class SportsWriter(OpenAICoach):
                 'Reject more than three player summaries or more than three performance metrics per player; appearance counts are context, not performance metrics. '
                 'Reject supplied figures, non-negligible, defensive actions noted and factual snapshot. '
                 'A short polished article is acceptable. '
+                'Management-confirmed Player of the Week is a supported award, without needing a named selector. '
+                'Football usage of return for results/output is not inherently a chronological claim; inspect the actual context. '
                 'Use title FAIL with body explaining concrete corrections when any check fails. '
                 'On PASS set body to an empty string. Return exactly title/body JSON; never rewrite in this audit.')
         if task=='locate_final_claims':
@@ -176,8 +178,13 @@ class SportsWriter(OpenAICoach):
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
             'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status.')
         async def draft_and_edit():
-            draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
-            feedback=[]
+            recovery=clean.get('recovery') or {}
+            if recovery.get('source_hash')==sheet['source_hash']:
+                draft=recovery['article'];feedback=[recovery.get('error','Complete every current check.')]
+                self._local.attempts.append({'state':'recovered','source_hash':sheet['source_hash']})
+            else:
+                draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
+                feedback=[]
             for attempt in range(3):
                 editing=dict(brief,editing_draft=draft,validation_feedback='\n'.join(feedback),
                     desk_task='Copy-edit the COMPLETE article. Correct every listed issue and retain earlier corrections. '

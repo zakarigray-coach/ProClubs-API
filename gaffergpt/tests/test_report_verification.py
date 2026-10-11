@@ -145,6 +145,28 @@ class AuditTests(unittest.TestCase):
         self.assertIsNone(writer.last_verification)
         self.assertLessEqual(writer.calls,10)
 
+class RecoveryTests(unittest.TestCase):
+    def test_recovery_requires_matching_source_and_reruns_reviews(self):
+        import json
+        from gaffergpt.article_writer import SportsWriter
+        packet={'matches':[fixture(1)],'statistics':[]}
+        article={'title':'Birmingham review the practice programme','body':'Birmingham’s practice programme offers the club a chance to assess its football away from league competition. The review focuses on the selected fixture and the recorded result. That distinction gives the training session its proper context while keeping the competitive record separate.'}
+        class Writer(SportsWriter):
+            def __init__(self):super().__init__('test');self.calls=[]
+            async def advise(self,analysis,formation=''):
+                r=json.loads(analysis);self.calls.append(r)
+                if r.get('desk_task')=='audit_finished_article':return json.dumps({'title':'PASS','body':''})
+                if r.get('desk_task')=='locate_final_claims':return json.dumps({'claims':[],'unsupported':[]})
+                return json.dumps(article)
+        for matching in (True,False):
+            source=build_fact_sheet(packet)['source_hash'] if matching else 'obsolete-source'
+            writer=Writer();writer.write(dict(packet,recovery={'source_hash':source,'article':article,'error':'Correct the headline.'}))
+            self.assertEqual(len(writer.calls),3 if matching else 4)
+            self.assertTrue(writer.last_verification)
+            self.assertEqual(sum(a.get('state')=='recovered' for a in writer.last_attempts),int(matching))
+            self.assertTrue(any(c.get('desk_task')=='audit_finished_article' for c in writer.calls))
+            self.assertTrue(any(c.get('desk_task')=='locate_final_claims' for c in writer.calls))
+
 class ApprovalTests(unittest.IsolatedAsyncioTestCase):
     async def test_changed_article_cannot_reuse_passed_audit(self):
         import tempfile
