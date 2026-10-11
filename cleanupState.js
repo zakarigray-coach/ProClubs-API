@@ -6,6 +6,7 @@ const { StateStore } = require('./stateStore');
 const CLEANUP_KEY = 'storyCleanup:2026-09-29-v1';
 const DATA_DIRECTORY = process.env.RT_DATA_DIR || (process.env.RAILWAY_ENVIRONMENT ? '/data' : path.join(__dirname, '.data'));
 const STATE_PATH = path.join(DATA_DIRECTORY, 'rt-football-media-state.json');
+if (process.env.DISCORD_GUILD_ID === '1524828767426707587') require('./retirePendingStories').retirePendingStories(STATE_PATH);
 const store = new StateStore(STATE_PATH);
 
 function countBy(records, selector) {
@@ -135,3 +136,4 @@ try {
   console.error('RT story cleanup failed:', error.stack || error.message);
   process.exitCode = 1;
 }
+
