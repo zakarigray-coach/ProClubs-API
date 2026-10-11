@@ -145,7 +145,7 @@ class Reporter:
                     previous=json.loads(held['attempts'])
                     drafts=[a for a in previous if isinstance(a.get('article'),dict)]
                     if drafts:
-                        packet['recovery']={'source_hash':held['source_hash'],'article':drafts[-1]['article'],'error':drafts[-1].get('error','Complete all current checks.')}
+                        packet['recovery']={'source_hash':held['source_hash'],'article':drafts[-1]['article'],'error':'\n'.join(a['error'] for a in drafts if a.get('error')) or 'Complete all current checks.'}
                 # Release the write lock while the remote sports desk works.
                 conn.commit()
                 title,body=self.writer.write(packet)

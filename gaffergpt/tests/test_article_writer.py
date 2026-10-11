@@ -133,3 +133,13 @@ class NewspaperQualityTests(unittest.TestCase):
         for body in ('TraapxLit scored seven goals and two assists.\n\nHis seven goals earned the award.',
                      'TraapxLit scored seven goals. The week’s ledger presents a mixture of high-scoring outings.'):
             with self.assertRaises(ValueError):check_feature_quality({'body':body},self.packet)
+
+class PersistentWritingRulesTests(unittest.TestCase):
+    def test_generic_first_sentence_is_rejected_even_with_star_in_paragraph(self):
+        from gaffergpt.article_writer import check_feature_quality
+        packet={'management':{'player_name':'TraapxLit'},'observations':{'player_statistics':{'Practice':[{'player':'TraapxLit','goals':7}]}}}
+        with self.assertRaises(ValueError):check_feature_quality({'body':'Birmingham played a busy week. TraapxLit scored seven goals.'},packet)
+    def test_compact_record_and_policy_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_finished_prose,check_feature_quality
+        with self.assertRaises(ValueError):check_finished_prose({'title':'Practice week','body':'Birmingham finished 2–1–1. '+'A training fixture offered useful football. '*10},{})
+        with self.assertRaises(ValueError):check_feature_quality({'body':'The matches ended without drawing larger conclusions.'},{})

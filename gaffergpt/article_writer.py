@@ -177,6 +177,7 @@ class SportsWriter(OpenAICoach):
             'Official fixtures and practice must have explicit separate context. Scores use Birmingham first unless clearly labelled away. '
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
             'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status.')
+        brief['writing_requirements']=brief['desk_task']
         async def draft_and_edit():
             recovery=clean.get('recovery') or {}
             if recovery.get('source_hash')==sheet['source_hash']:
@@ -232,6 +233,7 @@ def feature_facts(packet):
     facts=fact_registry(packet)
     focused={k:v for k,v in facts.items() if '_player_' not in k}
     award=(packet.get('management') or {}).get('player_name')
+    if award:focused['award']=f'{award} is Birmingham City’s Player of the Week.'
     for kind,players in packet.get('observations',{}).get('player_statistics',{}).items():
         candidates=sorted(players,key=lambda p:(p['player']==award,p.get('assists',0),p.get('goals',0)),reverse=True)[:2]
         for player in candidates:
@@ -251,7 +253,7 @@ def feature_facts(packet):
 
 def check_feature_quality(article,packet):
     body=article['body']
-    banned=r'\bledger\b|supplied (?:match )?records|statistical contribution|recorded practice results|named weekly award|defined, match-by-match numbers|other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff'
+    banned=r'\bledger\b|supplied (?:match )?records|statistical contribution|recorded practice results|named weekly award|defined, match-by-match numbers|other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff|without drawing larger conclusions|firm headline|headline return|file away'
     bad=re.search(banned,body,re.I)
     if bad:
         raise ValueError('Remove this exact wording: '+repr(bad[0])+'. Delete the policy explanation or roster heading; end on the football story.')
@@ -264,20 +266,21 @@ def check_feature_quality(article,packet):
         preceding=[(p.start(),name) for name in names for p in re.finditer(re.escape(name),body[:match.start()])]
         subject=max(preceding)[1] if preceding else 'Birmingham City'
         claim=(subject,match[0].lower())
-        if claim in seen:raise ValueError('Repeated player statistic; state each figure once.')
+        if claim in seen:raise ValueError(f'Repeated statistic for {subject}: {match[0]}. State this figure once.')
         seen.add(claim)
     if len({name for name in names if name in body})>3:
         raise ValueError('Highlight at most three players; remove the roster roll-call')
     award=(packet.get('management') or {}).get('player_name')
     winner=next((p for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
-    lead=body.split('\n\n')[0]
-    if winner and winner.get('goals',0)>=3 and award not in lead:
+    lead=re.split(r'(?<=[.!?])\s+',body,1)[0]
+    if winner and winner.get('goals',0)>=3 and (award not in lead or not re.search(r'\bgoals?\b',lead,re.I)):
         raise ValueError('Lead with the award winner’s scoring and connect it to the contrast in results')
 
 def check_finished_prose(article,facts):
     title,body=article.get('title',''),article.get('body','')
     if not title.strip() or len(body.split())<40:
         raise ValueError('Return a complete headline and developed article')
+    if re.search(r'\b\d+[–-]\d+[–-]\d+\b',body):raise ValueError('Spell out wins, draws and defeats; remove the compact record notation.')
     if '[[' in title+body or ']]' in title+body:
         raise ValueError('Unresolved factual placeholders')
     if re.search(r'\b(?:one|1) (?:goals|assists|appearances)\b|\bthe the\b|\bThose the\b|\ba commanding the\b',body,re.I):
