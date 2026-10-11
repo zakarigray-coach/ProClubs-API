@@ -24,6 +24,10 @@ function mplName(name) {
   });
 }
 
+function leagueChannelKeys(teamKey, suffix) {
+  return teamKey==='crownfc' ? ['mlpc-'+suffix] : ['mpl-'+suffix,'ml1-'+suffix];
+}
+
 function persist(file, journal) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file + '.tmp', JSON.stringify(journal, null, 2));
@@ -119,4 +123,4 @@ async function runBirminghamRebrand(client, options = {}) {
   return result;
 }
 
-module.exports = { scrubDescription, mplName, directorySnapshot, runBirminghamRebrand };
+module.exports = { scrubDescription, mplName, leagueChannelKeys, directorySnapshot, runBirminghamRebrand };

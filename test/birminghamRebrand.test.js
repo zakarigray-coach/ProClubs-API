@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const { Collection }=require('discord.js');
-const { scrubDescription, mplName, runBirminghamRebrand }=require('../birminghamRebrand');
+const { scrubDescription, mplName, leagueChannelKeys, runBirminghamRebrand }=require('../birminghamRebrand');
 
 test('description cleanup removes the old club without changing unrelated names',()=>{
   assert.equal(scrubDescription('Home of Birmingham City and CrownFC.'),'Home of Birmingham City.');
@@ -79,4 +79,10 @@ test('cleanup cannot touch another server',async()=>{
   const result=await runBirminghamRebrand({user:{id:'bot'},guilds:{fetch:()=>{throw Error('Must not fetch');}}},
     {env:{DISCORD_GUILD_ID:'other'}});
   assert.equal(result.status,'scope-mismatch');
+});
+
+ test('Birmingham lookups accept both sides of the rename while CrownFC keeps its own channels',()=>{
+  assert.deepEqual(leagueChannelKeys('birmingham','stats'),['mpl-stats','ml1-stats']);
+  assert.deepEqual(leagueChannelKeys('birmingham','transactions'),['mpl-transactions','ml1-transactions']);
+  assert.deepEqual(leagueChannelKeys('crownfc','stats'),['mlpc-stats']);
 });

@@ -1,3 +1,4 @@
+const { leagueChannelKeys } = require('./birminghamRebrand');
 const pepBridge = require('./pepBridge');
 const {
   Client,
@@ -1763,17 +1764,17 @@ async function startBot() {
   }
 
   function transactionChannelFor(guild, teamKey) {
-    const key = teamKey === 'crownfc' ? 'mlpc-transactions' : 'mpl-transactions';
+    const keys = leagueChannelKeys(teamKey, 'transactions');
     return guild.channels.cache.find(channel =>
       [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type) &&
-      String(channel.name || '').toLowerCase().includes(key)
+      keys.some(key => String(channel.name || '').toLowerCase().includes(key))
     );
   }
 
   function statsChannelFor(guild, teamKey) {
-    const key = teamKey === 'crownfc' ? 'mlpc-stats' : 'mpl-stats';
+    const keys = leagueChannelKeys(teamKey, 'stats');
     return guild.channels.cache.find(channel => channel.isTextBased() &&
-      String(channel.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '') === key);
+      keys.includes(String(channel.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '')));
   }
 
   function managementLogChannelFor(guild) {
@@ -3821,15 +3822,15 @@ async function startBot() {
       const plans = [
         {
           prefix: 'mpl', category: ml1Category, roleId: birminghamRoleId,
-          renames: {'mpl-announcements':'🚨・mpl-announcements','mpl-locker-room':'⚽・mpl-locker-room','mpl-match-results':'📅・mpl-match-center','mpl-standings-table':'🏆・mpl-league-center','mpl-signing-announcements':'✍️・ml1-transactions','mpl-team-stats':'📊・ml1-stats'},
+          renames: {'mpl-announcements':'🚨・mpl-announcements','mpl-locker-room':'⚽・mpl-locker-room','mpl-match-results':'📅・mpl-match-center','mpl-standings-table':'🏆・mpl-league-center','mpl-signing-announcements':'✍️・mpl-transactions','mpl-team-stats':'📊・mpl-stats'},
           archive: ['mpl-signups','mpl-schedule','mpl-lineups','mpl-game-live-streams','mpl-player-stats'],
           channels: [
             ['mpl-announcements','🚨・mpl-announcements','Official Birmingham City MPL club announcements, deadlines and management updates.'],
             ['mpl-locker-room','⚽・mpl-locker-room','Birmingham City MPL squad room for players, staff, match discussion and team communication.'],
             ['mpl-match-center','📅・mpl-match-center','Birmingham City MPL fixtures, confirmed lineups, matchday notices, live-match links and official results.'],
             ['mpl-league-center','🏆・mpl-league-center','Official MPL standings, league information and competition updates for Birmingham City.'],
-            ['mpl-transactions','✍️・ml1-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
-            ['mpl-stats','📊・ml1-stats','Birmingham City MPL team and player statistics, records and season performance.'],
+            ['mpl-transactions','✍️・mpl-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
+            ['mpl-stats','📊・mpl-stats','Birmingham City MPL team and player statistics, records and season performance.'],
             ['mpl-highlights','🎬・mpl-highlights','Birmingham City MPL match highlights, goals, saves and featured game clips.'],
             ['romano-times-news','🗞️・romano-times-news','Read-only Romano Times coverage forwarded from the MPL Around the League news channel.']
           ]
