@@ -168,3 +168,13 @@ class SourceOutlineTests(unittest.TestCase):
         from gaffergpt.tests.test_report_verification import fixture,stat
         packet={'matches':[fixture(1,own=3),fixture(2,own=2)],'statistics':[stat(1,'Zak','goals',3),stat(2,'Zak','rating',7)],'management':{'player_name':'Zak','player_evidence':'Confirmed'}}
         self.assertIsNone(verified_short_outline(packet,build_fact_sheet(packet)))
+
+class NewspaperStructureTests(unittest.TestCase):
+    def test_score_and_metric_bullet_article_is_rejected_but_connected_story_passes(self):
+        from gaffergpt.article_writer import check_feature_quality
+        packet={'matches':[{}, {}, {}, {}],'observations':{'player_statistics':{}}}
+        flat='TraapxLit scored seven goals.\n\nBirmingham won two games.\n\nBirmingham drew one game.\n\nDaddyGray10420 had six assists.\n\nThe award went to TraapxLit.'
+        with self.assertRaisesRegex(ValueError,'isolated statistics'):
+            check_feature_quality({'body':flat},packet)
+        story='TraapxLit’s seven goals were the individual highlight of Birmingham City’s mixed practice results. The club finished with two wins, a draw and a defeat.\n\nThe contrasting results gave the scoring contribution its context. DaddyGray10420 also contributed six assists, alongside three goals.\n\nTraapxLit was Birmingham’s Player of the Week. The individual returns offered a brighter picture than the uneven team results.'
+        check_feature_quality({'body':story},packet)

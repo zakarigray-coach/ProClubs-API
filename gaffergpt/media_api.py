@@ -30,11 +30,13 @@ def report_payload(db, report_id):
                 'matches':facts,'published':False}
 
 
-def create_app(db, secret):
+def create_app(db, secret, bot=None):
     if len(secret)<32:
         raise ValueError('Reporter connection needs a strong configured secret.')
     @web.middleware
     async def authenticate(request, handler):
+        if bot is not None and request.path.startswith('/planner/'):
+            return await handler(request)
         supplied=request.headers.get('Authorization','')
         if not hmac.compare_digest(supplied.encode(),('Bearer '+secret).encode()):
             return web.json_response({'error':'Unauthorized'},status=401)
@@ -73,11 +75,14 @@ def create_app(db, secret):
     app.router.add_get('/reports/{report_id}/photo',photo)
     app.router.add_get('/health',health)
     app.router.add_get('/reports/{report_id}',report)
+    if bot is not None:
+        from .session_dashboard import install_dashboard
+        install_dashboard(app,bot)
     return app
 
 
-async def start_api(db, secret, port):
-    runner=web.AppRunner(create_app(db,secret),access_log=None)
+async def start_api(db, secret, port, bot=None):
+    runner=web.AppRunner(create_app(db,secret,bot),access_log=None)
     await runner.setup()
     try:
         await web.TCPSite(runner,'::',port).start()

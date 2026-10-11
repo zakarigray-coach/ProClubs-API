@@ -201,7 +201,7 @@ class SportsWriter(OpenAICoach):
         if event.get('report_type')=='Cup':
             brief['writing_requirements']+=' This is a separate CUP EDITION event report, not a weekly league or practice article. Lead with the strongest verified cup story. Organise around confirmed stages when available; unknown stages do not establish chronology. Match scores exclude penalty kicks. Aggregates and shootouts must be explicitly labelled and never added to player goals. Unknown progression means no claimed qualification, elimination or trophy. Use Cup Standout for the management-selected featured player; use Player of the Tournament only when explicitly confirmed with scope in event metadata. Do not call them Player of the Week. The Pre-Season Cup shows these verified results ahead of the MPL season; do not invent predictions, momentum or chemistry.'
         if len(sheet['fixtures'])<=4 and not sheet['narrative_evidence'] and not sheet['quotes']:
-            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Write a concise 120–220-word piece, shorter if necessary; do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play. End with a concrete selected result or confirmed award. A lesson, outlook, coaching recommendation, cause-and-effect summary or forecast is not required; never invent one to manufacture a conclusion.'
+            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Aim for 200–320 words when four fixtures and meaningful player contributions support a developed story; write less if the evidence is genuinely thin. Four fixtures are not automatically thin evidence. Do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play. Write connected newspaper paragraphs, not one result or metric per paragraph. Integrate the confirmed award with its statistical case, then close on the supported contrast between individual output and team results. A lesson, outlook, coaching recommendation, cause-and-effect summary or forecast is not required; never invent one to manufacture a conclusion.'
         award=(clean.get('management') or {}).get('player_name')
         winner=next((p for ps in clean.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
         if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3:
@@ -211,7 +211,7 @@ class SportsWriter(OpenAICoach):
             recovery=clean.get('recovery') or {}
             outline=verified_short_outline(clean,sheet)
             if outline and recovery:
-                draft=outline;feedback=['Use this clean source-backed outline instead of the rejected draft. Polish its rhythm and grammar without adding motives, causal conclusions or inferred chronology. Keep the concrete ending.']
+                draft=outline;feedback=['Use this clean source-backed outline instead of the rejected draft. Use the outline only as a factual skeleton, never as the finished paragraph structure. Develop a connected sports news story: a player-led opening, contrasting results, a selective supporting contribution, and a closing observation grounded in those results. Combine isolated score and metric lines into paragraphs. Integrate the award rather than making it a detached final sentence. Do not add motives, causal conclusions or inferred chronology.']
                 self._local.attempts.append({'state':'source_outline','source_hash':sheet['source_hash']})
             elif (recovery.get('source_hash')==sheet['source_hash'] or recovery.get('source_identity')==source_identity(sheet)):
                 draft=recovery['article'];feedback=[recovery.get('error','Complete every current check.')]
@@ -225,6 +225,7 @@ class SportsWriter(OpenAICoach):
                     'Use British English, natural football language, proper grammar and selective statistics. '
                     'Do not repeat award figures, names or result summaries. Each paragraph must add something. '
                     'Never invent a new fact while editing. Keep the strongest supported story in the opening. '
+                    'Combine related facts into connected paragraphs; never output a sequence of isolated score and metric sentences. '
                     'Read the final sentences aloud internally. Return finished title/body JSON.')
                 edited=json.loads(await self.advise(json.dumps(editing,ensure_ascii=False)))
                 edited={'title':edited['title'].strip(),'body':edited['body'].strip()}
@@ -304,6 +305,12 @@ def check_feature_quality(article,packet):
     bad=re.search(banned,body,re.I)
     if bad:
         raise ValueError('Remove this exact wording: '+repr(bad[0])+'. Delete the policy explanation or roster heading; end on the football story.')
+    paragraphs=[p.strip() for p in body.split('\n\n') if p.strip()]
+    fixtures=packet.get('source_matches',packet.get('matches',[]))
+    if len(fixtures)>=3 and len(paragraphs)>=4:
+        isolated=sum(len(re.split(r'(?<=[.!?])\s+',p))==1 and bool(re.search(r'\d|\b(?:two|three|four|five|six|seven)\b',p,re.I)) for p in paragraphs)
+        if isolated>=3 and isolated>len(paragraphs)/2:
+            raise ValueError('The article reads like isolated statistics. Connect related results and contributions into developed newspaper paragraphs; do not add unsupported action or padding.')
     sentences=[re.sub(r'\s+',' ',sentence.strip()).casefold() for sentence in re.split(r'(?<=[.!?])\s+',body)]
     repeated={sentence for sentence in sentences if re.search(r'\d|\b(?:seven|six|three|two)\b',sentence) and sentences.count(sentence)>1}
     if repeated:raise ValueError('Repeated statistical sentences; state each contribution once.')

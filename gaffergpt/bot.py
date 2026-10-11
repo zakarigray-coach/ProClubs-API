@@ -28,6 +28,7 @@ from .article_writer import SportsWriter, check_finished_prose, check_feature_qu
 from .weekly_intake import save_submission, save_photo, content as report_content
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
+from .session_planner import SessionService, RSVPView, register_sessions
 from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
@@ -563,7 +564,9 @@ class GafferBot(discord.Client):
         self.worker=None
         self.notebook_worker=None
         self.media_runner=None
+        self.sessions=SessionService(self)
         self.register_commands()
+        register_sessions(self)
 
     def manager(self, interaction):
         if interaction.user.id==self.config.owner_id:
@@ -572,7 +575,10 @@ class GafferBot(discord.Client):
 
     async def setup_hook(self):
         if self.config.reporter_secret:
-            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
+            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port,self)
+        for planned in self.sessions.store.list():
+            if planned['message_id']:
+                self.add_view(RSVPView(self.sessions,planned['session_id']),message_id=int(planned['message_id']))
         for batch in self.db.rows('SELECT batch_id FROM session_reviews WHERE message_id IS NOT NULL'):
             self.add_view(SessionReviewView(self,batch['batch_id']))
         for m in self.db.rows('SELECT match_id FROM matches'):
@@ -649,6 +655,7 @@ class GafferBot(discord.Client):
                 await self.scheduler.tick_tests(now)
                 await self.recover_recaps()
                 await self.pending_reviews()
+                await self.sessions.tick()
             except Exception as error:
                 log.error('Background check failed: %s',type(error).__name__)
             await asyncio.sleep(30)
