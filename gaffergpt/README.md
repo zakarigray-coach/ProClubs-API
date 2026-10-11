@@ -309,3 +309,8 @@ The pending conversation and confirmation buttons survive restarts. Send `weekly
 in a private DM to start early. While waiting for recap replies, prefix tactical requests with `Tactics:`.
 Photos submitted as recaps are source material, not automatically featured player photos.
 NACL and PCT are not scraped. Dates, venue and scores must be present or supplied by Coach.
+
+If weekly player statistics support a comparison, Pep proposes Player of the Week with its supplied-stat
+reason in the result preview. Coach confirms the suggestion. Missing player statistics produce no award
+suggestion. The **Attach Player Photo** button on the preview or draft lets Coach send the image in DM,
+without a slash command. Recap screenshots and featured player photos are handled separately.

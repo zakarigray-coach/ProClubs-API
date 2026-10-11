@@ -154,6 +154,15 @@ class MatchSelect(discord.ui.Select):
         await interaction.response.edit_message(content=view.bot.report_summary(view.report_id),view=ReportView(view.bot,view.report_id,view.page))
 
 
+def player_photo_button(bot,report_id,context):
+    async def request_photo(interaction):
+        if interaction.user.id!=bot.config.owner_id:
+            await interaction.response.send_message('Only Coach can attach the player photo.',ephemeral=True); return
+        bot.db.set_setting('weekly_photo_awaiting',str(report_id))
+        await interaction.response.send_message('Send the selected Player of the Week photo in this DM (PNG, JPEG or WebP, up to 8 MB). This photo will accompany the draft. Say cancel photo to cancel.',ephemeral=True)
+    return Action('Attach Player Photo',f'pep:playerphoto:{context}:{report_id}',request_photo)
+
+
 class RecapConfirmView(ManagedView):
     def __init__(self,bot,report_id,request_id):
         super().__init__(bot)
@@ -166,7 +175,7 @@ class RecapConfirmView(ManagedView):
                     await interaction.response.send_message('This preview has already been used. Send your recap again to change it.',ephemeral=True); return
                 try:
                     existing=report_content(bot.db,report_id)
-                    save_submission(bot.db,report_id,interaction.user.id,bot.config.guild_id,'\n'.join(saved['lines']),existing.get('notes',''),existing.get('player_name',''),existing.get('player_evidence',''))
+                    save_submission(bot.db,report_id,interaction.user.id,bot.config.guild_id,'\n'.join(saved['lines']),existing.get('notes',''),saved.get('player_name') or existing.get('player_name',''),saved.get('player_evidence') or existing.get('player_evidence',''))
                     matches=bot.db.period_matches(bot.db.report(report_id)['week_start'],bot.db.report(report_id)['week_end'],True)
                     wanted=set(saved['lines'])
                     ids=[m['match_id'] for m in matches if m['raw_recap'] in wanted]
@@ -190,6 +199,7 @@ class RecapConfirmView(ManagedView):
             bot.db.set_setting('weekly_dm_awaiting',str(report_id))
             await interaction.response.send_message('Reply to Pep with the corrected recap text or photo. No new results have been saved by this button.',ephemeral=True)
         self.add_item(Action('Send Corrections',f'pep:recapcorrect:{request_id}',change))
+        self.add_item(player_photo_button(bot,report_id,f'preview:{request_id}'))
 
 
 class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes'):
@@ -300,6 +310,7 @@ class DraftView(ManagedView):
                 await interaction.response.send_message('This week was skipped.',ephemeral=True); return
             bot.db.execute("UPDATE weekly_reports SET status='selecting',article=NULL,observations=NULL WHERE report_id=?",(report_id,))
             await interaction.response.send_message(bot.report_summary(report_id),view=ReportView(bot,report_id),ephemeral=True)
+        self.add_item(player_photo_button(bot,report_id,'draft'))
         self.add_item(Action('Approve Draft (save only)',f'gaffer:approve:{report_id}',approve,discord.ButtonStyle.success))
         self.add_item(Action('Change Selection',f'gaffer:change:{report_id}',change))
 
@@ -534,6 +545,13 @@ class GafferBot(discord.Client):
         if message.guild is None:
             if message.author.id!=self.config.owner_id:
                 return
+            photo_report=self.db.setting('weekly_photo_awaiting','')
+            if photo_report.isdigit():
+                if message.content.strip().lower()=='cancel photo':
+                    self.db.set_setting('weekly_photo_awaiting','')
+                    await message.reply('Photo attachment cancelled.',mention_author=False); return
+                if getattr(message,'attachments',[]):
+                    await self.attach_weekly_photo(message,int(photo_report));return
             if message.content.strip().lower() in ('weekly recap','weekly report','prepare weekly recap'):
                 a,b=week_window(datetime.now(timezone.utc))
                 report=self.db.open_report(a,b,self.config.owner_id)
@@ -561,6 +579,25 @@ class GafferBot(discord.Client):
             self.db.register_player(message.author.id,message.author.name,*parsed)
             await message.reply(f'Saved your preferred position: {parsed[0]}; role: {parsed[1]}.',mention_author=False)
 
+    async def attach_weekly_photo(self,message,report_id):
+        attachment=message.attachments[0]
+        if attachment.size>8*1024*1024:
+            await message.reply('Photo must be 8 MB or smaller.',mention_author=False); return
+        try:
+            report=self.db.report(report_id)
+            was_draft=report and report['status']=='draft'
+            save_photo(self.db,report_id,message.author.id,await attachment.read())
+            self.db.set_setting('weekly_photo_awaiting','')
+            if was_draft:
+                self.db.confirm_report(report_id)
+                article=await asyncio.to_thread(self.reporter.generate,report_id)
+                saved=report_content(self.db,report_id)
+                await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt'),discord.File(io.BytesIO(saved['photo']),filename=f'Player_of_the_Week_{report_id}.{saved["photo_extension"]}')],view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await message.reply('Player photo saved. Tap Confirm Results & Draft on the recap preview to include it with your article.',mention_author=False)
+        except (ValueError,RuntimeError,aiohttp.ClientError) as error:
+            await message.reply('Could not attach that photo. '+(str(error) if isinstance(error,ValueError) else 'Please try again.'),mention_author=False)
+
     async def read_weekly_dm(self,message,report):
         if not self.recap_reader:
             await message.reply('Photo/text reading is unavailable. Use Add Results / Notes for now; your recap has not been imported.',mention_author=False); return
@@ -581,8 +618,9 @@ class GafferBot(discord.Client):
                 parsed=await self.recap_reader.extract(message.content,images,[report['week_start'],report['week_end']])
             if parsed['questions']:
                 await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+'\nPlease resend the complete recap with those details. Nothing imported yet.',mention_author=False); return
-            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':message.content,'used':False}))
-            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+'\n'.join(parsed['lines'])[:1600],view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':message.content,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
+            recommendation=(f'\n\nSuggested Player of the Week: {parsed["player_name"]} — {parsed["player_evidence"]}\nConfirming approves this suggestion. Send corrections to choose someone else.' if parsed.get('player_name') else '\n\nNo Player of the Week suggestion: the submitted stats do not support a comparison.')
+            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+'\n'.join(parsed['lines'])[:1300]+recommendation,view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
         except (ValueError,RuntimeError,TimeoutError,aiohttp.ClientError) as error:
             log.warning('Weekly recap reading failed: %s',type(error).__name__)
             await message.reply('I could not read that recap reliably. Please resend it as clearer text or a clearer photo. Nothing imported.',mention_author=False)

@@ -59,3 +59,18 @@ class DMWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_message(message)
         self.assertEqual(self.bot.recap_reader.extract.call_args.args[1][0][1],'image/png')
         self.assertFalse(self.bot.db.rows('SELECT * FROM matches'))
+
+class PhotoAndAwardTests(DMWorkflowTests):
+    async def test_player_suggestion_confirmed_and_photo_attached(self):
+        self.bot.recap_reader.extract.return_value={'lines':['2026-10-15 | Official Home | Chelsea | 3-1'],'questions':[],'player_name':'Zak','player_evidence':'Suggestion: 2 assists in the submitted week.'}
+        message=self.message();await self.bot.on_message(message)
+        self.assertIn('Suggested Player of the Week: Zak',message.reply.call_args.args[0])
+        view=message.reply.call_args.kwargs['view']
+        interaction=SimpleNamespace(user=SimpleNamespace(id=1),response=SimpleNamespace(send_message=AsyncMock(),defer=AsyncMock()),followup=SimpleNamespace(send=AsyncMock()))
+        await view.children[2].callback(interaction)
+        message.id=100;message.content='';message.attachments=[SimpleNamespace(size=15,read=AsyncMock(return_value=b'\x89PNG\r\n\x1a\nphoto'))]
+        await self.bot.on_message(message)
+        owner=SimpleNamespace(send=AsyncMock());self.bot.fetch_user=AsyncMock(return_value=owner)
+        await view.children[0].callback(interaction)
+        self.assertEqual(len(owner.send.call_args.kwargs['files']),2)
+        self.assertIn('Zak — Suggestion: 2 assists',self.bot.db.report(self.rid)['article'])

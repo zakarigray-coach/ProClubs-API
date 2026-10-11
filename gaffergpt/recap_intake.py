@@ -12,7 +12,24 @@ Only transcribe facts visible in the supplied material. MPL Birmingham is Birmin
 Do not infer home/away from club order, or official status from EA League/Friendly labels.
 The owner is submitting their weekly league recap, but practice entries may also appear.
 Do not infer missing dates from the reporting window. Never invent facts, quotes or statistics.
+Also return recommended_player and player_evidence, both strings or null.
+Suggest Player of the Week only when explicit player statistics for this submitted week support a comparison.
+Use only the supplied player names and numerical statistics in player_evidence; label the choice a suggestion.
+Do not treat a single-match rating as a weekly rating, invent totals or assume missing stats are zero.
+If the recap has no usable player comparison, leave both null.
 questions is an array of short questions for missing/unclear facts. Do not diagnose player performance.'''
+
+RESULT_PROPERTIES={
+    'date':{'type':['string','null']},
+    'type':{'type':['string','null'],'enum':['Official Home','Official Away','Practice',None]},
+    'opponent':{'type':['string','null']},
+    'birmingham_score':{'type':['integer','null']},'opponent_score':{'type':['integer','null']}
+}
+OUTPUT_SCHEMA={'type':'object','additionalProperties':False,'properties':{
+    'results':{'type':'array','items':{'type':'object','additionalProperties':False,'properties':RESULT_PROPERTIES,'required':list(RESULT_PROPERTIES)}},
+    'questions':{'type':'array','items':{'type':'string'}},
+    'recommended_player':{'type':['string','null']},'player_evidence':{'type':['string','null']}
+},'required':['results','questions','recommended_player','player_evidence']}
 
 class RecapReader:
     def __init__(self, coach): self.coach=coach
@@ -21,10 +38,15 @@ class RecapReader:
         for data,mime in images:
             inputs.append({'type':'input_image','image_url':f'data:{mime};base64,'+base64.b64encode(data).decode()})
         payload={'model':self.coach.model,'instructions':INSTRUCTIONS,'input':[{'role':'user','content':inputs}],
-                 'text':{'format':{'type':'json_object'}},'max_output_tokens':3500,'reasoning':{'effort':'low'},'store':False}
+                 'text':{'format':{'type':'json_schema','name':'weekly_recap','strict':True,'schema':OUTPUT_SCHEMA}},'max_output_tokens':3500,'reasoning':{'effort':'low'},'store':False}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
             async with session.post('https://api.openai.com/v1/responses',headers={'Authorization':'Bearer '+self.coach.key},json=payload) as response:
-                if response.status!=200: raise RuntimeError(f'Recap reader HTTP {response.status}')
+                if response.status!=200:
+                    detail=await response.json()
+                    param=detail.get('error',{}).get('param')
+                    # Parameter name is safe diagnostic metadata; never log submitted text or provider bodies.
+                    safe_param=param if isinstance(param,str) and len(param)<100 and all(c.isalnum() or c in '._[]' for c in param) else 'unknown'
+                    raise RuntimeError(f'Recap reader HTTP {response.status}; parameter={safe_param}')
                 result=json.loads(OpenAICoach.extract(await response.json()))
         return validate_extraction(result)
 
@@ -43,4 +65,7 @@ def validate_extraction(result):
     if not isinstance(extra,list) or any(not isinstance(q,str) for q in extra): raise ValueError('Invalid clarification questions.')
     questions.extend(extra)
     if not lines and not questions: questions=['Please send a recap that includes opponents, scores, dates and home/away.']
-    return {'lines':lines,'questions':list(dict.fromkeys(questions))[:5]}
+    player=result.get('recommended_player');evidence=result.get('player_evidence')
+    if not (isinstance(player,str) and isinstance(evidence,str) and player.strip() and evidence.strip()):
+        player=evidence=''
+    return {'lines':lines,'questions':list(dict.fromkeys(questions))[:5], 'player_name':player[:100],'player_evidence':evidence[:500]}
