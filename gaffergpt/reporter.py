@@ -15,7 +15,7 @@ def match_label(m):
     other='?' if m['opponent_score'] is None else m['opponent_score']
     if m['venue']=='Away' and m['match_type']=='Official':
         return f'{opponent} {other}–{own} Birmingham City — Away'
-    suffix='Practice' if m['match_type']=='Practice' else m['venue']
+    suffix='Practice' if m['match_type']=='Practice' else 'Cup' if m['match_type']=='Cup' else m['venue']
     return f'Birmingham City {own}–{other} {opponent} — {suffix}'
 
 
@@ -51,7 +51,7 @@ class Reporter:
             statistics=[]
             for m in matches:
                 statistics.extend(dict(r) for r in conn.execute('SELECT * FROM match_statistics WHERE match_id=?',(m['match_id'],)))
-            analysis_matches=matches if report['include_development'] else [m for m in matches if m['match_type']=='Official']
+            analysis_matches=matches if report['include_development'] else [m for m in matches if m['match_type'] in ('Official','Cup')]
             observations=self.analyst.analyze(analysis_matches,statistics)
             official=[m for m in matches if m['match_type']=='Official']
             practices=[m for m in matches if m['match_type']=='Practice']
@@ -109,7 +109,7 @@ class Reporter:
                     lines.append(f"{c['subject']} — {c['metric'].replace('_',' ')}: {c['before']:g} to {c['after']:g} {c['unit'] or ''} between selected {c['from_type'].lower()} match #{c['from_match']} and {c['to_type'].lower()} match #{c['to_match']}.".strip())
                 lines.append('Missing metrics are not treated as zero. Match conditions, minutes played and positions can affect these comparisons.')
             player_sections={}
-            for kind in ('Official','Practice'):
+            for kind in ('Official','Cup','Practice'):
                 if kind=='Practice' and not report['include_development']:continue
                 ids={m['match_id'] for m in matches if m['match_type']==kind}
                 players=player_totals([s for s in statistics if s['match_id'] in ids and s.get('source')=='PCT+ Excel'])
@@ -130,10 +130,12 @@ class Reporter:
                     "SELECT title,article FROM weekly_reports WHERE report_id<>? AND article IS NOT NULL ORDER BY report_id DESC LIMIT 6",(report_id,))]
                 packet={'period':period_label(report),'reporter':editorial['reporter'],'style':editorial['style'],
                         'matches':[{k:m.get(k) for k in ('played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')} for m in matches
-                                   if m['match_type']=='Official' or report['include_development']],
+                                   if m['match_type'] in ('Official','Cup') or report['include_development']],
                         'observations':observations,'management':{k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None,'recent_articles':recent}
-                included=[m for m in matches if m['match_type']=='Official' or report['include_development']]
+                included=[m for m in matches if m['match_type'] in ('Official','Cup') or report['include_development']]
                 included_ids={m['match_id'] for m in included}
+                from .competitions import snapshot
+                packet['competition_context']=snapshot(self.db,report_id)
                 packet['source_matches']=included
                 packet['statistics']=[s for s in statistics if s['match_id'] in included_ids]
                 packet['excluded_names']=[r['opponent'] for r in conn.execute(
@@ -160,7 +162,7 @@ class Reporter:
                 old_content={k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None
                 if (dict(current_content) if current_content else None)!=old_content:
                     raise ValueError('Management notes or award selection changed during writing; report held for fresh verification.')
-                if current['status']!='confirmed' or current_matches!=matches or current_stats!=statistics or current['include_development']!=report['include_development']:
+                if current['status']!='confirmed' or current_matches!=matches or current_stats!=statistics or current['include_development']!=report['include_development'] or snapshot(self.db,report_id)!=packet.get('competition_context'):
                     raise ValueError('Report facts changed during writing; regenerate using the latest selections.')
                 article='\n'.join(['RT FOOTBALL MEDIA',title,f"By {editorial['reporter']} | RT Football Media",
                                    period_label(report),'DRAFT — awaiting Coach review','',body])

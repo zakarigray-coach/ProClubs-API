@@ -12,16 +12,20 @@ def report_payload(db, report_id):
             raise ValueError('No current review draft is available for that report.')
         report=dict(row)
         matches=[dict(r) for r in conn.execute('SELECT m.* FROM report_matches rm JOIN matches m USING(match_id) WHERE report_id=? ORDER BY played_at,match_id',(report_id,))]
-        if not matches or any(not m['report_eligible'] or m['match_type'] not in ('Official','Practice') for m in matches):
+        if not matches or any(not m['report_eligible'] or m['match_type'] not in ('Official','Cup','Practice') for m in matches):
             raise ValueError('Report selections need review.')
         if not report['include_development']:
-            matches=[m for m in matches if m['match_type']=='Official']
+            matches=[m for m in matches if m['match_type'] in ('Official','Cup')]
         facts=[]
         for m in matches:
             facts.append({k:m[k] for k in ('match_id','played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')})
         conn.execute(CONTENT_SCHEMA)
         photo=conn.execute('SELECT photo_extension FROM weekly_report_content WHERE report_id=? AND photo IS NOT NULL',(report_id,)).fetchone()
-        return {'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
+        from .competitions import snapshot
+        context=snapshot(db,report_id)
+        from .cup_cover import report_covers
+        covers=report_covers(db,report_id) if context and context['event']['report_type']=='Cup' else []
+        return {'competition_context':context,'cover_count':len(covers),'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
                 'status':report['status'],'week_start':report['week_start'],'week_end':report['week_end'],
                 'matches':facts,'published':False}
 
@@ -55,6 +59,17 @@ def create_app(db, secret):
             return web.Response(body=saved['photo'],content_type=mime,headers={'Cache-Control':'no-store'})
         except (ValueError,TypeError,KeyError):
             return web.json_response({'error':'Photo unavailable'},status=404)
+    async def cover(request):
+        try:
+            from .cup_cover import report_covers
+            rid=int(request.match_info['report_id']);index=int(request.match_info['index'])
+            report_payload(db,rid)
+            pages=report_covers(db,rid)
+            if index<0 or index>=len(pages):raise ValueError('Unknown card')
+            return web.Response(body=pages[index],content_type='image/png',headers={'Cache-Control':'no-store'})
+        except (ValueError,TypeError):
+            return web.json_response({'error':'Cover unavailable'},status=404)
+    app.router.add_get('/reports/{report_id}/covers/{index}',cover)
     app.router.add_get('/reports/{report_id}/photo',photo)
     app.router.add_get('/health',health)
     app.router.add_get('/reports/{report_id}',report)

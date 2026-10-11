@@ -179,10 +179,16 @@ class SportsWriter(OpenAICoach):
         brief['verified_facts']=feature_facts(clean)
         if clean.get('period'):brief['verified_facts']['report_period']=clean['period']
         brief['fixtures']=sheet['fixtures']
+        event=(clean.get('competition_context') or {}).get('event',{})
+        if event.get('report_type')=='Cup':
+            brief['competition_context']=clean['competition_context']
+            brief['verified_event_facts']=[f for f in sheet['facts'].values() if f['kind']=='event']
+            brief['verified_facts']['cup_event_metadata']=json.dumps(brief['verified_event_facts'],ensure_ascii=False)
         brief['desk_task']=('Write complete natural sentences, no placeholders. Find the strongest evidenced football story. '
             'Prefer the standout player and contrasting results when supported. Do not force a player angle when another story is stronger. '
             'Default 350–550 words, shorter for thin evidence. Pick telling figures; no stat dump, roster roll-call or padding. '
             'Explain confirmed recognition once. Spell out wins/draws/defeats rather than compressed record notation. '
+            'Whenever using a match score, name that specific opponent in the SAME sentence, including the lead. Do not repeat the same score elsewhere. '
             'No derived totals beyond supplied facts. No invented match events, emotions, chemistry, stakes or chronological transitions. '
             'Official fixtures and practice must have explicit separate context. Scores use Birmingham first unless clearly labelled away. '
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
@@ -192,6 +198,8 @@ class SportsWriter(OpenAICoach):
             'Delete unsupported clauses entirely. Never turn correction notes into prose about what cannot be inferred. '
             'Do not describe absent evidence, explain the reporting process, or copy validation feedback into the article.')
         brief['writing_requirements']=brief['desk_task']
+        if event.get('report_type')=='Cup':
+            brief['writing_requirements']+=' This is a separate CUP EDITION event report, not a weekly league or practice article. Lead with the strongest verified cup story. Organise around confirmed stages when available; unknown stages do not establish chronology. Match scores exclude penalty kicks. Aggregates and shootouts must be explicitly labelled and never added to player goals. Unknown progression means no claimed qualification, elimination or trophy. Use Cup Standout for the management-selected featured player; use Player of the Tournament only when explicitly confirmed with scope in event metadata. Do not call them Player of the Week. The Pre-Season Cup shows these verified results ahead of the MPL season; do not invent predictions, momentum or chemistry.'
         if len(sheet['fixtures'])<=4 and not sheet['narrative_evidence'] and not sheet['quotes']:
             brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Write a concise 200–300-word piece, shorter if necessary; do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play.'
         award=(clean.get('management') or {}).get('player_name')
@@ -264,7 +272,10 @@ def feature_facts(packet):
     facts=fact_registry(packet)
     focused={k:v for k,v in facts.items() if '_player_' not in k}
     award=(packet.get('management') or {}).get('player_name')
-    if award:focused['award']=f'{award} is Birmingham City’s Player of the Week.'
+    if award:
+        event=(packet.get('competition_context') or {}).get('event',{})
+        label=event.get('award_label','Cup Standout') if event.get('report_type')=='Cup' else 'Player of the Week'
+        focused['award']=f'{award} is Birmingham City’s {label}.'
     for kind,players in packet.get('observations',{}).get('player_statistics',{}).items():
         candidates=sorted(players,key=lambda p:(p['player']==award,p.get('assists',0),p.get('goals',0)),reverse=True)[:2]
         for player in candidates:

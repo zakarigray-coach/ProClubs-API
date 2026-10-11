@@ -30,7 +30,10 @@ def assert_current(db,report_id,sheet):
     """A passed draft cannot be delivered against subsequently changed source rows."""
     from .report_verification import ReportHold
     report=db.report(report_id)
-    matches=[m for m in db.selected(report_id) if m['match_type']=='Official' or report['include_development']]
+    from .competitions import snapshot
+    if snapshot(db,report_id)!=sheet.get('competition_context'):
+        raise ReportHold('Competition details changed after verification. Generate a fresh checked article.')
+    matches=[m for m in db.selected(report_id) if m['match_type'] in ('Official','Cup') or report['include_development']]
     by_id={m['match_id']:m for m in matches}
     if set(by_id)!={m['match_id'] for m in sheet['fixtures']}:
         raise ReportHold('The selected matches changed after this draft. Generate a fresh checked article before approval.')

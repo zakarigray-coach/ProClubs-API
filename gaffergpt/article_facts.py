@@ -4,7 +4,7 @@ from collections import Counter
 
 def fact_registry(packet):
     facts={}
-    for kind in ('Official','Practice'):
+    for kind in ('Official','Cup','Practice'):
         rows=[m for m in packet['matches'] if m['match_type']==kind]
         if not rows:continue
         scored=[m for m in rows if m['birmingham_score'] is not None and m['opponent_score'] is not None]
@@ -27,7 +27,9 @@ def fact_registry(packet):
 
     management=packet.get('management') or {}
     if management.get('player_name'):
-        facts['award']=f"{management['player_name']} is management’s confirmed Player of the Week."
+        event=(packet.get('competition_context') or {}).get('event',{})
+        label=event.get('award_label','Cup Standout') if event.get('report_type')=='Cup' else 'Player of the Week'
+        facts['award']=f"{management['player_name']} is management’s confirmed {label}."
     return facts
 
 TOKEN=re.compile(r'\[\[([A-Za-z0-9_]+)\]\]')
@@ -62,7 +64,7 @@ def render_checked(result,facts,packet):
     raw=re.sub(r'\b\d{1,2}[–-]\d{1,2}\b',verified_score,raw)
     count_names=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty']
     allowed_counts=set()
-    for kind in ('Official','Practice'):
+    for kind in ('Official','Cup','Practice'):
         rows=[m for m in packet['matches'] if m['match_type']==kind and m['birmingham_score'] is not None and m['opponent_score'] is not None]
         if rows:
             for label,comparison in [('wins',lambda a,b:a>b),('draws',lambda a,b:a==b),('defeats',lambda a,b:a<b)]:
@@ -87,7 +89,7 @@ def phrase_registry(packet):
     phrases={}
     words=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty']
     def n(v):return words[int(v)] if int(v)==v and 0<=v<=20 else f'{v:g}'
-    for kind in ('Official','Practice'):
+    for kind in ('Official','Cup','Practice'):
         rows=[m for m in packet['matches'] if m['match_type']==kind and m['birmingham_score'] is not None and m['opponent_score'] is not None]
         if not rows:continue
         w=sum(m['birmingham_score']>m['opponent_score'] for m in rows);d=sum(m['birmingham_score']==m['opponent_score'] for m in rows);l=len(rows)-w-d

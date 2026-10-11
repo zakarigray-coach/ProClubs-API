@@ -37,6 +37,12 @@ async function sendReview(interaction, reportId, ownerId, options) {
     const photo = await centralRequest(`/reports/${reportId}/photo`, { ...options, binary: true });
     files.push({ attachment: photo, name: `Featured_Player_${reportId}.${report.photo_extension}` });
   }
+  if (Number.isInteger(report.cover_count) && report.cover_count > 0 && report.cover_count <= 6) {
+    for (let i = 0; i < report.cover_count; i++) {
+      const cover = await centralRequest(`/reports/${reportId}/covers/${i}`, { ...options, binary: true });
+      files.push({ attachment: cover, name: `RT_Cup_${reportId}_${i + 1}.png` });
+    }
+  }
   // Ephemeral download only; no public post and no legacy statistics writes.
   return interaction.editReply({
     content: `RT Football Media — Pep draft #${reportId}. Private review copy; nothing has been published.`,

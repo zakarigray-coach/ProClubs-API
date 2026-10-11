@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS matches (
  played_at TEXT NOT NULL, date_source TEXT NOT NULL DEFAULT 'message',
  opponent TEXT, birmingham_score INTEGER CHECK(birmingham_score>=0),
  opponent_score INTEGER CHECK(opponent_score>=0), raw_recap TEXT NOT NULL,
- match_type TEXT NOT NULL DEFAULT 'Unknown' CHECK(match_type IN ('Unknown','Official','Practice','Ignored')),
+ match_type TEXT NOT NULL DEFAULT 'Unknown' CHECK(match_type IN ('Unknown','Official','Cup','Practice','Ignored')),
  venue TEXT NOT NULL DEFAULT 'Unknown' CHECK(venue IN ('Unknown','Home','Away','Neutral')),
  competition TEXT, classification_status TEXT NOT NULL DEFAULT 'Unknown' CHECK(classification_status IN ('Unknown','Classified')),
  counts_official INTEGER NOT NULL DEFAULT 0 CHECK(counts_official IN (0,1)),
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS matches (
  UNIQUE(source_guild_id,source_channel_id,source_message_id,source_part),
  CHECK((match_type='Unknown' AND classification_status='Unknown' AND counts_official=0 AND report_eligible=0)
  OR (match_type='Official' AND classification_status='Classified' AND counts_official=1 AND venue IN ('Home','Away','Neutral'))
+ OR (match_type='Cup' AND classification_status='Classified' AND counts_official=0)
  OR (match_type='Practice' AND classification_status='Classified' AND counts_official=0)
  OR (match_type='Ignored' AND classification_status='Classified' AND counts_official=0 AND report_eligible=0))
 );
@@ -62,10 +63,11 @@ CREATE TABLE IF NOT EXISTS classification_history (
 CREATE TABLE IF NOT EXISTS weekly_reports (
  report_id INTEGER PRIMARY KEY, week_start TEXT NOT NULL, week_end TEXT NOT NULL,
  owner_id TEXT NOT NULL, title TEXT, article TEXT, observations TEXT,
+ report_key TEXT NOT NULL DEFAULT 'mpl-league',
  include_development INTEGER NOT NULL DEFAULT 1 CHECK(include_development IN (0,1)),
  status TEXT NOT NULL DEFAULT 'selecting' CHECK(status IN ('selecting','confirmed','draft','approved','skipped')),
  created_at TEXT NOT NULL, confirmed_at TEXT, draft_sent_at TEXT,
- CHECK(week_end>week_start), UNIQUE(owner_id,week_start,week_end)
+ CHECK(week_end>week_start), UNIQUE(owner_id,week_start,week_end,report_key)
 );
 CREATE TABLE IF NOT EXISTS report_generation_audit (
  audit_id INTEGER PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES weekly_reports(report_id),
@@ -109,6 +111,8 @@ class Database:
             db.executescript(SCHEMA)
             db.execute('INSERT OR IGNORE INTO schema_migrations VALUES (1,?)', (utcnow(),))
             db.execute('INSERT OR IGNORE INTO schema_migrations VALUES (2,?)', (utcnow(),))
+        from .competitions import initialise
+        initialise(self)
 
     @contextmanager
     def connect(self):
@@ -208,12 +212,12 @@ class Database:
     def period_matches(self, start, end, eligible=False):
         query = 'SELECT * FROM matches WHERE played_at>=? AND played_at<?'
         if eligible:
-            query += " AND report_eligible=1 AND match_type IN ('Official','Practice')"
+            query += " AND report_eligible=1 AND match_type IN ('Official','Cup','Practice')"
         return self.rows(query+' ORDER BY played_at,match_id', (start,end))
 
     def classify(self, match_id, match_type, venue, actor, competition=None):
-        if match_type not in ('Official','Practice','Ignored'):
-            raise ValueError('Choose Official, Practice or Ignored.')
+        if match_type not in ('Official','Cup','Practice','Ignored'):
+            raise ValueError('Choose Official, Cup, Practice or Ignored.')
         if venue not in ('Home','Away','Neutral','Unknown') or (match_type=='Official' and venue=='Unknown'):
             raise ValueError('Official matches need a venue.')
         with self.connect() as db:
@@ -233,9 +237,9 @@ class Database:
     def report(self, report_id):
         return self.one('SELECT * FROM weekly_reports WHERE report_id=?',(report_id,))
 
-    def open_report(self, start, end, owner):
-        self.execute('INSERT OR IGNORE INTO weekly_reports(week_start,week_end,owner_id,created_at) VALUES (?,?,?,?)', (start,end,str(owner),utcnow()))
-        return self.one('SELECT * FROM weekly_reports WHERE owner_id=? AND week_start=? AND week_end=?',(str(owner),start,end))
+    def open_report(self, start, end, owner, report_key='mpl-league'):
+        self.execute('INSERT OR IGNORE INTO weekly_reports(week_start,week_end,owner_id,created_at,report_key) VALUES (?,?,?,?,?)', (start,end,str(owner),utcnow(),report_key))
+        return self.one('SELECT * FROM weekly_reports WHERE owner_id=? AND week_start=? AND week_end=? AND report_key=?',(str(owner),start,end,report_key))
 
     def selected(self, report_id):
         return self.rows('SELECT m.* FROM report_matches r JOIN matches m USING(match_id) WHERE report_id=? ORDER BY played_at,match_id',(report_id,))
@@ -268,7 +272,7 @@ class Database:
             selected=db.execute('SELECT m.* FROM report_matches rm JOIN matches m USING(match_id) WHERE report_id=?',(report_id,)).fetchall()
             if not selected:
                 raise ValueError('Choose at least one match first.')
-            if any(not m['report_eligible'] or m['match_type'] not in ('Official','Practice') for m in selected):
+            if any(not m['report_eligible'] or m['match_type'] not in ('Official','Cup','Practice') for m in selected):
                 raise ValueError('A selected match needs review.')
             db.execute("UPDATE weekly_reports SET status='confirmed',confirmed_at=? WHERE report_id=?",(utcnow(),report_id))
 

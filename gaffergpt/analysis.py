@@ -30,7 +30,7 @@ def direction(metric, values):
 class FactualGaffer:
     def analyze(self, matches, statistics):
         # Unknown/ignored records and unselected statistics cannot enter an analysis.
-        matches=[m for m in matches if m['match_type'] in ('Official','Practice')]
+        matches=[m for m in matches if m['match_type'] in ('Official','Cup','Practice')]
         ids={m['match_id'] for m in matches}
         metrics={}
         for stat in statistics:
@@ -66,7 +66,7 @@ class FactualGaffer:
                         'before':before[key]['value'],'after':after[key]['value'],'unit':after[key]['unit'],
                         'from_type':previous['match_type'],'to_type':current['match_type']})
             # Keep practice and official trend samples distinct.
-            for kind in ('Official','Practice'):
+            for kind in ('Official','Cup','Practice'):
                 samples=defaultdict(list)
                 for m in meetings:
                     if m['match_type']==kind:
@@ -91,7 +91,7 @@ class FactualGaffer:
                     doubleheaders.append({'opponent':night[0]['opponent'],'date':date,
                         'competition':competition,'match_ids':[m['match_id'] for m in night]})
         summaries={}
-        for kind in ('Official','Practice'):
+        for kind in ('Official','Cup','Practice'):
             group=[m for m in matches if m['match_type']==kind]
             complete=[m for m in group if m.get('birmingham_score') is not None and m.get('opponent_score') is not None]
             summaries[kind]={'selected':len(group),'scored_matches':len(complete),

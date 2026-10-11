@@ -485,7 +485,7 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(view.is_persistent())
         self.assertTrue(ReviewView(bot,a).is_persistent());self.assertTrue(DraftView(bot,rid).is_persistent())
         summary=bot.report_summary(rid)
-        self.assertIn('OFFICIAL MATCHES',summary);self.assertIn('PRACTICE / DEVELOPMENT',summary)
+        self.assertIn('MPL LEAGUE MATCHES',summary);self.assertIn('PRACTICE / DEVELOPMENT',summary)
         self.assertIn('1 matches still need classification',summary)
         self.assertFalse(bot.manager(SimpleNamespace(user=SimpleNamespace(id=999,roles=[]),guild_id=30)))
         self.assertTrue(bot.manager(SimpleNamespace(user=SimpleNamespace(id=42),guild_id=None)))

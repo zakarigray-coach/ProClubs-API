@@ -22,7 +22,7 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(len(s['fixtures']),2)
         self.assertEqual(s['groups']['Official']['summary'],dict(matches=2,wins=1,draws=0,losses=1,goals_for=3,goals_against=4))
     def test_mixed_scopes_calculated_separately(self):
-        s=self.sheet([fixture(1),fixture(2,'Official')],[stat(1,'Zak','goals',7),stat(2,'Zak','goals',1)])
+        s=self.sheet([fixture(1,own=7),fixture(2,'Official')],[stat(1,'Zak','goals',7),stat(2,'Zak','goals',1)])
         self.assertEqual(s['groups']['Practice']['players'][0]['goals'],7)
         self.assertEqual(s['groups']['Official']['players'][0]['goals'],1)
         text='In league fixtures, Zak scored seven goals.'
@@ -45,11 +45,14 @@ class VerificationTests(unittest.TestCase):
         s=self.sheet([fixture(1),fixture(2)],[stat(1,'Zak','goals',2),stat(2,'Zak','rating',8)])
         self.assertFalse(any(f['metric']=='goals' and f['fixture_id'] is None for f in s['facts'].values()))
         self.assertTrue(s['warnings'])
+    def test_player_goals_cannot_include_shootout_or_exceed_team_score(self):
+        with self.assertRaises(ReportHold):self.sheet([fixture(1,'Cup',own=2,other=2)],stats=[stat(1,'Zak','goals',7)])
+
     def test_impossible_ratio_holds(self):
         with self.assertRaises(ReportHold):self.sheet(stats=[stat(1,'Zak','shots',1),stat(1,'Zak','shots_on_target',2)])
     def test_high_scoring_player_mixed_results(self):
         s=self.sheet([fixture(1,own=2,other=5),fixture(2,own=6,other=2)],
-                     [stat(1,'TraapxLit','goals',3),stat(2,'TraapxLit','goals',4)])
+                     [stat(1,'TraapxLit','goals',2),stat(2,'TraapxLit','goals',5)])
         text='TraapxLit scored seven goals in practice.'
         proof=self.validate(s,text,[self.evidence(s,'TraapxLit','goals',text)])
         self.assertIn('numeric_coverage',proof['checks'])
@@ -62,11 +65,11 @@ class VerificationTests(unittest.TestCase):
         for prefix in ('Other featured in practice. ','Zak and Other featured in practice. '):
             with self.assertRaises(ValueError):self.validate(s,prefix+quote,[{'fact_id':key,'quote':quote}])
     def test_wrong_player_even_when_number_exists_is_rejected(self):
-        s=self.sheet(stats=[stat(1,'Zak','goals',7),stat(1,'Other','goals',3)])
+        s=self.sheet([fixture(1,own=10)],stats=[stat(1,'Zak','goals',7),stat(1,'Other','goals',3)])
         text='Other scored seven goals in practice.'
         with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Zak','goals',text)])
     def test_wrong_metric_even_when_number_exists_is_rejected(self):
-        s=self.sheet(stats=[stat(1,'Zak','goals',3),stat(1,'Zak','assists',7)])
+        s=self.sheet([fixture(1,own=10)],stats=[stat(1,'Zak','goals',3),stat(1,'Zak','assists',7)])
         text='Zak recorded 3 assists and 7 goals in practice.'
         with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Zak','goals',text),self.evidence(s,'Zak','assists',text)])
     def test_individual_match_stat_cannot_cover_period_total(self):
@@ -82,7 +85,7 @@ class VerificationTests(unittest.TestCase):
         for text in ('Birmingham lost 2–1 against Chelsea in practice.','Birmingham won 4–1 against Chelsea in practice.'):
             with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Chelsea','score',text,kind='fixture',fixture_id=1)])
     def test_unselected_name_leak_and_wrong_case_rejected(self):
-        s=self.sheet(stats=[stat(1,'TraapxLit','goals',7)],excluded_names=['Arsenal'])
+        s=self.sheet([fixture(1,own=7)],stats=[stat(1,'TraapxLit','goals',7)],excluded_names=['Arsenal'])
         for text in ('Birmingham played Arsenal.','traapxlit played well.'):
             with self.assertRaises(ValueError):self.validate(s,text,[])
     def test_quotes_and_chronology_rejected(self):

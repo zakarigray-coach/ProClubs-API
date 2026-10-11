@@ -27,7 +27,7 @@ def save_submission(db, report_id, actor, guild, results, notes='', player_name=
         if len(parts)!=4:
             raise ValueError('Each result needs: YYYY-MM-DD | Official Home, Official Away or Practice | Opponent | Birmingham score-Opponent score')
         day,kind,opponent,score=parts
-        kinds={'official home':('Official','Home'),'official away':('Official','Away'),'practice':('Practice','Unknown')}
+        kinds={'official home':('Official','Home'),'official away':('Official','Away'),'practice':('Practice','Unknown'),'cup':('Cup','Unknown'),'cup home':('Cup','Home'),'cup away':('Cup','Away')}
         if kind.lower() not in kinds or not opponent or len(opponent)>100:
             raise ValueError('Use Official Home, Official Away or Practice and an opponent name.')
         try:
@@ -43,6 +43,10 @@ def save_submission(db, report_id, actor, guild, results, notes='', player_name=
         occurrence=occurrences.get(canonical,0); occurrences[canonical]=occurrence+1
         source=f'manual:{report_id}:'+hashlib.sha256(canonical.encode()).hexdigest()
         parsed.append((source,occurrence,played,opponent,own,other,line,match_type,venue))
+    from .competitions import report_event,set_match_details
+    event=report_event(db,report_id)
+    if any(row[-2]=='Cup' for row in parsed) and (not event or event['report_type']!='Cup'):
+        raise ValueError('Select Cup / Tournament and its competition before adding cup results.')
     with db.connect() as conn:
         conn.execute('BEGIN IMMEDIATE')
         current=conn.execute('SELECT status FROM weekly_reports WHERE report_id=?',(report_id,)).fetchone()
@@ -55,6 +59,13 @@ def save_submission(db, report_id, actor, guild, results, notes='', player_name=
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'Classified',?,1,?,?)''',(source,'manual-weekly',str(guild),part,utcnow(),played,'management-date',opponent,own,other,raw,kind,venue,int(kind=='Official'),str(actor),utcnow()))
             added+=cur.rowcount
         conn.execute("UPDATE weekly_reports SET status='selecting',article=NULL,observations=NULL WHERE report_id=?",(report_id,))
+    from .competitions import report_event,set_match_details
+    event=report_event(db,report_id)
+    for source,part,*rest in parsed:
+        row=db.one('SELECT * FROM matches WHERE source_message_id=? AND source_part=?',(source,part))
+        if row['match_type']=='Cup':
+            if not event or event['report_type']!='Cup':raise ValueError('Select Cup / Tournament and its competition before adding cup results.')
+            set_match_details(db,row['match_id'],event['competition_key'],actor,'Coach confirmed cup result.')
     return added
 
 

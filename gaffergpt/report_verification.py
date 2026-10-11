@@ -42,7 +42,7 @@ def build_fact_sheet(packet):
         if mid in ids:raise ReportHold(f'Match {mid} appears twice in the selection. Please confirm its selection.')
         ids.add(mid)
         kind=row.get('match_type')
-        if kind not in ('Official','Practice'):
+        if kind not in ('Official','Cup','Practice'):
             raise ReportHold(f'Match {mid} is not classified for reporting. Is it official or practice?')
         own,other=row.get('birmingham_score'),row.get('opponent_score')
         if not row.get('opponent') or any(type(n) is not int or n<0 for n in (own,other)):
@@ -90,11 +90,15 @@ def build_fact_sheet(packet):
     games=defaultdict(dict)
     for stat in stats:
         if stat['subject_type']=='player':games[(stat['match_id'],stat['subject_key'])][stat['metric']]=stat['value']
+    for mid,fixture in by_id.items():
+        supplied_goals=sum(values.get('goals',0) for (game_id,name),values in games.items() if game_id==mid)
+        if supplied_goals>fixture['birmingham_score']:
+            raise ReportHold(f'Match {mid}: player goals total {supplied_goals:g} exceeds the team score {fixture["birmingham_score"]}. Check the source; penalty-shootout kicks must be excluded.')
     for (mid,name),values in games.items():
         for numerator,denominator in [('passes_completed','passes_attempted'),('shots_on_target','shots')]:
             if numerator in values and denominator in values and values[numerator]>values[denominator]:
                 raise ReportHold(f'{name} in match {mid}: {numerator} ({values[numerator]}) exceeds {denominator} ({values[denominator]}). Which figure is correct?')
-    for kind in ('Official','Practice'):
+    for kind in ('Official','Cup','Practice'):
         matches=[m for m in fixtures if m['match_type']==kind]
         if not matches:continue
         mids={m['match_id'] for m in matches}
@@ -153,12 +157,19 @@ def build_fact_sheet(packet):
                         add('comparison',m['opponent'],metric,True,kind,m['match_id'],[f'match:{mid}' for mid in sorted(mids)])
         groups[kind]={'summary':summary,'players':players}
     management=packet.get('management') or {}
-    if management.get('player_name'):add('award',management['player_name'],'player_of_week',True,sources=['management:award'])
+    event=(packet.get('competition_context') or {}).get('event',{})
+    award_metric=('player_of_tournament' if event.get('award_label')=='Player of the Tournament' else 'cup_standout') if event.get('report_type')=='Cup' else 'player_of_week'
+    if management.get('player_name'):add('award',management['player_name'],award_metric,True,sources=['management:award'])
+    from .competitions import verify_event
+    event_facts=verify_event(packet,fixtures)
+    if packet.get('competition_context'):
+        references['report:competition']=packet['competition_context']
+    for metric,value in event_facts:add('event',event.get('name'),metric,value,'Cup',sources=['report:competition'])
     references['management:award']={'player_name':management.get('player_name'),'player_evidence':management.get('player_evidence')}
     if packet.get('period'):add('period','Reporting period','dates',packet['period'],sources=['report:period'])
     sheet={'version':1,'fixtures':fixtures,'groups':groups,'facts':facts,'references':references,
            'warnings':warnings,'quotes':[],'narrative_evidence':[],
-           'excluded_names':packet.get('excluded_names',[])}
+           'excluded_names':packet.get('excluded_names',[]),'competition_context':packet.get('competition_context')}
     sheet['source_hash']=source_identity(sheet)
     return sheet
 
@@ -207,6 +218,14 @@ def validate_final(article,sheet,evidence):
     """The model locates claims; Python independently checks their referenced facts."""
     text=article['title']+'\n'+article['body'];facts=sheet['facts'];covered=set();fact_positions=defaultdict(set)
     if evidence.get('unsupported'):raise ValueError('Unsupported final claims: '+'; '.join(evidence['unsupported'])[:700])
+    event=(sheet.get('competition_context') or {}).get('event',{})
+    if event.get('report_type')=='Cup':
+        outcomes={'Advanced':r'\b(?:advanced|progressed|qualified)\b','Eliminated':r'\b(?:eliminated|knocked out|cup exit)\b','Champions':r'\b(?:champions|lifted the (?:cup|trophy)|won the (?:cup|tournament))\b'}
+        for outcome,pattern in outcomes.items():
+            if re.search(pattern,text,re.I) and event.get('outcome')!=outcome:
+                raise ValueError('Cup progression or trophy claim lacks matching confirmed outcome.')
+        if re.search(r'player of the tournament',text,re.I) and (event.get('award_label')!='Player of the Tournament' or not event.get('award_scope')):
+            raise ValueError('Player of the Tournament requires management-confirmed award scope.')
     if re.search(r'[“”"]',text) and not sheet['quotes']:raise ValueError('Quotation has no verified source.')
     if re.search(r'\b(comeback|late winner|stoppage.time|dominat(?:ed|ing|ion)|tactical adjustment|changed (?:the )?formation)\b',text,re.I) and not sheet['narrative_evidence']:
         raise ValueError('Match narrative or tactical event lacks source evidence.')
@@ -224,7 +243,7 @@ def validate_final(article,sheet,evidence):
     def scope_at(position):
         labels=scope_labels(text[:position])
         if not labels:return None
-        return 'Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Official'
+        return 'Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Cup' if labels[-1][0].lower()=='cup' else 'Official'
     for claim in evidence.get('claims',[]):
         key=claim.get('fact_id');quote=claim.get('quote','')
         if key not in facts or not quote or quote not in text:raise ValueError('Final claim lacks a valid fact reference or exact text span.')
@@ -267,16 +286,19 @@ def validate_final(article,sheet,evidence):
                     if n!=value['count'] or not re.search(r'\b(?:matches|fixtures|games)\b',text[b:min(end,b+35)],re.I):continue
                     scope=scope_at(a)
                     qualifier=re.match(r'\s+(practice|friendly|official|competitive|league|cup)\b',text[b:end],re.I)
-                    if qualifier:scope='Practice' if qualifier[1].lower() in ('practice','friendly') else 'Official'
+                    if qualifier:scope='Practice' if qualifier[1].lower() in ('practice','friendly') else 'Cup' if qualifier[1].lower()=='cup' else 'Official'
                     if scope and scope!=fact['classification']:continue
                     if len(sheet['groups'])>1 and not scope:continue
                     covered.add((a,b))
         elif kind=='comparison':
             if fact['subject'] not in quote:raise ValueError('Comparison names the wrong player.')
             labels=scope_labels(quote)
-            scope=('Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Official') if labels else scope_at(start)
+            scope=('Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Cup' if labels[-1][0].lower()=='cup' else 'Official') if labels else scope_at(start)
             if scope and scope!=fact['classification']:raise ValueError('Comparison mixes practice and competitive results.')
             if len(sheet['groups'])>1 and not scope:raise ValueError('Comparison requires an explicit practice or competitive scope.')
+        elif kind=='event':
+            from .cup_verification import cover_event_claim
+            covered.update(cover_event_claim(fact,quote,start,candidates,sheet))
         elif kind=='period':
             if not re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{4}-\d{2}-\d{2}',quote):continue
             allowed={v for _,_,v in numeric_spans(str(value),{'facts':{}})}

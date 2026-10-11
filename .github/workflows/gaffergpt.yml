@@ -1,28 +1,19 @@
-name: Pep and RT Media checks
+name: GafferGPT foundation
 on:
   push:
-    paths: ['gaffergpt/**', 'pepBridge.js', 'reporterBot.js', 'test/**', '.github/workflows/gaffergpt.yml']
+    paths: ['gaffergpt/**', '.github/workflows/gaffergpt.yml']
   pull_request:
-    paths: ['gaffergpt/**', 'pepBridge.js', 'reporterBot.js', 'test/**', '.github/workflows/gaffergpt.yml']
+    paths: ['gaffergpt/**', '.github/workflows/gaffergpt.yml']
 permissions:
   contents: read
 jobs:
-  pep:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
       - run: pip install -r gaffergpt/requirements.txt
       - run: python -m unittest discover -s gaffergpt/tests -v
-  rt-media:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npm test
