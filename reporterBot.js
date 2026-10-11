@@ -1276,7 +1276,7 @@ function professionalClubhouseAudit(guild, inactiveDays = 45) {
     !categories.some(category => aliases.some(alias => String(category.name || '').toLowerCase().includes(alias)))
   ).map(([name]) => name);
   const requiredChannels = [
-    'ml1-announcements', 'ml1-locker-room', 'ml1-match-center', 'ml1-league-center', 'ml1-transactions', 'ml1-stats', 'ml1-highlights', 'romano-times-news',
+    'mpl-announcements', 'mpl-locker-room', 'mpl-match-center', 'mpl-league-center', 'mpl-transactions', 'mpl-stats', 'mpl-highlights', 'romano-times-news',
     'mlpc-announcements', 'mlpc-locker-room', 'mlpc-match-center', 'mlpc-league-center', 'mlpc-transactions', 'mlpc-stats', 'mlpc-highlights',
     'grounds-match-center', 'grounds-highlights',
   ];
@@ -1763,7 +1763,7 @@ async function startBot() {
   }
 
   function transactionChannelFor(guild, teamKey) {
-    const key = teamKey === 'crownfc' ? 'mlpc-transactions' : 'ml1-transactions';
+    const key = teamKey === 'crownfc' ? 'mlpc-transactions' : 'mpl-transactions';
     return guild.channels.cache.find(channel =>
       [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type) &&
       String(channel.name || '').toLowerCase().includes(key)
@@ -1771,7 +1771,7 @@ async function startBot() {
   }
 
   function statsChannelFor(guild, teamKey) {
-    const key = teamKey === 'crownfc' ? 'mlpc-stats' : 'ml1-stats';
+    const key = teamKey === 'crownfc' ? 'mlpc-stats' : 'mpl-stats';
     return guild.channels.cache.find(channel => channel.isTextBased() &&
       String(channel.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '') === key);
   }
@@ -2255,7 +2255,7 @@ async function startBot() {
           ? await guild.channels.fetch(record.transactionChannelId).catch(() => null)
           : transactionChannelFor(guild, record.teamKey);
         if (!destination || !destination.isTextBased()) {
-          throw new Error((record.teamKey === 'crownfc' ? 'MLPC' : 'ML1') + ' transactions channel is unavailable.');
+          throw new Error((record.teamKey === 'crownfc' ? 'MLPC' : 'MPL') + ' transactions channel is unavailable.');
         }
       } else {
         destination = await guild.channels.fetch(record.destinationChannelId).catch(() => null);
@@ -3820,17 +3820,17 @@ async function startBot() {
 
       const plans = [
         {
-          prefix: 'ml1', category: ml1Category, roleId: birminghamRoleId,
-          renames: {'ml1-announcements':'🚨・ml1-announcements','ml1-locker-room':'⚽・ml1-locker-room','ml1-match-results':'📅・ml1-match-center','ml1-standings-table':'🏆・ml1-league-center','ml1-signing-announcements':'✍️・ml1-transactions','ml1-team-stats':'📊・ml1-stats'},
-          archive: ['ml1-signups','ml1-schedule','ml1-lineups','ml1-game-live-streams','ml1-player-stats'],
+          prefix: 'mpl', category: ml1Category, roleId: birminghamRoleId,
+          renames: {'mpl-announcements':'🚨・mpl-announcements','mpl-locker-room':'⚽・mpl-locker-room','mpl-match-results':'📅・mpl-match-center','mpl-standings-table':'🏆・mpl-league-center','mpl-signing-announcements':'✍️・ml1-transactions','mpl-team-stats':'📊・ml1-stats'},
+          archive: ['mpl-signups','mpl-schedule','mpl-lineups','mpl-game-live-streams','mpl-player-stats'],
           channels: [
-            ['ml1-announcements','🚨・ml1-announcements','Official Birmingham City MPL club announcements, deadlines and management updates.'],
-            ['ml1-locker-room','⚽・ml1-locker-room','Birmingham City MPL squad room for players, staff, match discussion and team communication.'],
-            ['ml1-match-center','📅・ml1-match-center','Birmingham City MPL fixtures, confirmed lineups, matchday notices, live-match links and official results.'],
-            ['ml1-league-center','🏆・ml1-league-center','Official MPL standings, league information and competition updates for Birmingham City.'],
-            ['ml1-transactions','✍️・ml1-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
-            ['ml1-stats','📊・ml1-stats','Birmingham City MPL team and player statistics, records and season performance.'],
-            ['ml1-highlights','🎬・ml1-highlights','Birmingham City MPL match highlights, goals, saves and featured game clips.'],
+            ['mpl-announcements','🚨・mpl-announcements','Official Birmingham City MPL club announcements, deadlines and management updates.'],
+            ['mpl-locker-room','⚽・mpl-locker-room','Birmingham City MPL squad room for players, staff, match discussion and team communication.'],
+            ['mpl-match-center','📅・mpl-match-center','Birmingham City MPL fixtures, confirmed lineups, matchday notices, live-match links and official results.'],
+            ['mpl-league-center','🏆・mpl-league-center','Official MPL standings, league information and competition updates for Birmingham City.'],
+            ['mpl-transactions','✍️・ml1-transactions','Birmingham City MPL roster moves, signings, releases and official player transactions.'],
+            ['mpl-stats','📊・ml1-stats','Birmingham City MPL team and player statistics, records and season performance.'],
+            ['mpl-highlights','🎬・mpl-highlights','Birmingham City MPL match highlights, goals, saves and featured game clips.'],
             ['romano-times-news','🗞️・romano-times-news','Read-only Romano Times coverage forwarded from the MPL Around the League news channel.']
           ]
         },
@@ -4169,7 +4169,7 @@ async function startBot() {
           if (sourceKey === 'start-here' && welcomeKeys.test(key)) destination = welcomeCategory || archiveCategory;
           else if (sourceKey === 'club-info-community') destination = welcomeKeys.test(key) ? (welcomeCategory || archiveCategory) : archiveCategory;
           else if (/^(general|community|introductions?|club-news|club-information|information|announcements?)$/.test(key)) destination = communityCategory || archiveCategory;
-          else if (/^(ml1|birmingham)/.test(key)) destination = birminghamCategory || archiveCategory;
+          else if (/^(mpl|ml1|birmingham)/.test(key)) destination = birminghamCategory || archiveCategory;
           else if (/^(mlpc|crownfc|crown-fc)/.test(key)) destination = crownCategory || archiveCategory;
           const hasVisibleHistory = Boolean(child.lastMessageId);
           if (!welcomeKeys.test(key) && !hasVisibleHistory) {

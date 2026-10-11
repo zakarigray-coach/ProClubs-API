@@ -5,6 +5,7 @@ const { TextChannel, Message, MessageFlags } = require('discord.js');
 const { buildResponse, archetypes, costModels } = require('./optimizer');
 const reporterBot = require('./reporterBot');
 const { startBot } = reporterBot;
+const { runBirminghamRebrand } = require('./birminghamRebrand');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -76,7 +77,7 @@ function isZeroGameMl1StatsPayload(payload) {
 
 function isMl1StatsChannel(channel) {
   const name = String(channel?.name || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
-  return name.includes('ml1-stats');
+  return /(?:ml1|mpl)-stats/.test(name);
 }
 
 function suppressPrematureMl1StatsPosts() {
@@ -221,6 +222,8 @@ startBot().then(async client => {
   disableLegacySigningChannelIntake(client);
   disableLegacySigningInteractions(client);
   await cleanupPrematureMl1Stats(client);
+  try { await runBirminghamRebrand(client); }
+  catch (error) { console.error('Birmingham rebrand failed:', error.code || error.name); }
   botHealth.status = client ? 'ready' : 'disabled';
   botHealth.checkedAt = new Date().toISOString();
 }).catch(err => {

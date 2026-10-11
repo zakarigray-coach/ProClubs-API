@@ -79,7 +79,7 @@ function policyFromEnv(env = process.env) {
     managementCategoryIds: ids('AUDITOR_MANAGEMENT_CATEGORY_IDS'),
     protectedChannelIds: ids('AUDITOR_PROTECTED_CHANNEL_IDS'),
     teams: {
-      birmingham: { roleId: env.BIRMINGHAM_ROLE_ID || null, categoryIds: ids('AUDITOR_BIRMINGHAM_CATEGORY_IDS'), prefix: 'ml1' },
+      birmingham: { roleId: env.BIRMINGHAM_ROLE_ID || null, categoryIds: ids('AUDITOR_BIRMINGHAM_CATEGORY_IDS'), prefix: 'mpl' },
       crownfc: { roleId: env.MLPC_ROLE_ID || null, categoryIds: ids('AUDITOR_CROWNFC_CATEGORY_IDS'), prefix: 'mlpc' },
     },
   };
@@ -110,7 +110,7 @@ function teamForChannel(channel, guild, policy) {
   }
   const name = normalize(channel.name);
   const parent = normalize(guild.channels.cache.get(channel.parentId)?.name);
-  if (/birmingham/.test(parent) || /^(ml1|birmingham)-/.test(name) || (channel.type === C.GuildCategory && /birmingham/.test(name))) return 'birmingham';
+  if (/birmingham/.test(parent) || /^(mpl|ml1|birmingham)-/.test(name) || (channel.type === C.GuildCategory && /birmingham/.test(name))) return 'birmingham';
   if (/crown-?fc/.test(parent) || /^(mlpc|crown-?fc)-/.test(name) || (channel.type === C.GuildCategory && /crown-?fc/.test(name))) return 'crownfc';
   return null;
 }
@@ -152,7 +152,7 @@ async function inspectServer(guild, store, policy, { inactiveDays = 45, now = Da
     if (TEXT.includes(channel.type) && /\s|[A-Z]/.test(channel.name)) add('structure', 'review', 'naming', channel,
       'Text channel contains whitespace or uppercase characters.', 'Review against the existing decorated lowercase-hyphen naming convention.');
     const team = teamForChannel(channel, guild, policy);
-    if (team && /^(ml1|mlpc)-/.test(normalize(channel.name)) && !normalize(channel.name).startsWith(policy.teams[team].prefix + '-')) {
+    if (team && /^(mpl|ml1|mlpc)-/.test(normalize(channel.name)) && !normalize(channel.name).startsWith(policy.teams[team].prefix + '-')) {
       add('operations', 'warning', 'misplaced-club-channel', channel, 'Club prefix conflicts with its category.', 'Check Birmingham / CrownFC ownership before moving.');
     }
     const parent = guild.channels.cache.get(channel.parentId);
