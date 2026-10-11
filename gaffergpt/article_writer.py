@@ -44,7 +44,7 @@ Only use chronology from supplied timestamps. Never describe a three-goal defeat
 STATISTICS: Official and practice totals stay separate. Practice never earns league points
 or changes the competitive record. Missing data is unknown, never zero. Individual goals
 conceded and goalkeeper clean-sheet totals are for confirmed goalkeeper appearances only;
-never discuss an outfield player's conceded-goals ledger. Team conceded goals can be reported.
+never discuss goals conceded as an outfield player's statistic. Team conceded goals can be reported.
 Highlight at most three players; choose statistics that explain their documented contribution.
 For confirmed Player of the Week, incorporate the award into the main narrative, with the
 winner's decisive statistics ONCE. Do not add a second award paragraph repeating those figures.
@@ -182,7 +182,11 @@ class SportsWriter(OpenAICoach):
             'No derived totals beyond supplied facts. No invented match events, emotions, chemistry, stakes or chronological transitions. '
             'Official fixtures and practice must have explicit separate context. Scores use Birmingham first unless clearly labelled away. '
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
-            'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status.')
+            'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status. '
+            'Never use ledger, non-negligible, supplied figures, defensive actions noted, factual snapshot, '
+            'Other contributors, firm headline or headline return. Player positions and tactical roles are unknown unless explicitly sourced. '
+            'Delete unsupported clauses entirely. Never turn correction notes into prose about what cannot be inferred. '
+            'Do not describe absent evidence, explain the reporting process, or copy validation feedback into the article.')
         brief['writing_requirements']=brief['desk_task']
         async def draft_and_edit():
             recovery=clean.get('recovery') or {}
