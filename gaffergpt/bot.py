@@ -383,7 +383,7 @@ class GafferBot(discord.Client):
         self.coach=OpenAICoach.from_environment()
         self.coaching_lock=asyncio.Lock()
         self.recap_reader=RecapReader(self.coach) if self.coach else None
-        self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key,self.coach.model) if self.coach else None)
+        self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key,os.getenv("PEP_REPORTER_MODEL",self.coach.model)) if self.coach else None)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None
