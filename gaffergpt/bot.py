@@ -1,6 +1,7 @@
 """Discord adapter: all football records live in the shared SQLite database."""
 import asyncio
 import io
+import json
 import logging
 import math
 import sys
@@ -15,6 +16,7 @@ from .feedback import player_feedback
 from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
 from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
+from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
 from .scheduler import WeeklyScheduler, week_window
 
@@ -238,6 +240,18 @@ class GafferBot(discord.Client):
 
     async def work(self):
         await self.wait_until_ready()
+        # One requested compatibility check; does not import or classify anything.
+        if not self.db.setting('league_stats_check:v1'):
+            try:
+                check=await inspect_league_stats(self)
+                self.db.set_setting('league_stats_check:v1',json.dumps(check))
+                log.info('League stats channel check: %s',json.dumps(check['channels']))
+                for recap in check['recaps']:
+                    log.info('League stats public recap check: %s',json.dumps(recap))
+                if not check['recaps']:
+                    log.info('League stats check: no readable club bot recaps in the last 30 messages')
+            except Exception as error:
+                log.error('League stats check failed: %s',type(error).__name__)
         try:
             channel,_=self.recap_config()
             ignored=self.db.ignore_setup_prompts(channel,self.config.guild_id,self.config.owner_id)
@@ -291,18 +305,7 @@ class GafferBot(discord.Client):
             return
         if message.channel.id!=channel or message.author.id!=author:
             return
-        # Recaps may live in readable embeds rather than message.content.
-        blocks=[]
-        def add(value):
-            if value and value.strip() and value.strip() not in blocks:
-                blocks.append(value.strip())
-        add(message.content)
-        for embed in getattr(message,'embeds',[]):
-            add(embed.title); add(embed.description)
-            for field in embed.fields:
-                separator='\n' if field.name.strip().upper() in ('PLAYER STATS','TEAM STATS','FINAL SCORE') else ': '
-                add(f'{field.name}{separator}{field.value}')
-        text='\n'.join(blocks)
+        text=readable_message(message)
         if not is_match_recap(text):
             return
         self.db.ingest(message.id,channel,message.guild.id,message.created_at.astimezone(timezone.utc).isoformat(),text,parse_recap(text))
