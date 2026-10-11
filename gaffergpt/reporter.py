@@ -1,6 +1,7 @@
 """Reporter reads the shared store and prepares drafts; it never publishes."""
 import json
 from .analysis import FactualGaffer
+from .editorial import choose_editorial, editorial_lead, editorial_headline
 
 
 def match_label(m):
@@ -44,9 +45,13 @@ class Reporter:
                 title='Birmingham City: a week on the training ground'
             else:
                 title='Birmingham City: the selected match week'
-            lines=['RT FOOTBALL MEDIA',title,'DRAFT — awaiting Coach review',
+            editorial=choose_editorial(conn,report_id)
+            # Include the reporting period so recurring result patterns have distinct headlines.
+            factual_subheadline=title
+            title=editorial_headline(editorial,report['week_start'])
+            lines=['RT FOOTBALL MEDIA',title,factual_subheadline,f"By {editorial['reporter']} | RT Football Media",'DRAFT — awaiting Coach review',
                    f"Reporting period: {report['week_start']} to {report['week_end']} (end exclusive).",
-                   'Coverage is limited to the matches selected by management.','']
+                   'Coverage is limited to the matches selected by management.','',editorial_lead(editorial,summary),'']
             if official:
                 lines+=['COMPETITIVE RECAP']
                 for m in official:
@@ -86,5 +91,6 @@ class Reporter:
                 lines.append('Missing metrics are not treated as zero. Match conditions, minutes played and positions can affect these comparisons.')
             lines+=['','EDITORIAL NOTE','Scores and statistics come from the selected database records. No quotes, injuries, events or future fixtures have been invented. This draft has not been published.']
             article='\n'.join(lines)
+            observations['editorial']={key:editorial[key] for key in ('reporter','opening','style')}
             conn.execute("UPDATE weekly_reports SET title=?,article=?,observations=?,status='draft' WHERE report_id=?",(title,article,json.dumps(observations),report_id))
         return article

@@ -91,4 +91,21 @@ async function prepareRtPermissions(client,options={}) {
   if(verified.permissions.has(P.Administrator))throw new Error('RT still has Administrator through another role');
   journal.completedAt=new Date().toISOString();save();log('RT FIX 3 complete: Administrator removed; operations role verified');
 }
-module.exports={fixYourBotLiveAccess,fixWelcomeAccess,prepareRtPermissions,RT_PERMISSIONS};
+async function fixSupatimerAccess(client,options={}) {
+  const env=options.env || process.env,log=options.log || console.log;
+  if(env.DISCORD_GUILD_ID!==GUILD)return;
+  const file=path.join(env.RT_DATA_DIR || '/data','workflow-fix-4-supatimer.json');
+  const journal=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};
+  if(journal.completedAt)return;
+  const guild=await client.guilds.fetch(GUILD),channel=await guild.channels.fetch('1552394785501876277');
+  const role=await guild.roles.fetch('1552395677743579189');
+  if(!role?.managed || role.name!=='Supatimer' || channel.guildId!==GUILD)throw new Error('Supatimer scope mismatch');
+  const save=()=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(journal,null,2));fs.renameSync(file+'.tmp',file);};
+  if(!journal.original){const previous=channel.permissionOverwrites.cache.get(role.id);journal.original={channelId:channel.id,roleId:role.id,overwrite:previous?{allow:previous.allow.bitfield.toString(),deny:previous.deny.bitfield.toString()}:null};save();}
+  const grant={ViewChannel:true,SendMessages:true,EmbedLinks:true,ReadMessageHistory:true};
+  await channel.permissionOverwrites.edit(role,grant,{reason:'Owner approved audit fix 4: Supatimer availability posts'});
+  const verified=await guild.channels.fetch(channel.id),permissions=verified.permissionsFor(role);
+  if(Object.keys(grant).some(name=>!permissions.has(P[name])))throw new Error('Supatimer verification failed');
+  journal.completedAt=new Date().toISOString();save();log('RT FIX 4 complete: Supatimer can read and post embeds in cnc-availability');
+}
+module.exports={fixYourBotLiveAccess,fixWelcomeAccess,prepareRtPermissions,fixSupatimerAccess,RT_PERMISSIONS};

@@ -90,6 +90,8 @@ async function runBirminghamRebrand(client, options = {}) {
   catch(error) { log('RT FIX 2 failed: '+(error.code || error.message)); }
   try { await require('./approvedWorkflowFixes').prepareRtPermissions(client,options); }
   catch(error) { log('RT FIX 3 failed: '+(error.code || error.message)); }
+  try { await require('./approvedWorkflowFixes').fixSupatimerAccess(client,options); }
+  catch(error) { log('RT FIX 4 failed: '+(error.code || error.message)); }
   if (!journal.completedAt) {
     const reason='Owner-requested Birmingham cleanup: remove CrownFC descriptions and rename ML1 to MPL';
     const description=scrubDescription(guild.description);
