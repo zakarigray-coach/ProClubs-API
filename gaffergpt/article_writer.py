@@ -146,7 +146,7 @@ class SportsWriter(OpenAICoach):
                         'unsupported':{'type':'array','items':{'type':'string'}}},
                         'required':['claims','unsupported'],'additionalProperties':False}}}}
         return {'model':self.model,'instructions':instructions,'input':analysis,
-                'max_output_tokens':8000,'reasoning':{'effort':'medium' if task=='audit_finished_article' else 'low'},'store':False,
+                'max_output_tokens':8000,'reasoning':{'effort':'medium'},'store':False,
                 'text':{'format':{'type':'json_schema','name':'sports_article','strict':True,
                     'schema':{'type':'object','properties':{'title':{'type':'string'},'body':{'type':'string'}},
                               'required':['title','body'],'additionalProperties':False}}}}
@@ -184,10 +184,14 @@ class SportsWriter(OpenAICoach):
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
             'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status. '
             'Never use ledger, non-negligible, supplied figures, defensive actions noted, factual snapshot, '
-            'Other contributors, firm headline or headline return. Player positions and tactical roles are unknown unless explicitly sourced. '
+            'Other contributors, firm headline, headline return or file away. Player positions and tactical roles are unknown unless explicitly sourced. '
             'Delete unsupported clauses entirely. Never turn correction notes into prose about what cannot be inferred. '
             'Do not describe absent evidence, explain the reporting process, or copy validation feedback into the article.')
         brief['writing_requirements']=brief['desk_task']
+        award=(clean.get('management') or {}).get('player_name')
+        winner=next((p for ps in clean.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
+        if winner and winner.get('goals',0)>=3:
+            brief['writing_requirements']+=f' The FIRST SENTENCE must name {award} exactly and describe the verified {winner["goals"]:g} goals, linked to the contrasting practice/official results. Mention that scoring total only once in the body.'
         async def draft_and_edit():
             recovery=clean.get('recovery') or {}
             if (recovery.get('source_hash')==sheet['source_hash'] or recovery.get('source_identity')==source_identity(sheet)):
@@ -284,7 +288,7 @@ def check_feature_quality(article,packet):
     winner=next((p for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
     lead=re.split(r'(?<=[.!?])\s+',body,1)[0]
     if winner and winner.get('goals',0)>=3 and (award not in lead or not re.search(r'\bgoals?\b',lead,re.I)):
-        raise ValueError('Lead with the award winner’s scoring and connect it to the contrast in results')
+        raise ValueError('The FIRST SENTENCE must name '+award+' exactly and describe the verified goals. Link that opening to the contrast in results; do not defer the name or goals to a later sentence.')
 
 def check_finished_prose(article,facts):
     title,body=article.get('title',''),article.get('body','')
