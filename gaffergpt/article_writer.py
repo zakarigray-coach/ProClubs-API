@@ -20,7 +20,7 @@ Teagan: brisk, vivid, lightly witty; confident rhythm without hype, sarcasm or p
 Both sound like experienced football journalists, never a statistical dashboard or AI essay.
 
 STRUCTURE: An original, specific headline, usually 6–12 words, followed by a direct opening
-of 35–60 words built around the main result, contrast or standout contribution. Follow with
+usually of 20–45 words built around the main result, contrast or standout contribution. Follow with
 short connected paragraphs: important results, two or three telling numbers, player highlights,
 and a grounded closing thought. Use at most three section headings when they aid the story.
 Default to 350–550 words for a weekly article, but use fewer when the evidence is thin. Less evidence warrants
@@ -201,15 +201,19 @@ class SportsWriter(OpenAICoach):
         if event.get('report_type')=='Cup':
             brief['writing_requirements']+=' This is a separate CUP EDITION event report, not a weekly league or practice article. Lead with the strongest verified cup story. Organise around confirmed stages when available; unknown stages do not establish chronology. Match scores exclude penalty kicks. Aggregates and shootouts must be explicitly labelled and never added to player goals. Unknown progression means no claimed qualification, elimination or trophy. Use Cup Standout for the management-selected featured player; use Player of the Tournament only when explicitly confirmed with scope in event metadata. Do not call them Player of the Week. The Pre-Season Cup shows these verified results ahead of the MPL season; do not invent predictions, momentum or chemistry.'
         if len(sheet['fixtures'])<=4 and not sheet['narrative_evidence'] and not sheet['quotes']:
-            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Write a concise 200–300-word piece, shorter if necessary; do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play.'
+            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Write a concise 120–220-word piece, shorter if necessary; do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play. End with a concrete selected result or confirmed award. A lesson, outlook, coaching recommendation, cause-and-effect summary or forecast is not required; never invent one to manufacture a conclusion.'
         award=(clean.get('management') or {}).get('player_name')
         winner=next((p for ps in clean.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
-        if winner and winner.get('goals',0)>=3:
+        if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3:
             brief['writing_requirements']+=f' The FIRST SENTENCE must name {award} exactly and describe the verified {winner["goals"]:g} goals, linked to the contrasting practice/official results. Mention that scoring total only once in the body.'
         async def draft_and_edit():
             mapping_retried=False
             recovery=clean.get('recovery') or {}
-            if (recovery.get('source_hash')==sheet['source_hash'] or recovery.get('source_identity')==source_identity(sheet)):
+            outline=verified_short_outline(clean,sheet)
+            if outline and recovery:
+                draft=outline;feedback=['Use this clean source-backed outline instead of the rejected draft. Polish its rhythm and grammar without adding motives, causal conclusions or inferred chronology. Keep the concrete ending.']
+                self._local.attempts.append({'state':'source_outline','source_hash':sheet['source_hash']})
+            elif (recovery.get('source_hash')==sheet['source_hash'] or recovery.get('source_identity')==source_identity(sheet)):
                 draft=recovery['article'];feedback=[recovery.get('error','Complete every current check.')]
                 self._local.attempts.append({'state':'recovered','source_hash':sheet['source_hash']})
             else:
@@ -315,7 +319,8 @@ def check_feature_quality(article,packet):
     award=(packet.get('management') or {}).get('player_name')
     winner=next((p for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
     lead=re.split(r'(?<=[.!?])\s+',body,1)[0]
-    if winner and winner.get('goals',0)>=3 and (award not in lead or not re.search(r'\bgoals?\b',lead,re.I)):
+    event=(packet.get('competition_context') or {}).get('event',{})
+    if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3 and (award not in lead or not re.search(r'\bgoals?\b',lead,re.I)):
         raise ValueError('The FIRST SENTENCE must name '+award+' exactly and describe the verified goals. Link that opening to the contrast in results; do not defer the name or goals to a later sentence.')
 
 def check_finished_prose(article,facts):
@@ -338,3 +343,40 @@ def period_label(report):
     start=datetime.fromisoformat(report['week_start']).astimezone(zone)
     end=datetime.fromisoformat(report['week_end']).astimezone(zone)-timedelta(microseconds=1)
     return f"{start.strftime('%B')} {start.day}–{end.strftime('%B')} {end.day}, {end.year}"
+
+
+def verified_short_outline(packet,sheet):
+    """Recover thin failed recaps from source facts, not from defective prose."""
+    if len(sheet['fixtures'])>4 or len(sheet['groups'])!=1 or sheet['quotes'] or sheet['narrative_evidence']:
+        return None
+    if (packet.get('competition_context') or {}).get('event',{}).get('report_type')=='Cup':return None
+    kind,group=next(iter(sheet['groups'].items()))
+    award=(packet.get('management') or {}).get('player_name')
+    winner=next((p for p in group['players'] if p['player']==award),None)
+    if not winner or 'goals' not in winner or winner['goals']<3:return None
+    words={0:'no',1:'one',2:'two',3:'three',4:'four',5:'five',6:'six',7:'seven',8:'eight',9:'nine',10:'ten'}
+    count=lambda n:words.get(n,str(n))
+    summary=group['summary'];scope='practice' if kind=='Practice' else 'league'
+    records=[]
+    for field,label in [('wins','win'),('draws','draw'),('losses','defeat')]:
+        n=summary[field]
+        if n:records.append(('a' if n==1 else count(n))+' '+label+('' if n==1 else 's'))
+    record=', '.join(records[:-1])+(' and ' if len(records)>1 else '')+records[-1]
+    lead=f"{award}’s {count(int(winner['goals']))} goals stood out as Birmingham City recorded {record} across {count(summary['matches'])} {scope} matches."
+    results=[]
+    for fixture in sheet['fixtures']:
+        result={'win':'a win','draw':'a draw','defeat':'a defeat'}[fixture['result']]
+        results.append(f"Birmingham recorded {result} against {fixture['opponent']}, {fixture['birmingham_score']}–{fixture['opponent_score']}")
+    fixtures='. '.join(results)+'.'
+    details=[]
+    if 'assists' in winner:details.append(f"{count(int(winner['assists']))} "+('assist' if winner['assists']==1 else 'assists'))
+    if 'average_rating' in winner:details.append(f"an average rating of {winner['average_rating']:.2f}")
+    extra=f"Across {count(winner['appearances'])} {scope} appearances, his other returns were {' and '.join(details)}." if details else ''
+    others=sorted((p for p in group['players'] if p['player']!=award and 'goals' in p and 'assists' in p),key=lambda p:p['goals']+p['assists'],reverse=True)
+    teammate=''
+    if others:
+        p=others[0]
+        teammate=f"{p['player']} contributed {count(int(p['goals']))} "+('goal' if p['goals']==1 else 'goals')+f" and {count(int(p['assists']))} "+('assist' if p['assists']==1 else 'assists')+f" across {count(p['appearances'])} {scope} appearances."
+    ending=f"{award} was Birmingham City’s Player of the Week."
+    return {'title':f'{award} stands out in Birmingham’s contrasting {scope} results',
+            'body':'\n\n'.join(p for p in [lead,fixtures,extra,teammate,ending] if p)}

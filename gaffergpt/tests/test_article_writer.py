@@ -143,3 +143,21 @@ class PersistentWritingRulesTests(unittest.TestCase):
         from gaffergpt.article_writer import check_finished_prose,check_feature_quality
         with self.assertRaises(ValueError):check_finished_prose({'title':'Practice week','body':'Birmingham finished 2–1–1. '+'A training fixture offered useful football. '*10},{})
         with self.assertRaises(ValueError):check_feature_quality({'body':'The matches ended without drawing larger conclusions.'},{})
+
+
+class SourceOutlineTests(unittest.TestCase):
+    def test_failed_thin_article_restarts_from_exact_selected_facts(self):
+        from gaffergpt.article_writer import verified_short_outline
+        from gaffergpt.report_verification import build_fact_sheet
+        from gaffergpt.tests.test_report_verification import fixture,stat
+        packet={'matches':[fixture(1,opponent='Test A',own=2,other=5),fixture(2,opponent='Test B',own=6,other=2)],
+                'statistics':[stat(1,'TraapxLit','goals',2),stat(2,'TraapxLit','goals',5)],
+                'management':{'player_name':'TraapxLit','player_evidence':'Coach confirmed'},
+                'recovery':{'article':{'title':'Wrong','body':'Invented leadership and confidence'}}}
+        outline=verified_short_outline(packet,build_fact_sheet(packet))
+        self.assertTrue(outline['body'].startswith('TraapxLit’s seven goals'))
+        self.assertIn('Test A, 2–5',outline['body']);self.assertIn('Test B, 6–2',outline['body'])
+        self.assertNotIn('leadership',outline['body']);self.assertNotIn('confidence',outline['body'])
+        self.assertEqual(outline['body'].count('seven goals'),1)
+        packet['competition_context']={'event':{'report_type':'Cup'}}
+        self.assertIsNone(verified_short_outline(packet,build_fact_sheet(dict(packet,competition_context=None))))

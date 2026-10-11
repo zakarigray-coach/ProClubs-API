@@ -72,6 +72,8 @@ def render(event,headline,player=None,photo=None,sample=False):
     if outcome!='Unknown':
         if not event.get('outcome_evidence') or not event.get('format'):raise ValueError('Cover outcome is unverified.')
         text_block(draw,outcome.upper(),(426,1340,606,100),30,True,colour=GOLD)
+    elif event.get('stage_label'):
+        text_block(draw,event['stage_label'],(426,1340,606,100),30,True,colour=GOLD)
     text_block(draw,'MPL BIRMINGHAM CITY • RT FOOTBALL MEDIA',(48,1490,984,52),24,True)
     output=io.BytesIO();image.save(output,format='PNG');return output.getvalue()
 
@@ -100,10 +102,11 @@ def render_pages(event,headline,player=None,photo=None,sample=False):
     try:return [render(event,headline,player,photo,sample)]
     except ValueError as error:
         if not any(s in str(error) for s in ('Cover text','Cover word')):raise
-    compact=dict(event,name='Cup / Tournament')
+    compact=dict(event,name='Cup / Tournament',stage_label=None)
     first=render(compact,'Birmingham City — cup edition',None,photo,sample)
     text=event['name']+'\n\n'+headline
     if player:text+='\n\n'+event.get('award_label','Cup Standout')+': '+player
+    if event.get('stage_label'):text+='\n\n'+event['stage_label']
     pages=[first];face=font(40,True);probe=ImageDraw.Draw(Image.new('RGB',SIZE))
     lines=[]
     for para in text.split('\n\n'):lines.extend(wrap(probe,para,face,984)+[''])
@@ -134,4 +137,7 @@ def report_covers(db,report_id):
         raise ValueError('The cup article changed after validation; generate a fresh draft.')
     assert_current(db,report_id,json.loads(audit['fact_sheet']))
     supplied=content(db,report_id)
+    from .competitions import snapshot
+    stages=list(dict.fromkeys(d['stage'] for d in snapshot(db,report_id)['match_details'] if d.get('stage') and d['stage'].lower()!='unknown'))
+    if stages:event=dict(event,stage_label=' / '.join(stages))
     return render_pages(event,db.report(report_id)['title'],supplied.get('player_name'),supplied.get('photo'))
