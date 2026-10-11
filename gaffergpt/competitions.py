@@ -154,6 +154,10 @@ def verify_event(packet,fixtures):
     if set(by_id)!={d['match_id'] for d in details} or any(d['competition_key']!=event['competition_key'] for d in details):
         raise ReportHold('Every selected cup fixture needs an explicit competition assignment. Unknown stages are fine.')
     facts=[('competition_name',event['name']),('event_dates',{'start':event['event_start'],'end':event['event_end']})]
+    if event.get('format'):facts.append(('event_format',event['format']))
+    import re
+    season=re.search(r'\bSeason\s+(\d+)\b',(event.get('announcement') or {}).get('season_context',''),re.I)
+    if season:facts.append(('season_number',int(season[1])))
     ties={}
     for d in details:
         f=by_id[d['match_id']]

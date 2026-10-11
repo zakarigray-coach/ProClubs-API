@@ -7,6 +7,13 @@ def cover_event_claim(fact,quote,start,candidates,sheet):
     if metric=='competition_name':
         if value not in quote:raise ValueError('Preserve the exact competition name.')
         return covered
+    if metric=='event_format':
+        if 'single elimination' in value.lower() and re.search(r'single[- ]elimination|knockout',quote,re.I):return covered
+        if value not in quote:raise ValueError('Event format claim must match the confirmed competition rules.')
+        return covered
+    if metric=='season_number':
+        if not re.search(r'\bseason\b',quote,re.I):raise ValueError('Season number needs an explicit season label.')
+        return {(a,b) for a,b,n in candidates if n==value}
     if metric=='confirmed_outcome':
         if value['outcome'].lower() not in quote.lower():
             raise ValueError('Cup outcome must match its explicit confirmation.')

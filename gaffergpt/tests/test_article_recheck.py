@@ -42,3 +42,22 @@ class RecheckTests(unittest.TestCase):
         self.held(['editorial_review','deterministic_style'])
         self.db.execute('UPDATE matches SET birmingham_score=9 WHERE match_id=1')
         with self.assertRaises(ReportHold):ReviewedDraftRecheck(self.db,self.rid)
+
+    def test_private_preview_uses_persisted_audit_not_thread_local_writer_state(self):
+        import asyncio
+        from gaffergpt.bot import GafferBot
+        from gaffergpt.config import Config
+        self.held(['editorial_review','deterministic_style'])
+        Reporter(self.db,writer=ReviewedDraftRecheck(self.db,self.rid)).generate(self.rid)
+        self.db.confirm_report(self.rid)
+        async def run():
+            bot=GafferBot(Config('test',42,30,database_path=self.db.path))
+            try:
+                # Main-thread writer state is absent; the finished audit is authoritative.
+                self.assertIsNone(bot.reporter.writer)
+                with self.assertLogs('gaffergpt',level='INFO'):
+                    await bot.rewrite_verified_report(f'{self.rid}:test:savedpreview')
+                self.assertEqual(bot.db.setting(f'report_rewrite:{self.rid}:test:savedpreview'),'complete')
+                self.assertEqual(bot.db.report(self.rid)['status'],'draft')
+            finally:await bot.close()
+        asyncio.run(run())

@@ -37,6 +37,12 @@ class CupTests(unittest.TestCase):
         self.assertIn('unconfirmed',e['start_time'])
         self.assertIsNone(e['prizes'])
         self.assertEqual(e['outcome'],'Unknown')
+    def test_announced_format_and_season_context_are_source_facts(self):
+        sheet=build_fact_sheet(self.packet([self.add()]))
+        quote='The single-elimination cup is preseason ahead of Season 4.'
+        claims=[{'fact_id':k,'quote':quote} for k,f in sheet['facts'].items() if f['metric'] in ('event_format','season_number')]
+        validate_final({'title':'The Minglewood Cup','body':quote},sheet,{'claims':claims,'unsupported':[]})
+
     def test_cup_excluded_from_league_and_practice(self):
         mid=self.add();sheet=build_fact_sheet(self.packet([mid]))
         self.assertEqual(self.db.official_record()['played'],0)

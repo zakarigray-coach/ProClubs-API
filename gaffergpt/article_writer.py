@@ -236,6 +236,7 @@ class SportsWriter(OpenAICoach):
                     record['checks'].append('deterministic_style')
                     review_sheet={k:sheet[k] for k in ('fixtures','quotes','narrative_evidence')}
                     review_sheet['award_confirmation']=sheet['references']['management:award']
+                    review_sheet['competition_context']=sheet.get('competition_context')
                     review_sheet['facts']={k:{field:value for field,value in f.items() if field!='sources'} for k,f in sheet['facts'].items() if f['kind']!='player' or f['subject'] in edited['title']+' '+edited['body']}
                     audit={'fact_sheet':review_sheet,'finished_article':edited,'desk_task':'audit_finished_article',
                            'review_focus':'Strongest story, selective facts, every paragraph useful, natural British English, grammar, accurate names, no repeated statistics, proportionate interpretation, meaningful ending. No policy explanations.'}

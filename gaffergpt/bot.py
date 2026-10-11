@@ -683,9 +683,9 @@ class GafferBot(discord.Client):
                 from .recheck_article import ReviewedDraftRecheck
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(Reporter(self.db,writer=ReviewedDraftRecheck(self.db,report_id)).generate,report_id)
-            elif request.endswith(':deliver'):
+            elif request.endswith((':deliver',':savedpreview')):
                 saved=self.db.report(report_id)
-                if saved['status']!='draft' or not saved['article']:raise ValueError('No reviewed draft available.')
+                if saved['status'] not in ('draft','confirmed') or not saved['article']:raise ValueError('No reviewed draft available.')
                 article=saved['article']
                 audits=self.db.rows("SELECT * FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
                 checked={'title':saved['title'],'body':article.split('\n\n',1)[1].strip()}
@@ -696,13 +696,18 @@ class GafferBot(discord.Client):
                 proof=json.loads(audits[0]['verification'])
                 validate_final(checked,sheet,proof['evidence'])
                 check_feature_quality(checked,{'management':report_content(self.db,report_id),'observations':{'player_statistics':{kind:group['players'] for kind,group in sheet['groups'].items()}}})
+                if saved['status']=='confirmed':
+                    self.db.execute("UPDATE weekly_reports SET status='draft' WHERE report_id=? AND status='confirmed' AND article=?",(report_id,article))
 
             else:
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(self.reporter.generate,report_id)
-            if request.endswith(':preview'):
-                sheet=self.reporter.writer.last_fact_sheet
-                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article,'sources':{'source_hash':sheet['source_hash'],'fixtures':sheet['fixtures'],'groups':sheet['groups'],'warnings':sheet['warnings']},'verification':self.reporter.writer.last_verification},ensure_ascii=False))
+            if request.endswith((':preview',':savedpreview')):
+                audit=self.db.one("SELECT fact_sheet,verification FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
+                if not audit:raise ValueError('No completed verification record is available for this draft.')
+                sheet=json.loads(audit['fact_sheet'])
+                persisted_proof=json.loads(audit['verification'])
+                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article,'sources':{'source_hash':sheet['source_hash'],'fixtures':sheet['fixtures'],'groups':sheet['groups'],'warnings':sheet['warnings']},'verification':persisted_proof},ensure_ascii=False))
                 self.db.set_setting('report_rewrite:'+request,'complete')
                 return
             owner=await self.fetch_user(self.config.owner_id)
