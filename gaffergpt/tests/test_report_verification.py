@@ -145,4 +145,29 @@ class AuditTests(unittest.TestCase):
         self.assertIsNone(writer.last_verification)
         self.assertLessEqual(writer.calls,10)
 
+class ApprovalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_changed_article_cannot_reuse_passed_audit(self):
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from gaffergpt.database import Database
+        from gaffergpt import report_audit
+        from gaffergpt.bot import DraftView
+        with tempfile.TemporaryDirectory() as folder:
+            db=Database(Path(folder)/'pep.db')
+            rid=db.open_report('2026-10-05','2026-10-12',42)['report_id']
+            original={'title':'Original headline','body':'Original checked text.'}
+            db.execute("UPDATE weekly_reports SET status='draft',title=?,article=? WHERE report_id=?",(original['title'],'RT FOOTBALL MEDIA\n\nChanged text.',rid))
+            aid=report_audit.start(db,rid)
+            writer=SimpleNamespace(last_fact_sheet=build_fact_sheet({'matches':[]}),last_attempts=[],last_verification={'article_hash':digest(original),'checks':['editorial_review']})
+            report_audit.finish(db,aid,writer,'passed')
+            bot=SimpleNamespace(db=db,config=SimpleNamespace(owner_id=42))
+            interaction=SimpleNamespace(user=SimpleNamespace(id=42),response=SimpleNamespace(send_message=AsyncMock()))
+            button=next(b for b in DraftView(bot,rid).children if b.label=='Approve Draft (save only)')
+            await button.callback(interaction)
+            self.assertEqual(db.report(rid)['status'],'draft')
+            self.assertIn('changed after verification',interaction.response.send_message.call_args.args[0])
+            self.assertTrue(interaction.response.send_message.call_args.kwargs['ephemeral'])
+
 if __name__=='__main__':unittest.main()
