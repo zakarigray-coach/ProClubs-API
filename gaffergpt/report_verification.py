@@ -143,6 +143,14 @@ def build_fact_sheet(packet):
             if highest>0 and 0<=summary['goals_for']-recorded<highest:
                 for p in players:
                     if p.get('goals')==highest:add('comparison',p['player'],'leading_scorer',True,kind,sources=[f'match:{mid}' for mid in sorted(mids)])
+        selected=[m for m in fixtures if m['match_type']==kind]
+        for result,metric in (('defeat','heaviest_defeat'),('win','largest_victory')):
+            outcomes=[m for m in selected if m['result']==result]
+            if outcomes:
+                margin=max(abs(m['birmingham_score']-m['opponent_score']) for m in outcomes)
+                for m in outcomes:
+                    if abs(m['birmingham_score']-m['opponent_score'])==margin:
+                        add('comparison',m['opponent'],metric,True,kind,m['match_id'],[f'match:{mid}' for mid in sorted(mids)])
         groups[kind]={'summary':summary,'players':players}
     management=packet.get('management') or {}
     if management.get('player_name'):add('award',management['player_name'],'player_of_week',True,sources=['management:award'])
