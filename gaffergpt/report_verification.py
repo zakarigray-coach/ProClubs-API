@@ -273,6 +273,10 @@ def validate_final(article,sheet,evidence):
                     covered.add((a,b))
         elif kind=='comparison':
             if fact['subject'] not in quote:raise ValueError('Comparison names the wrong player.')
+            labels=scope_labels(quote)
+            scope=('Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Official') if labels else scope_at(start)
+            if scope and scope!=fact['classification']:raise ValueError('Comparison mixes practice and competitive results.')
+            if len(sheet['groups'])>1 and not scope:raise ValueError('Comparison requires an explicit practice or competitive scope.')
         elif kind=='period':
             if not re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{4}-\d{2}-\d{2}',quote):continue
             allowed={v for _,_,v in numeric_spans(str(value),{'facts':{}})}

@@ -33,6 +33,8 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual({(f['subject'],f['classification'],f['fixture_id']) for f in comparisons},{('Chelsea','Practice',1),('Arsenal','Official',2)})
         text='The heaviest practice loss was against Chelsea.'
         self.validate(s,text,[self.evidence(s,'Chelsea','heaviest_defeat',text,kind='comparison',fixture_id=1)])
+        wrong='The heaviest league loss was against Chelsea.'
+        with self.assertRaises(ValueError):self.validate(s,wrong,[self.evidence(s,'Chelsea','heaviest_defeat',wrong,kind='comparison',fixture_id=1)])
     def test_conflicting_source_values_hold(self):
         with self.assertRaisesRegex(ReportHold,'Conflicting goals'):
             self.sheet(stats=[stat(1,'Zak','goals',1),stat(1,'Zak','goals',2,'OurProClubs')])
