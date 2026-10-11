@@ -19,6 +19,7 @@ from .parser import parse_recap, parse_registration, is_match_recap, is_setup_pr
 from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
 from .scheduler import WeeklyScheduler, week_window
+from .session_reviews import SessionReviews
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -71,6 +72,67 @@ class ReviewView(ManagedView):
                 bot.db.classify(match_id,k,v,interaction.user.id)
                 await interaction.response.edit_message(content=f'Match #{match_id}: {match_label(bot.db.match(match_id))}\nClassified as {k}.',view=self)
             self.add_item(Action(label,f'gaffer:classify:{match_id}:{kind}:{venue}',choose))
+
+
+class SessionMatchView(ManagedView):
+    def __init__(self, bot, batch_id, page=0):
+        super().__init__(bot)
+        rows=bot.session_reviews.matches(batch_id)
+        total=max(1,(len(rows)+19)//20)
+        page=min(max(page,0),total-1)
+        matches=rows[page*20:(page+1)*20]
+        if matches:
+            menu=discord.ui.Select(placeholder='Choose a match to review',
+                custom_id=f'pep:session-select:{batch_id}:{page}',
+                options=[discord.SelectOption(label=f"#{m['match_id']} {match_label(m)} [{m['match_type']}]"[:100],value=str(m['match_id'])) for m in matches])
+            async def choose(interaction):
+                mid=int(menu.values[0]); m=bot.db.match(mid)
+                await interaction.response.send_message(f"Match #{mid}: {match_label(m)}",view=ReviewView(bot,mid),ephemeral=True)
+            menu.callback=choose
+            self.add_item(menu)
+        for label,target in [('Previous',page-1),('Next',page+1)]:
+            if 0<=target<total:
+                async def move(interaction,p=target):
+                    await interaction.response.edit_message(content=f'Session matches — page {p+1}',view=SessionMatchView(bot,batch_id,p))
+                self.add_item(Action(label,f'pep:session-page:{batch_id}:{page}:{target}',move))
+
+
+class SessionReviewView(ManagedView):
+    def __init__(self, bot, batch_id):
+        super().__init__(bot)
+        async def review(interaction):
+            await interaction.response.send_message('Choose a session match. Saved classifications are shown in the menu.',
+                view=SessionMatchView(bot,batch_id),ephemeral=True)
+        self.add_item(Action('Review Session Matches',f'pep:session-review:{batch_id}',review))
+
+
+class SessionDelivery:
+    def __init__(self, bot):
+        self.bot=bot
+
+    async def channel(self):
+        owner=await self.bot.fetch_user(self.bot.config.owner_id)
+        return owner.dm_channel or await owner.create_dm()
+
+    async def find(self, marker, created_at):
+        channel=await self.channel()
+        async for message in channel.history(limit=None,after=datetime.fromisoformat(created_at)):
+            if message.author.id==self.bot.user.id and any(has_marker(e,marker) for e in message.embeds):
+                return message.id
+        return None
+
+    async def send(self, batch_id, marker):
+        rows=self.bot.session_reviews.matches(batch_id)
+        lines=[f"Session ready for review: {len(rows)} saved matches.",
+               'Choose each match below. Nothing counts as official or practice until classified.','']
+        lines.extend(f"#{m['match_id']} {match_label(m)}" for m in rows[:10])
+        if len(rows)>10:
+            lines.append('All remaining matches are available in the paged review menu.')
+        embed=discord.Embed(title='PEP — SESSION REVIEW',description='\n'.join(lines)[:3900])
+        embed.set_footer(text=branded_footer(marker))
+        channel=await self.channel()
+        message=await channel.send(embed=embed,view=SessionReviewView(self.bot,batch_id),allowed_mentions=discord.AllowedMentions.none())
+        return message.id
 
 
 class MatchSelect(discord.ui.Select):
@@ -204,6 +266,8 @@ class GafferBot(discord.Client):
                 self.db.set_setting('owner_link_seeded','true')
             except ValueError:
                 log.warning('Owner player link needs management correction.')
+        self.session_reviews=SessionReviews(self.db,config.session_quiet_minutes)
+        self.session_review_lock=asyncio.Lock()
         self.reporter=Reporter(self.db)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
@@ -220,6 +284,8 @@ class GafferBot(discord.Client):
     async def setup_hook(self):
         if self.config.reporter_secret:
             self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
+        for batch in self.db.rows('SELECT batch_id FROM session_reviews WHERE message_id IS NOT NULL'):
+            self.add_view(SessionReviewView(self,batch['batch_id']))
         for m in self.db.rows('SELECT match_id FROM matches'):
             self.add_view(ReviewView(self,m['match_id']))
         for report in self.db.rows("SELECT * FROM weekly_reports WHERE status!='skipped'"):
@@ -324,20 +390,9 @@ class GafferBot(discord.Client):
             await self.ingest_message(message)
             self.db.set_setting(f'cursor:{channel_id}',str(message.id))
 
-    async def pending_reviews(self):
-        for m in self.db.rows("SELECT * FROM matches WHERE review_message_id IS NULL AND match_type='Unknown' ORDER BY match_id LIMIT 10"):
-            owner=await self.fetch_user(self.config.owner_id)
-            marker=f"gaffer:review:{m['match_id']}"
-            channel=owner.dm_channel or await owner.create_dm()
-            existing=None
-            async for message in channel.history(limit=None,after=datetime.fromisoformat(m['detected_at'])):
-                if message.author.id==self.user.id and any(has_marker(e,marker) for e in message.embeds):
-                    existing=message; break
-            if existing is None:
-                embed=discord.Embed(title=f"Match Review #{m['match_id']}",description=match_label(m)+'\nStarts Unknown. Choose its classification below.')
-                embed.set_footer(text=branded_footer(marker))
-                existing=await owner.send(embed=embed,view=ReviewView(self,m['match_id']))
-            self.db.execute('UPDATE matches SET review_message_id=? WHERE match_id=?',(str(existing.id),m['match_id']))
+    async def pending_reviews(self, force=False):
+        async with self.session_review_lock:
+            return await self.session_reviews.tick(SessionDelivery(self),force=force)
 
     async def refresh_footers(self):
         owner=await self.fetch_user(self.config.owner_id)
@@ -515,6 +570,14 @@ class GafferBot(discord.Client):
         async def matches(interaction):
             rows=self.db.rows('SELECT * FROM matches ORDER BY played_at DESC,match_id DESC LIMIT 15')
             await interaction.response.send_message('\n'.join(f"#{m['match_id']} {match_label(m)} [{m['match_type']}]" for m in rows)[:1900] or 'No matches saved yet.',ephemeral=True)
+
+        @self.tree.command(name='endsession',description='Management: finish this recap session and request one review DM')
+        @app_commands.check(authorized)
+        async def endsession(interaction):
+            await interaction.response.defer(ephemeral=True)
+            await self.recover_recaps()
+            sent=await self.pending_reviews(force=True)
+            await interaction.followup.send('Session review sent to Coach.' if sent else 'No new matches need a session review.',ephemeral=True)
 
         @self.tree.command(name='reviewmatches',description='Review the next ten unclassified matches')
         @app_commands.check(authorized)

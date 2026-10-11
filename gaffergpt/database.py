@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS weekly_jobs (
  lease_until TEXT, sent_at TEXT, message_id TEXT, reminder_at TEXT, reminder_sent_at TEXT,
  attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT
 );
+CREATE TABLE IF NOT EXISTS session_reviews (
+ batch_id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, sent_at TEXT, message_id TEXT
+);
+CREATE TABLE IF NOT EXISTS session_review_matches (
+ batch_id INTEGER NOT NULL REFERENCES session_reviews(batch_id),
+ match_id INTEGER NOT NULL UNIQUE REFERENCES matches(match_id), PRIMARY KEY(batch_id,match_id)
+);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 """

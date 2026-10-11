@@ -215,3 +215,37 @@ The data tabs are viewing mirrors, not match intake or backup. Make match correc
 The separate `Link Players` input tab supports up to 100 rows (`A5:D104`). Column A is the exact OurProClubs player name; B is a Discord user ID stored as text; C/D are Pep-owned status/saved-at fields. Pep reads this tab every two minutes, including when the database has not changed. It checks new IDs against the configured Discord server with `fetch_member`, rejects bots, duplicate names/IDs, numeric or scientific-notation IDs, and existing-link conflicts. Only verified, unclaimed links are inserted atomically with the configured owner as actor. Existing links are never overwritten or deleted by this sheet; management corrects conflicts with `/setplayerlink` or `/unlinkplayer` in Discord. Clearing a cell does not unlink anyone. The bot writes only C/D and never overwrites manager input. Status updates are withheld if inputs changed during processing. The ordinary `Player_Links` tab reflects saved links after synchronization.
 
 Keep workbook editor access limited to authorized management and the service account: writing this input tab authorizes linking requests. The initial eight names are from the supplied sample recap, not a verified complete club roster. Add further names and IDs only when their identities are known.
+
+
+## Session reviews
+Pep saves incoming matches immediately but sends one grouped review DM after 60 minutes
+without a newly saved recap. This is an inactivity estimate, not proof the club stopped playing.
+Management can use `/endsession` when finished to request the review immediately.
+`PEP_SESSION_IDLE_MINUTES` optionally adjusts the quiet period (minimum 30, default 60).
+`/reviewmatches` and `/match` remain available on demand. Classification does not change
+until management chooses it; unclassified matches count in neither official nor practice analysis.
+Session membership, delivery IDs and footer recovery markers live in the existing database.
+Restarts preserve the quiet deadline and delivered batches. Menus paginate all session matches.
+
+## NACL season source: planned, not connected
+The intended season authority is NACL's confirmed MPL competition and season records;
+PCT+/OurProClubs remain possible session-stat sources. No NACL importer or automatic
+classification is enabled: approved API/feed/export access has not been verified.
+VirtualArena's published terms require permission for automated collection/export.
+
+Once approved access is available, verify team, competition and season IDs and import
+completed results with stable NACL match IDs, recorded home/away and source provenance.
+A verified result inside the configured MPL season can be classified Official without
+asking Coach. A fixture without a final result cannot. Match-level data is required for
+weekly selection; cumulative season totals alone cannot establish a weekly recap.
+Preserve corrections/forfeits as official outcomes, without inventing on-field statistics.
+Use only returned statistics and identify estimates separately.
+
+Link Discord/EA/NACL records with shared external IDs where available; ambiguous matches
+must go to review. Never merge the two fixtures against the same opponent by date or score.
+An official game also appearing in a session recap must not be counted again as practice.
+Absence from NACL does not establish practice: submissions may be delayed or missing.
+Use management-confirmed practice sessions, with unresolved entries excluded from analysis.
+All sources, match records and reporting selections must use the same central database.
+Reporter consumes selected official matches and selected practice sections separately;
+articles still require selection confirmation and approval before publication.
