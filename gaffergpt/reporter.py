@@ -2,6 +2,7 @@
 import json
 from .analysis import FactualGaffer
 from .weekly_intake import CONTENT_SCHEMA
+from .excel_stats import player_totals, stats_text
 from .editorial import choose_editorial, editorial_lead, editorial_headline
 
 
@@ -90,6 +91,15 @@ class Reporter:
                 for c in comparisons:
                     lines.append(f"{c['subject']} — {c['metric'].replace('_',' ')}: {c['before']:g} to {c['after']:g} {c['unit'] or ''} between selected {c['from_type'].lower()} match #{c['from_match']} and {c['to_type'].lower()} match #{c['to_match']}.".strip())
                 lines.append('Missing metrics are not treated as zero. Match conditions, minutes played and positions can affect these comparisons.')
+            player_sections={}
+            for kind in ('Official','Practice'):
+                if kind=='Practice' and not report['include_development']:continue
+                ids={m['match_id'] for m in matches if m['match_type']==kind}
+                players=player_totals([s for s in statistics if s['match_id'] in ids and s.get('source')=='PCT+ Excel'])
+                if players:
+                    player_sections[kind]=players
+                    lines+=['',('OFFICIAL PLAYER PERFORMANCES' if kind=='Official' else 'PRACTICE PLAYER PERFORMANCES'),stats_text(players)]
+            observations['player_statistics']=player_sections
             conn.execute(CONTENT_SCHEMA)
             supplied=conn.execute('SELECT * FROM weekly_report_content WHERE report_id=?',(report_id,)).fetchone()
             if supplied and supplied['notes']:

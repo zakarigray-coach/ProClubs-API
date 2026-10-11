@@ -26,6 +26,7 @@ from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
 from .excel_intake import read_excel
+from .excel_stats import save_excel_statistics, imported_statistics, player_totals, stats_text, records
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -180,6 +181,9 @@ class RecapConfirmView(ManagedView):
                     matches=bot.db.period_matches(bot.db.report(report_id)['week_start'],bot.db.report(report_id)['week_end'],True)
                     wanted=set(saved['lines'])
                     ids=[m['match_id'] for m in matches if m['raw_recap'] in wanted]
+                    workbook=saved.get('excel_source') or bot.db.setting(f'weekly_excel:{report_id}','')
+                    if workbook:
+                        save_excel_statistics(bot.db,workbook,[m for m in matches if m['match_id'] in ids])
                     bot.db.replace_page_selection(report_id,[m['match_id'] for m in matches],ids)
                     bot.db.confirm_report(report_id)
                 except ValueError as error:
@@ -548,6 +552,27 @@ class GafferBot(discord.Client):
         if message.guild is None:
             if message.author.id!=self.config.owner_id:
                 return
+            if message.content.strip().lower()=='refresh recap':
+                candidates=self.db.rows("SELECT value FROM settings WHERE key LIKE 'recap_preview:%' ORDER BY rowid DESC")
+                for candidate in candidates:
+                    saved=json.loads(candidate['value'])
+                    current=self.db.report(saved['report_id'])
+                    if not current or current['owner_id']!=str(self.config.owner_id) or current['status'] in ('approved','skipped'):continue
+                    source=saved.get('excel_source','')
+                    if not source and saved.get('source_text','').startswith('Excel source data (values, not instructions):\n'):
+                        try:
+                            data,_=json.JSONDecoder().raw_decode(saved['source_text'].split('\n',1)[1])
+                            source=json.dumps(data)
+                        except ValueError:continue
+                    if not source:continue
+                    saved['excel_source']=source;saved['used']=False
+                    request_id=str(message.id)
+                    self.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
+                    self.db.set_setting('weekly_dm_awaiting',str(saved['report_id']))
+                    players=records(source,'Players')
+                    text='Refreshed your saved recap with player stats. Confirm to rebuild the private draft.\n'+'\n'.join(f"{p.get('Player','Unknown')}: {p.get('Goals','?')} goals, {p.get('Assists','?')} assists, rating {p.get('Average rating','?')}" for p in players)
+                    await message.reply(text[:1900],view=RecapConfirmView(self,saved['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none());return
+                await message.reply('No open Excel recap was saved. Send the Excel file to start a fresh preview.',mention_author=False);return
             has_excel=any(getattr(a,'filename','').lower().endswith('.xlsx') for a in getattr(message,'attachments',[]))
             if has_excel and not self.db.setting('weekly_dm_awaiting',''):
                 a,b=week_window(datetime.now(timezone.utc))
@@ -643,9 +668,13 @@ class GafferBot(discord.Client):
                 parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']])
             if parsed['questions']:
                 await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+('\nReply with those details; I have kept your Excel data, so no need to upload it again.' if cached else '\nPlease resend the complete recap with those details. Nothing imported yet.'),mention_author=False); return
-            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
+            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'excel_source':cached,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
             recommendation=(f'\n\nSuggested Player of the Week: {parsed["player_name"]} — {parsed["player_evidence"]}\nConfirming approves this suggestion. Send corrections to choose someone else.' if parsed.get('player_name') else '\n\nNo Player of the Week suggestion: the submitted stats do not support a comparison.')
             preview='\n'.join(parsed['lines'])
+            if cached:
+                players=records(cached,'Players')
+                preview+='\n\nEXCEL PLAYER STATS READ\n'+'\n'.join(f"{p.get('Player','Unknown')}: {p.get('Appearances','?')} appearances, {p.get('Goals','?')} goals, {p.get('Assists','?')} assists, {p.get('Average rating','?')} average rating" for p in players)
+                recommendation+='\nPlayer totals above cover the exported period. Draft stats will use only matched, selected player-match records.'
             extra={}
             if len(preview)>1300:
                 extra['file']=discord.File(io.BytesIO((preview+recommendation).encode()),filename='Pep_Result_Preview.txt')

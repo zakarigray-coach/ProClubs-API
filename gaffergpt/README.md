@@ -326,3 +326,12 @@ Pep keeps the uploaded values and clarification context, so reuploading is unnec
 For example: **All these matches were practices.** EA's `league` label never establishes MPL status.
 Large match lists include a complete text preview attachment before confirmation.
 Player-week aggregates may cover practices and official games together; suggestions must state that scope.
+
+
+Excel player stats now carry through confirmation into `match_statistics` in the central database.
+The preview includes all exported player totals; the draft computes player performances only from
+selected, unambiguously matched player-match records, separately for Official and Practice.
+The match identity check uses Eastern date, opponent and both scores. Ambiguous identical fixtures
+receive no guessed stats. Missing metrics stay missing, zero-minute rows do not count as appearances,
+and passing percentages are weighted by recorded attempts, not averaged across games.
+This is factual reporting, not individual development advice. The club-only coaching policy is unchanged.
