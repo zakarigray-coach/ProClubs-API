@@ -95,7 +95,6 @@ class SportsWriter(OpenAICoach):
         # Complete factual sentences are evidence, never fragments pasted into prose.
         brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
         brief['verified_facts']=fact_registry(clean)
-        brief['selected_records']=clean
         brief['desk_task']=('Write complete natural sentences from this evidence. No placeholders. '
             'Use a compelling factual lead, selective statistics, smooth transitions and a concise ending. '
             'Target 400–550 words when evidence supports it; prefer a shorter strong article to filler. '
@@ -138,8 +137,9 @@ def check_finished_prose(article,facts):
         raise ValueError('Broken grammar or singular/plural agreement')
     # Block invented numeric values before semantic review checks their attribution.
     allowed={float(n) for n in re.findall(r'\d+(?:\.\d+)?',' '.join(facts.values()))}
-    if {float(n) for n in re.findall(r'\d+(?:\.\d+)?',title+' '+body)}-allowed:
-        raise ValueError('Article introduces a numeric value outside the verified evidence')
+    extra={float(n) for n in re.findall(r'\d+(?:\.\d+)?',title+' '+body)}-allowed
+    if extra:
+        raise ValueError('Remove unsupported numeric values '+str(sorted(extra))+'. Use only the rounded figures in verified_facts; omit dates and derived figures.')
 
 def period_label(report):
     zone=ZoneInfo('America/New_York')
