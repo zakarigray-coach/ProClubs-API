@@ -48,3 +48,15 @@ class SportsArticleTests(unittest.TestCase):
         self.assertNotIn('clean_sheets',clean[0])
         self.assertEqual(clean[1]['goals_conceded'],3)
         self.assertEqual(packet['observations']['player_statistics']['Practice'][0]['goals_conceded'],10)
+
+    def test_recap_reset_preserves_matches_and_is_one_time(self):
+        from gaffergpt.recap_reset import reset_recap
+        self.db.set_setting('recap_preview:old','{"report_id":'+str(self.rid)+'}')
+        self.db.set_setting(f'weekly_excel:{self.rid}','old workbook')
+        self.assertTrue(reset_recap(self.db,self.rid,'1','test'))
+        self.assertEqual(len(self.db.selected(self.rid)),0)
+        self.assertEqual(len(self.db.rows('SELECT * FROM matches')),2)
+        self.assertEqual(self.db.report(self.rid)['status'],'selecting')
+        self.assertEqual(self.db.setting('weekly_dm_awaiting'),str(self.rid))
+        self.assertFalse(reset_recap(self.db,self.rid,'1','test'))
+        self.assertFalse(self.db.setting('recap_preview:old'))

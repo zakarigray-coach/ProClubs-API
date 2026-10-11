@@ -5,6 +5,8 @@ import io
 import json
 import logging
 import math
+import os
+from .recap_reset import reset_recap
 import sys
 from datetime import datetime, timezone, timedelta
 import discord
@@ -364,6 +366,11 @@ class GafferBot(discord.Client):
         intents=discord.Intents.default(); intents.message_content=True
         super().__init__(intents=intents,allowed_mentions=discord.AllowedMentions.none())
         self.config=config; self.db=Database(config.database_path)
+        reset_request=os.getenv('PEP_RECAP_RESET_REQUEST','')
+        if reset_request:
+            report_id,request=reset_request.split(':',1)
+            if reset_recap(self.db,int(report_id),config.owner_id,request):
+                log.info('Owner-requested recap reset completed; report=%s',report_id)
         # Optional first-run owner link; never overwrite a later correction.
         if config.owner_player_name and not self.db.player_link(config.owner_id) and not self.db.setting('owner_link_seeded'):
             try:
