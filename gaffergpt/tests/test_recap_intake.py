@@ -74,3 +74,14 @@ class PhotoAndAwardTests(DMWorkflowTests):
         await view.children[0].callback(interaction)
         self.assertEqual(len(owner.send.call_args.kwargs['files']),2)
         self.assertIn('Zak — Suggestion: 2 assists',self.bot.db.report(self.rid)['article'])
+
+class PracticeClarificationRegressionTests(unittest.TestCase):
+    def test_practice_null_venue_and_repeated_confirmation_cannot_block(self):
+        result=validate_extraction({'results':[{'date':'2026-10-07','type':'Practice','opponent':'Chelsea','birmingham_score':2,'opponent_score':2}],
+            'questions':['Confirm Home/Away is null?','Coach says practice; confirm Type=Practice?']})
+        self.assertEqual(result['questions'],[])
+        self.assertEqual(result['lines'],['2026-10-07 | Practice | Chelsea | 2-2'])
+    def test_missing_score_or_invalid_date_still_requires_clarification(self):
+        for date,score in [('2026-10-07',None),('2026-99-99',2)]:
+            result=validate_extraction({'results':[{'date':date,'type':'Practice','opponent':'Chelsea','birmingham_score':score,'opponent_score':2}],'questions':[]})
+            self.assertTrue(result['questions']);self.assertEqual(result['lines'],[])
