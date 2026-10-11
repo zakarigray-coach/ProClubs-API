@@ -46,6 +46,14 @@ def render_checked(result,facts,packet):
     names=[p['player'] for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps]
     names += [m['opponent'] for m in packet['matches']]
     for name in sorted(names,key=len,reverse=True):raw=raw.replace(name,'NAME')
+    # A freely written score is safe only when it matches a selected fixture;
+    # player numbers still require an attributed fact phrase.
+    scores={f"{m['birmingham_score']}–{m['opponent_score']}" for m in packet['matches']}
+    def verified_score(match):
+        score=match[0].replace('-','–')
+        if score not in scores:raise ValueError('Score not in selected fixtures: '+score)
+        return 'SCORE'
+    raw=re.sub(r'\b\d{1,2}[–-]\d{1,2}\b',verified_score,raw)
     unbound=re.search(r'\d+(?:\.\d+)?',raw) or NUMBER_WORDS.search(raw)
     if unbound:
         excerpt=raw[max(0,unbound.start()-45):unbound.end()+55].replace('\n',' ')

@@ -33,3 +33,8 @@ class ArticleFactTests(unittest.TestCase):
         self.assertIn('three goals and six assists',facts['Practice_player_0_attack'])
         self.assertFalse(facts['Practice_player_0_attack'].endswith('.'))
         self.assertIn('8.63',facts['Practice_player_1_rating'])
+
+    def test_selected_scores_can_flow_naturally_but_invented_scores_fail(self):
+        result=self.result('The 6–2 win provided a contrast to the 2–5 defeat. [[Practice_player_0_attack]]')
+        self.assertIn('6–2 win',render_checked(result,self.facts,self.packet)[1])
+        with self.assertRaises(ValueError):render_checked(self.result('A 9–0 win. [[Practice_player_0_attack]]'),self.facts,self.packet)
