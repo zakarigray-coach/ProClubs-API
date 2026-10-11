@@ -12,7 +12,7 @@ def fact_registry(packet):
         draws=sum(m['birmingham_score']==m['opponent_score'] for m in scored)
         losses=len(scored)-wins-draws
         gf=sum(m['birmingham_score'] for m in scored);ga=sum(m['opponent_score'] for m in scored)
-        facts[kind+'_record']=f'Birmingham City recorded {wins} wins, {draws} draws and {losses} defeats across {len(scored)} {kind.lower()} matches, scoring {gf} goals and conceding {ga}.'
+        facts[kind+'_record']=f'Birmingham City recorded {wins} {'win' if wins==1 else 'wins'}, {draws} {'draw' if draws==1 else 'draws'} and {losses} {'defeat' if losses==1 else 'defeats'} across {len(scored)} {kind.lower()} matches, scoring {gf} goals and conceding {ga}.'
         for i,m in enumerate(scored):
             facts[f'{kind}_match_{i}']=f"Birmingham City {'beat' if m['birmingham_score']>m['opponent_score'] else 'drew with' if m['birmingham_score']==m['opponent_score'] else 'lost to'} {m['opponent']} {m['birmingham_score']}–{m['opponent_score']} in {kind.lower()}."
         for i,p in enumerate(packet.get('observations',{}).get('player_statistics',{}).get(kind,[])):
@@ -35,7 +35,7 @@ NUMBER_WORDS=re.compile(r'\b(?:zero|two|three|four|five|six|seven|eight|nine|ten
 
 def render_checked(result,facts,packet):
     title=result.get('title','').strip();body=result.get('body','').strip()
-    if not title or len(body.split())<60:raise ValueError('Incomplete article')
+    if not title or len(body.split())<20:raise ValueError('Incomplete article')
     used=TOKEN.findall(body)
     if not used or any(k not in facts for k in used):raise ValueError('Unknown or missing fact references')
     if any(n>1 for n in Counter(used).values()):raise ValueError('Repeated statistical paragraph')

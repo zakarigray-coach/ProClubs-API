@@ -117,7 +117,17 @@ class Reporter:
                         'matches':[{k:m.get(k) for k in ('played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')} for m in matches
                                    if m['match_type']=='Official' or report['include_development']],
                         'observations':observations,'management':{k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None,'recent_articles':recent}
+                # Release the write lock while the remote sports desk works.
+                conn.commit()
                 title,body=self.writer.write(packet)
+                conn.execute('BEGIN IMMEDIATE')
+                current=conn.execute('SELECT * FROM weekly_reports WHERE report_id=?',(report_id,)).fetchone()
+                current_matches=[dict(r) for r in conn.execute('SELECT m.* FROM report_matches rm JOIN matches m USING(match_id) WHERE report_id=? ORDER BY played_at,match_id',(report_id,))]
+                current_stats=[]
+                for m in current_matches:
+                    current_stats.extend(dict(r) for r in conn.execute('SELECT * FROM match_statistics WHERE match_id=?',(m['match_id'],)))
+                if current['status']!='confirmed' or current_matches!=matches or current_stats!=statistics or current['include_development']!=report['include_development']:
+                    raise ValueError('Report facts changed during writing; regenerate using the latest selections.')
                 article='\n'.join(['RT FOOTBALL MEDIA',title,f"By {editorial['reporter']} | RT Football Media",
                                    period_label(report),'DRAFT — awaiting Coach review','',body])
             observations['editorial']={key:editorial[key] for key in ('reporter','opening','style')}

@@ -22,6 +22,6 @@ class ArticleFactTests(unittest.TestCase):
         for text in ('[[Practice_record]] [[Practice_record]]','[[made_up]]'):
             with self.assertRaises(ValueError):render_checked(self.result(text),self.facts,self.packet)
     def test_record_calculated_and_rating_rounded(self):
-        self.assertIn('2 wins, 1 draws and 1 defeats',self.facts['Practice_record'])
+        self.assertIn('2 wins, 1 draw and 1 defeat',self.facts['Practice_record'])
         self.assertIn('13 goals and conceding 10',self.facts['Practice_record'])
         self.assertIn('8.63',self.facts['Practice_player_1_rating'])

@@ -1,6 +1,7 @@
 """Sports desk prose from a verified fact packet; provider failures stay retryable."""
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .coaching_ai import OpenAICoach
@@ -82,6 +83,7 @@ class SportsWriter(OpenAICoach):
         brief['verified_sentences']=facts
         brief['writing_contract']=('Insert selected verified sentences using [[fact_key]] as complete sentences. '
             'Never rewrite their figures, names or attribution. No numerical claims outside tokens, including spelled numbers. '
+            'Return the literal [[fact_key]] tokens in the JSON body, do not expand them; code expands them later. '
             'Use each fact once. Highlight at most three players. Do not repeat scores/totals elsewhere. '
             'Keep prose around facts concise, natural and evidence-based. Include [[award]] under Player of the Week if present. '
             'A headline and fluent story matter more than length. Do not invent tactical causes. '
@@ -97,8 +99,9 @@ class SportsWriter(OpenAICoach):
                 edited=json.loads(await self.advise(json.dumps(edit,ensure_ascii=False)))
                 try:return render_checked(edited,facts,clean)
                 except ValueError as error:
+                    logging.getLogger(__name__).warning('Sports desk validation: %s',error)
                     edit['editing_draft']=edited;edit['validation_error']=str(error)
-            raise RuntimeError('The article failed its fact checks. Saved results are ready for retry.')
+            raise RuntimeError('The article failed its fact checks: '+edit['validation_error']+'. Saved results are ready for retry.')
         return asyncio.run(draft_and_edit())
 
 def period_label(report):
