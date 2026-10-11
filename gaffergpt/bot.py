@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from .recap_reset import reset_recap
+from .report_verification import ReportHold, digest
 import sys
 from datetime import datetime, timezone, timedelta
 import discord
@@ -195,6 +196,10 @@ class RecapConfirmView(ManagedView):
                 await interaction.response.defer(ephemeral=True)
                 try:
                     article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                except ReportHold as error:
+                    saved['used']=False;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
+                    await interaction.followup.send(str(error),ephemeral=True)
+                    return
                 except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
                     saved['used']=False;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
                     log.warning('Weekly sports writer unavailable; confirmed facts retained.')
@@ -267,6 +272,9 @@ class ReportView(ManagedView):
             await interaction.response.defer(ephemeral=True)
             try:
                 article=await asyncio.to_thread(bot.reporter.generate,report_id)
+            except ReportHold as error:
+                await interaction.followup.send(str(error),ephemeral=True)
+                return
             except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
                 log.warning('Weekly sports writer unavailable; confirmed selections retained.')
                 await interaction.followup.send('The sports writer could not finish. Your selections are saved. Try Generate Report again.',ephemeral=True)
@@ -331,6 +339,17 @@ class DraftView(ManagedView):
                 await interaction.response.send_message('This week was skipped.',ephemeral=True); return
             bot.db.execute("UPDATE weekly_reports SET status='selecting',article=NULL,observations=NULL WHERE report_id=?",(report_id,))
             await interaction.response.send_message(bot.report_summary(report_id),view=ReportView(bot,report_id),ephemeral=True)
+        async def statistics(interaction):
+            audits=bot.db.rows("SELECT fact_sheet FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
+            if not audits:
+                await interaction.response.send_message('Generate a checked draft first.',ephemeral=True);return
+            sheet=json.loads(audits[0]['fact_sheet'])
+            sections=[]
+            for kind,group in sheet['groups'].items():
+                sections.append(kind.upper()+' MATCHES\n'+stats_text(group['players']))
+            if sheet['warnings']:sections.append('DATA COVERAGE\n'+'\n'.join(sheet['warnings']))
+            await interaction.response.send_message(file=discord.File(io.BytesIO(('\n\n'.join(sections)).encode()),filename=f'RT_Statistics_{report_id}.txt'),ephemeral=True)
+        self.add_item(Action('View Statistics',f'pep:statistics:{report_id}',statistics))
         self.add_item(player_photo_button(bot,report_id,'draft'))
         self.add_item(Action('Approve Draft (save only)',f'gaffer:approve:{report_id}',approve,discord.ButtonStyle.success))
         self.add_item(Action('Change Selection',f'gaffer:change:{report_id}',change))
@@ -504,33 +523,21 @@ class GafferBot(discord.Client):
                 saved=self.db.report(report_id)
                 if saved['status']!='draft' or not saved['article']:raise ValueError('No reviewed draft available.')
                 article=saved['article']
-                copy_edit=os.getenv('PEP_REPORT_COPY_EDIT','')
-                if copy_edit:
-                    edited=json.loads(copy_edit)
-                    if edited.get('report_id')!=report_id or edited.get('request')!=request:raise ValueError('Copy edit is for another request.')
-                    # Final owner-requested copy edit changes prose, never selected facts.
-                    observations=json.loads(saved['observations'] or '{}')
-                    management=report_content(self.db,report_id)
-                    packet={'matches':selected,'observations':observations,'management':management}
-                    check_finished_prose(edited,feature_facts(packet))
-                    check_feature_quality(edited,packet)
-                    header=article.split('\n\n',1)[0].splitlines()
-                    header[1]=edited['title']
-                    article='\n'.join(header)+'\n\n'+edited['body'].strip()
-                    with self.db.connect() as conn:
-                        changed=conn.execute("UPDATE weekly_reports SET title=?,article=? WHERE report_id=? AND status='draft'",
-                            (edited['title'],article,report_id)).rowcount
-                        if changed!=1:raise ValueError('Draft changed during copy edit.')
+                audits=self.db.rows("SELECT * FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
+                checked={'title':saved['title'],'body':article.split('\n\n',1)[1].strip()}
+                if not audits or audits[0]['article_hash']!=digest(checked):
+                    raise ValueError('Saved draft has no matching completed verification. Generate it through the reporting workflow first.')
             else:
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(self.reporter.generate,report_id)
             if request.endswith(':preview'):
-                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article},ensure_ascii=False))
+                sheet=self.reporter.writer.last_fact_sheet
+                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article,'sources':{'source_hash':sheet['source_hash'],'fixtures':sheet['fixtures'],'groups':sheet['groups'],'warnings':sheet['warnings']},'verification':self.reporter.writer.last_verification},ensure_ascii=False))
                 self.db.set_setting('report_rewrite:'+request,'complete')
                 return
             owner=await self.fetch_user(self.config.owner_id)
             await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
-                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Verified.txt')],
+                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Draft.txt')],
                 view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
             self.db.set_setting('report_rewrite:'+request,'complete')
             log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))

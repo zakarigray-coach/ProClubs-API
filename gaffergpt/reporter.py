@@ -1,6 +1,7 @@
 """Reporter reads the shared store and prepares drafts; it never publishes."""
 import json
 from .article_writer import period_label
+from . import report_audit
 from .analysis import FactualGaffer
 from .weekly_intake import CONTENT_SCHEMA
 from .excel_stats import player_totals, stats_text
@@ -24,6 +25,19 @@ class Reporter:
         self.writer=writer
 
     def generate(self, report_id):
+        if not self.writer:return self._generate(report_id)
+        if hasattr(self.writer,'reset_audit'):self.writer.reset_audit()
+        audit_id=report_audit.start(self.db,report_id)
+        try:
+            article=self._generate(report_id)
+            report_audit.finish(self.db,audit_id,self.writer,
+                'passed' if getattr(self.writer,'last_verification',None) else 'unverified_legacy_writer')
+            return article
+        except Exception as error:
+            report_audit.finish(self.db,audit_id,self.writer,'held',error)
+            raise
+
+    def _generate(self, report_id):
         # One transaction prevents classification changes racing draft creation.
         with self.db.connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
@@ -117,6 +131,13 @@ class Reporter:
                         'matches':[{k:m.get(k) for k in ('played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')} for m in matches
                                    if m['match_type']=='Official' or report['include_development']],
                         'observations':observations,'management':{k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None,'recent_articles':recent}
+                included=[m for m in matches if m['match_type']=='Official' or report['include_development']]
+                included_ids={m['match_id'] for m in included}
+                packet['source_matches']=included
+                packet['statistics']=[s for s in statistics if s['match_id'] in included_ids]
+                packet['excluded_names']=[r['opponent'] for r in conn.execute(
+                    'SELECT DISTINCT opponent FROM matches WHERE match_id NOT IN ('+','.join('?' for _ in matches)+') AND opponent IS NOT NULL',
+                    [m['match_id'] for m in matches]) if r['opponent'] not in {m['opponent'] for m in included}]
                 # Release the write lock while the remote sports desk works.
                 conn.commit()
                 title,body=self.writer.write(packet)
@@ -126,6 +147,10 @@ class Reporter:
                 current_stats=[]
                 for m in current_matches:
                     current_stats.extend(dict(r) for r in conn.execute('SELECT * FROM match_statistics WHERE match_id=?',(m['match_id'],)))
+                current_content=conn.execute('SELECT notes,player_name,player_evidence FROM weekly_report_content WHERE report_id=?',(report_id,)).fetchone()
+                old_content={k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None
+                if (dict(current_content) if current_content else None)!=old_content:
+                    raise ValueError('Management notes or award selection changed during writing; report held for fresh verification.')
                 if current['status']!='confirmed' or current_matches!=matches or current_stats!=statistics or current['include_development']!=report['include_development']:
                     raise ValueError('Report facts changed during writing; regenerate using the latest selections.')
                 article='\n'.join(['RT FOOTBALL MEDIA',title,f"By {editorial['reporter']} | RT Football Media",

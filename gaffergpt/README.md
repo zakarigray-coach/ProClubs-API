@@ -296,7 +296,7 @@ RT's independent 6 PM draft and scheduled player interviews are retired.
 6. Review the private article and photo. **Approve Draft** saves approval only; nothing publishes automatically.
 
 Raine and Teagan rotate with persisted opening history. Draft length follows the available facts;
-600–800 words is an editorial goal for a full match week, not a reason to invent detail or pad a sparse week.
+350–550 words is the default for a full match week, not a reason to invent detail or pad a sparse week.
 Automatic recap collection remains paused. Owner DMs outside the results form remain tactical advice requests.
 
 
@@ -336,12 +336,14 @@ receive no guessed stats. Missing metrics stay missing, zero-minute rows do not 
 and passing percentages are weighted by recorded attempts, not averaged across games.
 This is factual reporting, not individual development advice. The club-only coaching policy is unchanged.
 
-Weekly articles now use the configured Pep AI provider for a story-led sports feature: original headline, rotating reporter voice, selective statistics and separate practice coverage. Typical four-match features target 450–650 words. Recent drafts inform wording variation. Provider failures keep confirmed facts available for retry; articles remain private drafts.
+Weekly articles now use the configured Pep AI provider for a story-led sports feature: original headline, rotating reporter voice, selective statistics and separate practice coverage. Weekly articles default to 350–550 words and remain shorter when evidence is thin. Recent drafts inform wording variation. Provider failures keep confirmed facts available for retry; articles remain private drafts.
 
 Sports desk quality: concrete leads, restrained reporter voices, evidence-only descriptions, rounded readable figures and explicit confirmed Player of the Week recognition. Legacy outfield conceded-goal totals are stripped before AI writing; new Excel imports retain individual conceded goals/clean sheets only for goalkeeper appearances.
 
-Article figures are calculated in Python and rendered from named factual sentence references; the AI cannot substitute a different player’s number. A second sports desk pass removes repetition, and validation blocks invented numerical claims, repeated references and internal wording. A requested four-match live rewrite can be run once through PEP_REPORT_REWRITE_REQUEST (report ID plus unique request marker); it sends only a private review draft.
+Article generation builds a frozen fact sheet from the selected database matches and raw statistic rows. Python computes separate Official and Practice totals, tracks sample coverage, and keeps individual fixture figures distinct. Incomplete aggregate metrics are omitted from prose. Material source conflicts hold the draft and return the precise conflict to Coach.
 
-The sports writer now embeds short verified, player-attributed fact phrases within original paragraphs instead of using fixed factual sentences. The editor targets 400–550 words for four fixtures and prioritizes goals/assists over secondary metrics.
+The existing reporter voices and configured `PEP_REPORTER_MODEL` remain unchanged. The sports desk drafts and edits complete prose, then runs an independent editorial review and final claim-location pass. Python checks the final claims against the frozen facts, including player attribution, score/result consistency, scope, exact names, unavailable quotations/narrative events, unselected opponent leakage, repeated statistics and banned language. These gates do not turn model judgement into proof of every possible natural-language inference; unsupported material is held, rather than labelled verified.
 
-`PEP_REPORTER_MODEL` optionally selects the model for article writing and editorial checks separately from `PEP_COACH_MODEL`. Existing installations fall back to the coaching model if it is unset.
+Revision is bounded: one initial draft and at most three edit/review/source-location attempts (at most ten provider requests). Failures retain selections and source data; no intermediate article is delivered or automatically published. Public approval remains unchanged. `report_generation_audit` stores source references, hashes, fact sheets, individual checks, failures and revisions in the shared SQLite database. The private View Statistics control keeps the complete recap separate from the article.
+
+`PEP_REPORT_REWRITE_REQUEST` remains a one-time owner test control. A marker ending `:preview` generates through the normal pipeline and logs the final article and checks privately for inspection. `:deliver` delivers only a stored draft whose text hash matches a passed audit. The former copy-edit bypass is retired; a changed article must go through the checks again. No token values are logged.

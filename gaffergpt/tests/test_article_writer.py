@@ -37,7 +37,7 @@ class SportsArticleTests(unittest.TestCase):
     def test_provider_uses_structured_article_output(self):
         payload=SportsWriter('test').payload('{}')
         self.assertEqual(payload['text']['format']['schema']['required'],['title','body'])
-        self.assertIn('500–750',payload['instructions'])
+        self.assertIn('350–550',payload['instructions'])
 
     def test_legacy_outfield_conceded_stats_never_reach_writer(self):
         packet={'observations':{'player_statistics':{'Practice':[
@@ -87,10 +87,11 @@ class FinishedArticleTests(unittest.TestCase):
                 if request.get('desk_task')=='audit_finished_article':
                     audits=sum(c.get('desk_task')=='audit_finished_article' for c in calls)
                     return json.dumps({'title':'FAIL' if audits==1 else 'PASS','body':'Remove repetition' if audits==1 else ''})
+                if request.get('desk_task')=='locate_final_claims':return json.dumps({'claims':[],'unsupported':[]})
                 return json.dumps({'title':'Birmingham weigh contrasting practice returns','body':prose})
         title,body=Writer('test').write({'matches':[],'observations':{},'management':{}})
         self.assertEqual(body,prose)
-        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),3)
+        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),2)
         self.assertEqual(calls[-1]['finished_article']['body'],prose)
         self.assertEqual(calls[-3]['validation_feedback'],'Remove repetition')
 

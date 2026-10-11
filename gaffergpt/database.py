@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
  created_at TEXT NOT NULL, confirmed_at TEXT, draft_sent_at TEXT,
  CHECK(week_end>week_start), UNIQUE(owner_id,week_start,week_end)
 );
+CREATE TABLE IF NOT EXISTS report_generation_audit (
+ audit_id INTEGER PRIMARY KEY, report_id INTEGER NOT NULL REFERENCES weekly_reports(report_id),
+ started_at TEXT NOT NULL, finished_at TEXT, state TEXT NOT NULL,
+ source_hash TEXT, fact_sheet TEXT, attempts TEXT NOT NULL DEFAULT '[]',
+ article_hash TEXT, verification TEXT, error TEXT
+);
 CREATE TABLE IF NOT EXISTS report_matches (
  report_id INTEGER NOT NULL REFERENCES weekly_reports(report_id) ON DELETE CASCADE,
  match_id INTEGER NOT NULL REFERENCES matches(match_id), PRIMARY KEY(report_id,match_id)
