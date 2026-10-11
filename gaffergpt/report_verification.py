@@ -313,7 +313,15 @@ def validate_final(article,sheet,evidence):
                 covered.add((a,b))
                 if a>len(article['title']):fact_positions[key].add((a,b))
         elif kind=='award':
-            if fact['subject'] not in quote:raise ValueError('Award recipient does not match management selection.')
+            player_names={f['subject'] for f in facts.values() if f['kind'] in ('player','award')}
+            named={name for name in player_names if name in quote}
+            if not named:
+                paragraph_start=max(0,text.rfind('\n\n',0,start)+2)
+                named={name for name in player_names if name in text[paragraph_start:start]}
+                if not named and re.match(r'\s*(?:He|His|She|Her)\b',quote):
+                    previous_start=max(0,text.rfind('\n\n',0,max(0,paragraph_start-2))+2)
+                    named={name for name in player_names if name in text[previous_start:paragraph_start]}
+            if named!={fact['subject']}:raise ValueError('Award recipient does not match management selection or is ambiguous.')
     used=defaultdict(set)
     for key,positions in fact_positions.items():
         f=facts[key]

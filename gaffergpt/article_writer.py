@@ -107,6 +107,8 @@ class SportsWriter(OpenAICoach):
                 'Also require grammatical sentences, correct singular/plural agreement, no awkward possessives, '
                 'no repeated name/statistic padding, no invented chronology, roles, motives or tactical causes. '
                 'Passing accuracy cannot prove composure; results cannot establish defensive shape or how the team opened up. '
+                'Goals, assists and ratings do not prove sustained threat, focal points, chances arriving, moves ticking over, '
+                'games staying alive, tempo, attacking movement or how quickly matches swung. Reject these descriptions of play unless explicit source evidence supports them. '
                 'Reject generic filler and mechanical statistical recitation. Require a strong story-led opening, '
                 'selective statistics, no repeated award figures, no Other contributors roll-call, '
                 'natural language, and a football-focused ending rather than reporting rules. '
@@ -188,6 +190,8 @@ class SportsWriter(OpenAICoach):
             'Delete unsupported clauses entirely. Never turn correction notes into prose about what cannot be inferred. '
             'Do not describe absent evidence, explain the reporting process, or copy validation feedback into the article.')
         brief['writing_requirements']=brief['desk_task']
+        if len(sheet['fixtures'])<=4 and not sheet['narrative_evidence'] and not sheet['quotes']:
+            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Write a concise 200–300-word piece, shorter if necessary; do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play.'
         award=(clean.get('management') or {}).get('player_name')
         winner=next((p for ps in clean.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
         if winner and winner.get('goals',0)>=3:

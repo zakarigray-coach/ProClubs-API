@@ -46,6 +46,13 @@ class VerificationTests(unittest.TestCase):
         proof=self.validate(s,text,[self.evidence(s,'TraapxLit','goals',text)])
         self.assertIn('numeric_coverage',proof['checks'])
         self.assertEqual(s['groups']['Practice']['summary']['losses'],1)
+    def test_award_pronoun_resolves_only_unambiguous_player(self):
+        s=self.sheet(stats=[stat(1,'Zak','goals',1),stat(1,'Other','goals',1)],management={'player_name':'Zak','player_evidence':'Confirmed'})
+        key=next(k for k,f in s['facts'].items() if f['kind']=='award')
+        quote='He was named Birmingham City’s Player of the Week.'
+        self.validate(s,'Zak featured in practice. '+quote,[{'fact_id':key,'quote':quote}])
+        for prefix in ('Other featured in practice. ','Zak and Other featured in practice. '):
+            with self.assertRaises(ValueError):self.validate(s,prefix+quote,[{'fact_id':key,'quote':quote}])
     def test_wrong_player_even_when_number_exists_is_rejected(self):
         s=self.sheet(stats=[stat(1,'Zak','goals',7),stat(1,'Other','goals',3)])
         text='Other scored seven goals in practice.'
