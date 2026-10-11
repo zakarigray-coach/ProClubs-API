@@ -73,7 +73,7 @@ def render_checked(result,facts,packet):
         if (count,label) not in allowed_counts:raise ValueError('Unverified result count')
         return 'RESULTCOUNT'
     raw=re.sub(r'\b('+ '|'.join(count_names)+r') (wins|draws|defeats)\b',checked_count,raw,flags=re.I)
-    unbound=re.search(r'\d+(?:\.\d+)?',raw) or NUMBER_WORDS.search(raw)
+    unbound=re.search(r'\d+(?:\.\d+)?',raw) or re.search(NUMBER_WORDS.pattern+r'\s+(?:goals?|assists?|shots?|dribbles?|saves?|tackles?|interceptions?|passes|points?|ratings?|percent|per cent)\b',raw,re.I)
     if unbound:
         excerpt=raw[max(0,unbound.start()-45):unbound.end()+55].replace('\n',' ')
         raise ValueError('Unbound numerical claim: '+repr(excerpt)+'. Replace this claim with its verified phrase token or remove it')
