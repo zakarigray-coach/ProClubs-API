@@ -4,7 +4,7 @@ from pathlib import Path
 from gaffergpt.database import Database
 from gaffergpt.weekly_intake import save_submission
 from gaffergpt.reporter import Reporter
-from gaffergpt.article_writer import SportsWriter
+from gaffergpt.article_writer import SportsWriter, editorial_packet
 
 class SportsArticleTests(unittest.TestCase):
     def setUp(self):
@@ -38,3 +38,13 @@ class SportsArticleTests(unittest.TestCase):
         payload=SportsWriter('test').payload('{}')
         self.assertEqual(payload['text']['format']['schema']['required'],['title','body'])
         self.assertIn('500–750',payload['instructions'])
+
+    def test_legacy_outfield_conceded_stats_never_reach_writer(self):
+        packet={'observations':{'player_statistics':{'Practice':[
+            {'player':'Outfield','appearances':4,'goals_conceded':10,'clean_sheets':1,'metric_samples':{'goals_conceded':4}},
+            {'player':'Keeper','appearances':2,'goalkeeper_appearances':2,'goals_conceded':3}]}}}
+        clean=editorial_packet(packet)['observations']['player_statistics']['Practice']
+        self.assertNotIn('goals_conceded',clean[0])
+        self.assertNotIn('clean_sheets',clean[0])
+        self.assertEqual(clean[1]['goals_conceded'],3)
+        self.assertEqual(packet['observations']['player_statistics']['Practice'][0]['goals_conceded'],10)

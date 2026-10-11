@@ -47,7 +47,10 @@ def imported_statistics(workbook,matches):
     for row in records(workbook,'Player matches'):
         mid=mapping.get(str(row.get('Match ID','')));name=row.get('Player')
         if not mid or not isinstance(name,str) or not name.strip():continue
+        is_keeper=str(row.get('Position','')).strip().casefold() in ('gk','goalkeeper','keeper')
+        statistics.append((mid,'player',name.strip(),'goalkeeper_appearances',float(is_keeper),None,'PCT+ Excel'))
         for label,metric in PLAYER_METRICS.items():
+            if metric in ('goals_conceded','clean_sheets') and not is_keeper:continue
             val=row.get(label)
             if type(val) not in (int,float,bool) or not math.isfinite(val):continue
             statistics.append((mid,'player',name.strip(),metric,float(val),None,'PCT+ Excel'))

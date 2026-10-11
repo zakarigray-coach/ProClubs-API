@@ -337,3 +337,5 @@ and passing percentages are weighted by recorded attempts, not averaged across g
 This is factual reporting, not individual development advice. The club-only coaching policy is unchanged.
 
 Weekly articles now use the configured Pep AI provider for a story-led sports feature: original headline, rotating reporter voice, selective statistics and separate practice coverage. Typical four-match features target 450–650 words. Recent drafts inform wording variation. Provider failures keep confirmed facts available for retry; articles remain private drafts.
+
+Sports desk quality: concrete leads, restrained reporter voices, evidence-only descriptions, rounded readable figures and explicit confirmed Player of the Week recognition. Legacy outfield conceded-goal totals are stripped before AI writing; new Excel imports retain individual conceded goals/clean sheets only for goalkeeper appearances.
