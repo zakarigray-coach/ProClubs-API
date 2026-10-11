@@ -119,6 +119,8 @@ def build_fact_sheet(packet):
                 if value is None:continue
                 rounded=round(value,2 if metric=='average_rating' else 1) if metric in ('average_rating','pass_accuracy') else value
                 add('player',name,metric,rounded,kind,sources=sources)
+            if all(player['metric_samples'].get(m)==appearances for m in ('goals','assists')):
+                add('player',name,'goal_contributions',player.get('goals',0)+player.get('assists',0),kind,sources=sources)
             # Individual match evidence remains distinct from period totals.
             for s in own:
                 if s['metric'] in ('goalkeeper_appearances','seconds_played'):continue
@@ -156,6 +158,7 @@ def build_fact_sheet(packet):
 WORDS={word:i for i,word in enumerate(('zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'))}
 NUMBER=r'\d+(?:\.\d+)?|'+ '|'.join(WORDS)
 METRICS={
+ 'goal_contributions':r'goal (?:involvements?|contributions?)|direct contribution',
  'goals':r'goals?', 'assists':r'assists?', 'appearances':r'appearances?|run-outs?|outings|matches',
  'average_rating':r'(?:average\s+)?rating|average', 'rating':r'rating',
  'shots':r'shots?(?!\s+on target)', 'shots_on_target':r'shots? on target',
@@ -311,6 +314,12 @@ def validate_final(article,sheet,evidence):
                 if a>len(article['title']):fact_positions[key].add((a,b))
         elif kind=='award':
             if fact['subject'] not in quote:raise ValueError('Award recipient does not match management selection.')
+    used=defaultdict(set)
+    for key,positions in fact_positions.items():
+        f=facts[key]
+        if positions and f['kind']=='player':used[(f['subject'],f['classification'],f['fixture_id'])].add(f['metric'])
+    if any({'goals','assists','goal_contributions'}<=metrics for metrics in used.values()):
+        raise ValueError('Do not repeat goals and assists as a combined goal-contribution total. Choose one presentation.')
     repeated=[key for key,positions in fact_positions.items() if len(positions)>1]
     if repeated:raise ValueError('Repeated statistical claims: '+', '.join(repeated))
     missing=[text[max(0,a-45):min(len(text),b+45)].replace('\n',' ') for a,b,_ in spans if (a,b) not in covered]

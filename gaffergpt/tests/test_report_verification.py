@@ -112,6 +112,11 @@ class VerificationTests(unittest.TestCase):
         self.assertTrue(any(f['kind']=='comparison' and f['subject']=='Zak' for f in s['facts'].values()))
         s=self.sheet([fixture(1,own=20)],[stat(1,'Zak','goals',7),stat(1,'Other','goals',1)])
         self.assertFalse(any(f['kind']=='comparison' for f in s['facts'].values()))
+    def test_goal_contributions_are_calculated_and_not_repeated(self):
+        s=self.sheet([fixture(1,own=10)],[stat(1,'Zak','goals',7),stat(1,'Zak','assists',2)])
+        text='Zak scored seven goals and two assists, a 9-goal direct contribution in practice.'
+        claims=[self.evidence(s,'Zak',m,text) for m in ('goals','assists','goal_contributions')]
+        with self.assertRaisesRegex(ValueError,'combined'):self.validate(s,text,claims)
     def test_source_hash_remains_reproducible(self):
         s=self.sheet();value=s.pop('source_hash');self.assertEqual(value,source_identity(s))
 
