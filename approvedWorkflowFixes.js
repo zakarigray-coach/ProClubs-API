@@ -49,4 +49,46 @@ async function fixWelcomeAccess(client,options={}) {
   }
   journal.completedAt=new Date().toISOString();save();log('RT FIX 2 complete');
 }
-module.exports={fixYourBotLiveAccess,fixWelcomeAccess};
+const RT_PERMISSIONS=['ViewChannel','ReadMessageHistory','SendMessages','SendMessagesInThreads','EmbedLinks','AttachFiles','AddReactions','CreatePublicThreads','ManageMessages','ManageThreads','ManageChannels','ManageRoles','ManageGuild','ManageWebhooks','ViewAuditLog','CreateEvents','ManageEvents'];
+async function prepareRtPermissions(client,options={}) {
+  const env=options.env || process.env,log=options.log || console.log;
+  if(env.DISCORD_GUILD_ID!==GUILD)return;
+  const file=path.join(env.RT_DATA_DIR || '/data','workflow-fix-3-rt.json');
+  const journal=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{originals:[]};
+  if(journal.completedAt)return;
+  const guild=await client.guilds.fetch(GUILD);await guild.roles.fetch();await guild.channels.fetch();
+  const me=await guild.members.fetchMe();
+  const admin=guild.roles.cache.get('1534904508205895833');
+  const player=guild.roles.cache.get(env.BIRMINGHAM_ROLE_ID);
+  if(!player || !admin)throw new Error('RT role prerequisites missing');
+  const save=()=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(journal,null,2));fs.renameSync(file+'.tmp',file);};
+  let role=journal.roleId?guild.roles.cache.get(journal.roleId):null;
+  if(!role){role=await guild.roles.create({name:'RT Media Operations',permissions:RT_PERMISSIONS.map(name=>P[name]),mentionable:false,hoist:false,reason:'Owner approved replacement for RT Administrator'});journal.roleId=role.id;save();}
+  if(role.permissions.has(P.Administrator))throw new Error('Replacement unexpectedly has Administrator');
+  if(role.position<=player.position)await role.setPosition(player.position+1,{reason:'Keep RT above the player role it assigns'});
+  await me.roles.add(role,'Owner approved replacement permissions');
+  const failures=[];
+  for(const channel of guild.channels.cache.values()) {
+    if(channel.isThread())continue;
+    const text=channel.isTextBased();
+    const grant=text?{ViewChannel:true,ReadMessageHistory:true,SendMessages:true,EmbedLinks:true,AttachFiles:true,SendMessagesInThreads:true}:{ViewChannel:true};
+    if(!journal.originals.some(item=>item.channelId===channel.id)){const previous=channel.permissionOverwrites.cache.get(role.id);journal.originals.push({channelId:channel.id,overwrite:previous?{allow:previous.allow.bitfield.toString(),deny:previous.deny.bitfield.toString()}:null});save();}
+    await channel.permissionOverwrites.edit(role,grant,{reason:'Preserve RT audit and publishing access without Administrator'});
+    const verified=await guild.channels.fetch(channel.id),permissions=verified.permissionsFor(role);
+    if(Object.keys(grant).some(name=>!permissions.has(P[name])))failures.push(channel.id);
+  }
+  if(failures.length)throw new Error('Replacement channel access failed: '+failures.join(','));
+  await guild.roles.fetch();const refreshedRole=guild.roles.cache.get(role.id);
+  if(refreshedRole.position<=guild.roles.cache.get(player.id).position)throw new Error('Replacement role hierarchy failed');
+  journal.preparedAt=new Date().toISOString();save();
+  const member=await guild.members.fetchMe();
+  if(member.roles.cache.has(admin.id)) {
+    // Discord forbids a bot managing roles at or above its own highest role.
+    if(member.roles.highest.comparePositionTo(admin)<=0){journal.needsOwnerRemoveAdmin=true;save();log('RT FIX 3 ready; owner must remove Admin from RT only: '+JSON.stringify({bot:member.user.username,roleId:role.id,roleName:role.name,channelChecks:journal.originals.length,reason:'Admin is RT’s highest role; Discord role hierarchy prevents self-removal'}));return;}
+    await member.roles.remove(admin,'Owner approved least privilege replacement');
+  }
+  const verified=await guild.members.fetchMe();
+  if(verified.permissions.has(P.Administrator))throw new Error('RT still has Administrator through another role');
+  journal.completedAt=new Date().toISOString();save();log('RT FIX 3 complete: Administrator removed; operations role verified');
+}
+module.exports={fixYourBotLiveAccess,fixWelcomeAccess,prepareRtPermissions,RT_PERMISSIONS};

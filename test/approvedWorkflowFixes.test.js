@@ -1,6 +1,13 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {fixYourBotLiveAccess}=require('../approvedWorkflowFixes');
+test('RT replacement covers publishing and role assignment without Administrator or moderation powers',()=>{
+  const {RT_PERMISSIONS}=require('../approvedWorkflowFixes');
+  const {PermissionFlagsBits:P}=require('discord.js');
+  assert(RT_PERMISSIONS.every(name=>typeof P[name]==='bigint'));
+  for(const name of ['Administrator','BanMembers','KickMembers','ModerateMembers','MentionEveryone'])assert(!RT_PERMISSIONS.includes(name));
+  for(const name of ['ManageRoles','ManageChannels','ManageThreads','EmbedLinks','AttachFiles','ReadMessageHistory'])assert(RT_PERMISSIONS.includes(name));
+});
 test('approved fix targets only YourBot live channel, backs up permissions and skips completed retries',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'rt-fix1-'));let edits=0;
   const role={id:'1558566879164104724',managed:true};
