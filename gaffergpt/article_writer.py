@@ -21,7 +21,7 @@ STRUCTURE: An original, specific headline, usually 6–12 words, followed by a d
 of 35–60 words built around the main result, contrast or standout contribution. Follow with
 short connected paragraphs: important results, two or three telling numbers, player highlights,
 and a grounded closing thought. Use at most three section headings when they aid the story.
-For four matches target 300–450 words; a substantial larger week 500–750. Less evidence warrants
+For four matches target 250–400 words; a substantial larger week 500–750. Less evidence warrants
 a shorter piece. Do not inflate thin evidence to reach a word count. No compulsory sections.
 Use active verbs and varied sentence lengths. Let details create interest. Avoid strained
 alliteration, grand metaphors, filler, repeated summaries or generic scene-setting.
@@ -92,7 +92,7 @@ class SportsWriter(OpenAICoach):
                 'selective statistics, no repeated award figures, no Other contributors roll-call, '
                 'natural language, and a football-focused ending rather than reporting rules. '
                 'Check comparative wording mathematically: six of thirteen is not the bulk or majority. '
-                'Reject more than three player summaries or more than three metrics per player. '
+                'Reject more than three player summaries or more than three performance metrics per player; appearance counts are context, not performance metrics. '
                 'Reject supplied figures, non-negligible, defensive actions noted and factual snapshot. '
                 'A short polished article is acceptable. '
                 'Use title FAIL with body explaining concrete corrections when any check fails. '
@@ -119,7 +119,7 @@ class SportsWriter(OpenAICoach):
             'statistical contributions, ledgers, reporting policies or the act of analysing data.')
         brief['desk_task']=('Write complete natural sentences from this evidence. No placeholders. '
             'Use a compelling factual lead, selective statistics, smooth transitions and a concise ending. '
-            'Target 400–550 words when evidence supports it; prefer a shorter strong article to filler. '
+            'Target 250–400 words when evidence supports it; prefer a shorter strong article to filler. '
             'Do not repeat player names in every clause or turn passing figures into claims of composure. '
             'Lead with the confirmed award winner’s goals when the main story is his scoring, and contrast the team results. '
             'Mention the award and supporting figures once, integrated into the narrative. '

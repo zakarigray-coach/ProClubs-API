@@ -21,7 +21,7 @@ from .database import Database, utcnow
 from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
 from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
-from .article_writer import SportsWriter
+from .article_writer import SportsWriter, check_finished_prose, check_feature_quality, feature_facts
 from .weekly_intake import save_submission, save_photo, content as report_content
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
@@ -504,6 +504,23 @@ class GafferBot(discord.Client):
                 saved=self.db.report(report_id)
                 if saved['status']!='draft' or not saved['article']:raise ValueError('No reviewed draft available.')
                 article=saved['article']
+                copy_edit=os.getenv('PEP_REPORT_COPY_EDIT','')
+                if copy_edit:
+                    edited=json.loads(copy_edit)
+                    if edited.get('report_id')!=report_id or edited.get('request')!=request:raise ValueError('Copy edit is for another request.')
+                    # Final owner-requested copy edit changes prose, never selected facts.
+                    observations=json.loads(saved['observations'] or '{}')
+                    management=report_content(self.db,report_id)
+                    packet={'matches':selected,'observations':observations,'management':management}
+                    check_finished_prose(edited,feature_facts(packet))
+                    check_feature_quality(edited,packet)
+                    header=article.split('\n\n',1)[0].splitlines()
+                    header[1]=edited['title']
+                    article='\n'.join(header)+'\n\n'+edited['body'].strip()
+                    with self.db.connect() as conn:
+                        changed=conn.execute("UPDATE weekly_reports SET title=?,article=? WHERE report_id=? AND status='draft'",
+                            (edited['title'],article,report_id)).rowcount
+                        if changed!=1:raise ValueError('Draft changed during copy edit.')
             else:
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(self.reporter.generate,report_id)
