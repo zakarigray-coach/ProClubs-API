@@ -11,3 +11,13 @@ test('invalid or unavailable report fails safely',async()=>{await assert.rejects
 test('private owner download never public send',async()=>{let reply;await sendReview({user:{id:'owner'},editReply:async r=>{reply=r;}},7,'owner',options);assert.equal(reply.files[0].attachment.toString(),report.article);assert.match(reply.content,/nothing has been published/);assert.deepEqual(reply.allowedMentions,{parse:[]});});
 test('non-owner cannot retrieve',async()=>{let called=false;await sendReview({user:{id:'other'},editReply:async()=>{}},7,'owner',{...options,fetchImpl:async()=>{called=true;}});assert.equal(called,false);});
 test('closed report rejected',async()=>{await assert.rejects(fetchReport(7,{...options,fetchImpl:async()=>({ok:true,json:async()=>({...report,status:'skipped'})})}));});
+
+test('optional photo travels with private draft through authenticated central store', async()=>{
+ let reply;
+ await sendReview({user:{id:'owner'},editReply:async r=>{reply=r;}},7,'owner',{...options,fetchImpl:async(url,request)=>{
+  assert.equal(request.headers.Authorization,'Bearer test-secret');
+  return url.pathname.endsWith('/photo') ? {ok:true,arrayBuffer:async()=>Buffer.from('photo bytes')} : {ok:true,json:async()=>({...report,photo_extension:'png'})};
+ }});
+ assert.equal(reply.files.length,2);assert.equal(reply.files[1].name,'Featured_Player_7.png');
+ assert.deepEqual(reply.allowedMentions,{parse:[]});
+});

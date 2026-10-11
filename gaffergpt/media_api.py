@@ -1,6 +1,7 @@
 """Authenticated read-only RT bridge; SQLite remains the only match store."""
 import hmac
 from aiohttp import web
+from .weekly_intake import CONTENT_SCHEMA, content
 
 
 def report_payload(db, report_id):
@@ -18,7 +19,9 @@ def report_payload(db, report_id):
         facts=[]
         for m in matches:
             facts.append({k:m[k] for k in ('match_id','played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')})
-        return {'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
+        conn.execute(CONTENT_SCHEMA)
+        photo=conn.execute('SELECT photo_extension FROM weekly_report_content WHERE report_id=? AND photo IS NOT NULL',(report_id,)).fetchone()
+        return {'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
                 'status':report['status'],'week_start':report['week_start'],'week_end':report['week_end'],
                 'matches':facts,'published':False}
 
@@ -42,6 +45,17 @@ def create_app(db, secret):
             return web.json_response(report_payload(db,rid),headers={'Cache-Control':'no-store'})
         except (ValueError,TypeError):
             return web.json_response({'error':'Report is unavailable or needs review'},status=404)
+    async def photo(request):
+        try:
+            rid=int(request.match_info['report_id'])
+            report_payload(db,rid)
+            saved=content(db,rid)
+            if not saved.get('photo'): raise ValueError('No photo')
+            mime={'png':'image/png','jpg':'image/jpeg','webp':'image/webp'}[saved['photo_extension']]
+            return web.Response(body=saved['photo'],content_type=mime,headers={'Cache-Control':'no-store'})
+        except (ValueError,TypeError,KeyError):
+            return web.json_response({'error':'Photo unavailable'},status=404)
+    app.router.add_get('/reports/{report_id}/photo',photo)
     app.router.add_get('/health',health)
     app.router.add_get('/reports/{report_id}',report)
     return app

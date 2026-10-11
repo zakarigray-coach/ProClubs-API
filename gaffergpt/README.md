@@ -277,3 +277,24 @@ Use management-confirmed practice sessions, with unresolved entries excluded fro
 All sources, match records and reporting selections must use the same central database.
 Reporter consumes selected official matches and selected practice sections separately;
 articles still require selection confirmation and approval before publication.
+
+
+## Friday article workflow
+Pep continues to DM Coach Fridays at 8 AM America/New_York, with persisted missed-job recovery.
+RT's independent 6 PM draft and scheduled player interviews are retired.
+1. Open **Add Results / Notes** in the Friday DM (or use `/weeklyreport`).
+2. Enter one result per line: `2026-10-15 | Official Home | Chelsea | 3-1`.
+   Types: `Official Home`, `Official Away`, `Practice`. Score is always Birmingham first.
+   Dates must be within the displayed reporting week. Results are explicitly management-classified;
+   they are not inferred from EA's Friendly/League label. Repeated identical submissions are deduplicated.
+   To correct an existing imported score, use `/matchdetails`; do not resubmit a changed score as a new fixture.
+3. Optionally add verified PCT findings and a Player of the Week name/Discord mention plus factual achievement.
+   These are attributed management notes, not independently verified statistics. No player interview is sent.
+4. Select only the matches to include and press **Generate Report**.
+5. Optionally run `/reportphoto` with the report ID and a PNG/JPEG/WebP up to 8 MB, then generate again.
+   Photos are stored in the same persistent database and attached to Coach's draft DM. No public mention pings.
+6. Review the private article and photo. **Approve Draft** saves approval only; nothing publishes automatically.
+
+Raine and Teagan rotate with persisted opening history. Draft length follows the available facts;
+600–800 words is an editorial goal for a full match week, not a reason to invent detail or pad a sparse week.
+Automatic recap collection remains paused. Owner DMs outside the results form remain tactical advice requests.

@@ -61,6 +61,12 @@ class CompletionTests(unittest.IsolatedAsyncioTestCase):
             response=await client.get('/health',headers=headers);self.assertTrue((await response.json())['ok'])
             response=await client.get('/reports/'+str(rid),headers=headers);payload=await response.json()
             self.assertEqual(payload['matches'][0]['match_id'],mid);self.assertFalse(payload['published'])
+            from gaffergpt.weekly_intake import save_photo
+            save_photo(self.db,rid,42,b'\x89PNG\r\n\x1a\nexample')
+            self.db.confirm_report(rid);Reporter(self.db).generate(rid)
+            response=await client.get(f'/reports/{rid}/photo');self.assertEqual(response.status,401)
+            response=await client.get(f'/reports/{rid}/photo',headers=headers);self.assertEqual(response.status,200)
+            self.assertEqual(await response.read(),b'\x89PNG\r\n\x1a\nexample')
             response=await client.post('/reports/'+str(rid),headers=headers);self.assertEqual(response.status,405)
             self.db.classify(mid,'Ignored','Unknown',42)
             response=await client.get('/reports/'+str(rid),headers=headers);self.assertEqual(response.status,404)

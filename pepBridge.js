@@ -1,13 +1,18 @@
 'use strict';
 
 // Read current reports from Pep; never maintain a second match store.
-async function centralRequest(path, { url = process.env.PEP_CENTRAL_URL, token = process.env.PEP_REPORTER_TOKEN, fetchImpl = fetch } = {}) {
+async function centralRequest(path, { url = process.env.PEP_CENTRAL_URL, token = process.env.PEP_REPORTER_TOKEN, fetchImpl = fetch, binary = false } = {}) {
   if (!url || !token) throw new Error('Pep connection is not configured.');
   const response = await fetchImpl(new URL(path, url), {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(10000), redirect: 'error',
   });
   if (!response.ok) throw new Error(`Pep returned ${response.status}; the report may need review.`);
+  if (binary) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > 8 * 1024 * 1024) throw new Error('Featured photo exceeds Discord size limit.');
+    return bytes;
+  }
   return response.json();
 }
 
@@ -27,10 +32,15 @@ async function sendReview(interaction, reportId, ownerId, options) {
   const report = await fetchReport(reportId, options);
   const bytes = Buffer.from(report.article, 'utf8');
   if (bytes.length > 7500000) throw new Error('This draft is too large for Discord.');
+  const files = [{ attachment: bytes, name: `RT_Pep_Report_${reportId}.txt` }];
+  if (['png', 'jpg', 'webp'].includes(report.photo_extension)) {
+    const photo = await centralRequest(`/reports/${reportId}/photo`, { ...options, binary: true });
+    files.push({ attachment: photo, name: `Featured_Player_${reportId}.${report.photo_extension}` });
+  }
   // Ephemeral download only; no public post and no legacy statistics writes.
   return interaction.editReply({
     content: `RT Football Media — Pep draft #${reportId}. Private review copy; nothing has been published.`,
-    files: [{ attachment: bytes, name: `RT_Pep_Report_${reportId}.txt` }],
+    files,
     allowedMentions: { parse: [] },
   });
 }

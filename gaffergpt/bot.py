@@ -18,6 +18,7 @@ from .database import Database, utcnow
 from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
 from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
+from .weekly_intake import save_submission, save_photo, content as report_content
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
 from .tactical_coach import PracticalCoach
@@ -151,6 +152,28 @@ class MatchSelect(discord.ui.Select):
         await interaction.response.edit_message(content=view.bot.report_summary(view.report_id),view=ReportView(view.bot,view.report_id,view.page))
 
 
+class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes'):
+    results=discord.ui.TextInput(label='Results: date | type | opponent | score', style=discord.TextStyle.paragraph, required=False, placeholder='2026-10-15 | Official Home | Chelsea | 3-1', max_length=3000)
+    notes=discord.ui.TextInput(label='Verified PCT findings / club notes (optional)', style=discord.TextStyle.paragraph, required=False, max_length=3000)
+    player=discord.ui.TextInput(label='Player of the Week name or mention (optional)', required=False, max_length=100)
+    evidence=discord.ui.TextInput(label='Their verified achievement (optional)', required=False, max_length=500)
+
+    def __init__(self, bot, report_id):
+        super().__init__()
+        self.bot=bot; self.report_id=report_id
+        existing=report_content(bot.db,report_id)
+        self.notes.default=existing.get('notes','')
+        self.player.default=existing.get('player_name','')
+        self.evidence.default=existing.get('player_evidence','')
+
+    async def on_submit(self, interaction):
+        try:
+            count=save_submission(self.bot.db,self.report_id,interaction.user.id,self.bot.config.guild_id,str(self.results),str(self.notes),str(self.player),str(self.evidence))
+        except ValueError as error:
+            await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.send_message(f'Saved {count} new results. Choose the matches below, then Generate Report.\n'+self.bot.report_summary(self.report_id),view=ReportView(self.bot,self.report_id),ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
+
+
 class ReportView(ManagedView):
     def __init__(self, bot, report_id, page=0):
         super().__init__(bot)
@@ -178,8 +201,12 @@ class ReportView(ManagedView):
             await interaction.response.defer(ephemeral=True)
             article=await asyncio.to_thread(bot.reporter.generate,report_id)
             owner=await bot.fetch_user(bot.config.owner_id)
+            files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
+            supplied=report_content(bot.db,report_id)
+            if supplied.get('photo'):
+                files.append(discord.File(io.BytesIO(supplied['photo']),filename=f'Featured_Player_{report_id}.{supplied["photo_extension"]}'))
             await owner.send(content=f'RT Football Media draft #{report_id} — review only. Nothing has been published.',
-                file=discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt'),view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+                files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
             bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
             await interaction.followup.send('Draft sent to Coach for review.',ephemeral=True)
         async def development(interaction):
@@ -202,6 +229,11 @@ class ReportView(ManagedView):
                 await interaction.followup.send('No unclassified matches remain.',ephemeral=True)
             for m in unknown[:10]:
                 await interaction.followup.send(f"Review #{m['match_id']}: {match_label(m)}",view=ReviewView(bot,m['match_id']),ephemeral=True)
+        async def add_facts(interaction):
+            if interaction.user.id!=bot.config.owner_id:
+                await interaction.response.send_message('Only Coach can submit weekly facts.',ephemeral=True); return
+            await interaction.response.send_modal(WeeklyFactsModal(bot,report_id))
+        self.add_item(Action('Add Results / Notes',f'pep:facts:{report_id}',add_facts,row=4))
         self.add_item(Action('Generate Report',f'gaffer:generate:{report_id}',generate,discord.ButtonStyle.primary,row=2))
         self.add_item(Action('Training Ground: '+('ON' if report['include_development'] else 'OFF'),f'gaffer:development:{report_id}',development,row=2))
         self.add_item(Action('Review Unknown Matches',f'gaffer:unknown:{report_id}',review,row=2))
@@ -469,7 +501,7 @@ class GafferBot(discord.Client):
         rows=self.db.period_matches(report['week_start'],report['week_end'],True)
         selected={m['match_id'] for m in self.db.selected(report_id)}
         unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
-        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Paste this week’s verified NACL results and PCT findings when ready. Saved match selections remain available below.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
+        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Use Add Results / Notes to submit verified NACL results and PCT findings. Then select your matches below. Optional photo: /reportphoto.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
         for kind,title in [('Official','OFFICIAL MATCHES'),('Practice','PRACTICE / DEVELOPMENT')]:
             lines+=['',title]
             group=[m for m in rows if m['match_type']==kind]
@@ -667,6 +699,20 @@ class GafferBot(discord.Client):
              (match_id,subject_type,subject,metric.strip().casefold(),value,unit))
             self.db.execute("UPDATE weekly_reports SET status='selecting',article=NULL,observations=NULL WHERE report_id IN (SELECT report_id FROM report_matches WHERE match_id=?)",(match_id,))
             await interaction.response.send_message('Statistic saved. Affected drafts need to be regenerated.',ephemeral=True)
+
+        @self.tree.command(name='reportphoto',description='Attach an optional player photo to your weekly draft')
+        @app_commands.check(authorized)
+        async def reportphoto(interaction,report_id:int,photo:discord.Attachment):
+            if interaction.user.id!=self.config.owner_id:
+                await interaction.response.send_message('Only Coach can attach a report photo.',ephemeral=True); return
+            if photo.size>8*1024*1024:
+                await interaction.response.send_message('Photo must be 8 MB or smaller.',ephemeral=True); return
+            await interaction.response.defer(ephemeral=True)
+            try:
+                save_photo(self.db,report_id,interaction.user.id,await photo.read())
+            except ValueError as error:
+                await interaction.followup.send(str(error),ephemeral=True); return
+            await interaction.followup.send('Photo saved. Generate the report again to receive it with the private draft.',ephemeral=True)
 
         @self.tree.command(name='weeklyreport',description='Select exactly which matches belong in a weekly draft')
         @app_commands.check(authorized)

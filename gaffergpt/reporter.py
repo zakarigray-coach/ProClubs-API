@@ -1,6 +1,7 @@
 """Reporter reads the shared store and prepares drafts; it never publishes."""
 import json
 from .analysis import FactualGaffer
+from .weekly_intake import CONTENT_SCHEMA
 from .editorial import choose_editorial, editorial_lead, editorial_headline
 
 
@@ -89,6 +90,12 @@ class Reporter:
                 for c in comparisons:
                     lines.append(f"{c['subject']} — {c['metric'].replace('_',' ')}: {c['before']:g} to {c['after']:g} {c['unit'] or ''} between selected {c['from_type'].lower()} match #{c['from_match']} and {c['to_type'].lower()} match #{c['to_match']}.".strip())
                 lines.append('Missing metrics are not treated as zero. Match conditions, minutes played and positions can affect these comparisons.')
+            conn.execute(CONTENT_SCHEMA)
+            supplied=conn.execute('SELECT * FROM weekly_report_content WHERE report_id=?',(report_id,)).fetchone()
+            if supplied and supplied['notes']:
+                lines+=['','FROM THE CLUB DESK','Management-supplied observations (not independently verified):',supplied['notes']]
+            if supplied and supplied['player_name'] and supplied['player_evidence']:
+                lines+=['','PLAYER OF THE WEEK',supplied['player_name']+' — '+supplied['player_evidence'], 'Selected by management. No interview was requested.']
             lines+=['','EDITORIAL NOTE','Scores and statistics come from the selected database records. No quotes, injuries, events or future fixtures have been invented. This draft has not been published.']
             article='\n'.join(lines)
             observations['editorial']={key:editorial[key] for key in ('reporter','opening','style')}

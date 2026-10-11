@@ -235,9 +235,6 @@ function easternDateParts(value = new Date(), timezone = ORGANIZATION.timezone) 
 function dueRecurringJobs(value = new Date(), timezone = ORGANIZATION.timezone) {
   const time = easternDateParts(value, timezone);
   const jobs = [];
-  if (time.weekday === 'Thu' && time.hour >= 12) jobs.push({ name: 'spotlight-selection', key: `${time.dateKey}:spotlight-selection` });
-  if (time.weekday === 'Fri' && time.hour >= 18) jobs.push({ name: 'weekly-recap-draft', key: `${time.dateKey}:weekly-recap-draft` });
-  if (time.weekday === 'Sat' && time.hour >= 10) jobs.push({ name: 'spotlight-publish-draft', key: `${time.dateKey}:spotlight-publish-draft` });
   jobs.push({ name: 'media-archive-check', key: `${time.dateKey}:media-archive-check` });
   return jobs;
 }
@@ -257,3 +254,4 @@ module.exports = {
   dueRecurringJobs,
   stableId,
 };
+

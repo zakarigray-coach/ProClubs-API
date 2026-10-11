@@ -85,6 +85,13 @@ test('archive planner only selects verified RT-managed posts older than 30 days'
 
 test('recurring jobs are evaluated in Eastern Time with stable idempotency keys', () => {
   const saturday = dueRecurringJobs(new Date('2026-09-26T14:05:00.000Z'));
-  assert.equal(saturday.some(job => job.name === 'spotlight-publish-draft'), true);
+  assert.equal(saturday.some(job => job.name === 'spotlight-publish-draft'), false);
   assert.equal(saturday.every(job => job.key.startsWith('2026-09-26:')), true);
+});
+
+
+test('Pep owns weekly reporting; RT does not schedule duplicate drafts or interviews', () => {
+  for (const date of ['2026-10-15T20:00:00Z','2026-10-16T23:00:00Z','2026-10-17T20:00:00Z']) {
+    assert.deepEqual(dueRecurringJobs(new Date(date)).map(job => job.name), ['media-archive-check']);
+  }
 });
