@@ -63,10 +63,21 @@ async function prepareRtPermissions(client,options={}) {
   if(!player || !admin)throw new Error('RT role prerequisites missing');
   const save=()=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(journal,null,2));fs.renameSync(file+'.tmp',file);};
   let role=journal.roleId?guild.roles.cache.get(journal.roleId):null;
+  if(journal.preparedAt && role && me.roles.cache.has(role.id)) {
+    if(me.permissions.has(P.Administrator)){log('RT FIX 3 waiting: remove Admin from RT only; replacement remains ready');return;}
+    const missing=[];
+    for(const channel of guild.channels.cache.values()) {
+      if(channel.isThread())continue;
+      const required=channel.isTextBased()?['ViewChannel','ReadMessageHistory','SendMessages','EmbedLinks','AttachFiles','SendMessagesInThreads']:['ViewChannel'];
+      if(required.some(name=>!channel.permissionsFor(me).has(P[name])))missing.push(channel.name);
+    }
+    if(missing.length || RT_PERMISSIONS.some(name=>!me.permissions.has(P[name])) || role.position<=player.position)throw new Error('RT replacement verification failed: '+missing.join(','));
+    journal.completedAt=new Date().toISOString();save();log('RT FIX 3 complete: Administrator absent; operations role and all channel access verified');return;
+  }
   if(!role){role=await guild.roles.create({name:'RT Media Operations',permissions:RT_PERMISSIONS.map(name=>P[name]),mentionable:false,hoist:false,reason:'Owner approved replacement for RT Administrator'});journal.roleId=role.id;save();}
   if(role.permissions.has(P.Administrator))throw new Error('Replacement unexpectedly has Administrator');
   if(role.position<=player.position)await role.setPosition(player.position+1,{reason:'Keep RT above the player role it assigns'});
-  await me.roles.add(role,'Owner approved replacement permissions');
+  if(!me.roles.cache.has(role.id))await me.roles.add(role,'Owner approved replacement permissions');
   const failures=[];
   for(const channel of guild.channels.cache.values()) {
     if(channel.isThread())continue;
