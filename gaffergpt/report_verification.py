@@ -232,7 +232,7 @@ def validate_final(article,sheet,evidence):
         start=text.index(quote);end=start+len(quote)
         candidates=[s for s in spans if start<=s[0] and s[1]<=end]
         if kind=='fixture':
-            if fact['subject'] not in quote:raise ValueError('Fixture claim names the wrong opponent.')
+            if fact['subject'] not in quote:raise ValueError('Fixture claim names the wrong opponent. Reference '+key+' requires '+fact['subject']+' in its exact quote: '+quote)
             score=value
             pairs=list(re.finditer(r'\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b',quote))
             for pair in pairs:

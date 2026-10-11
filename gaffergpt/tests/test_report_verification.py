@@ -188,6 +188,31 @@ class AuditTests(unittest.TestCase):
         self.assertLessEqual(writer.calls,10)
 
 class RecoveryTests(unittest.TestCase):
+    def test_reference_repair_keeps_article_unchanged_and_is_bounded(self):
+        import json
+        from gaffergpt.article_writer import SportsWriter
+        packet={'matches':[fixture(1)],'statistics':[]}
+        article={'title':'Birmingham beat Chelsea in practice','body':'Birmingham beat Chelsea 2–1 in practice. The practice result gave Birmingham a victory. The scoreline provides the focus for this account of the fixture, with the outcome established by the match record. Birmingham had a successful result against the named opposition during the practice programme.'}
+        sheet=build_fact_sheet(packet)
+        key=next(k for k,f in sheet['facts'].items() if f['kind']=='fixture')
+        class Writer(SportsWriter):
+            def __init__(self,repair):super().__init__('test');self.calls=[];self.repair=repair
+            async def advise(self,analysis,formation=''):
+                p=json.loads(analysis);self.calls.append(p)
+                if p.get('desk_task')=='audit_finished_article':return json.dumps({'title':'PASS','body':''})
+                if p.get('desk_task')=='locate_final_claims':
+                    quote='Birmingham beat Chelsea 2–1 in practice.' if self.repair and p.get('reference_feedback') else 'The practice result gave Birmingham a victory.'
+                    return json.dumps({'claims':[{'fact_id':key,'quote':quote}],'unsupported':[]})
+                return json.dumps(article)
+        writer=Writer(True)
+        self.assertEqual(writer.write(packet),(article['title'],article['body']))
+        self.assertEqual(sum('reference_feedback' in c for c in writer.calls),1)
+        self.assertEqual(len(writer.calls),5)
+        writer=Writer(False)
+        with self.assertRaises(RuntimeError):writer.write(packet)
+        self.assertEqual(sum('reference_feedback' in c for c in writer.calls),1)
+        self.assertLessEqual(len(writer.calls),11)
+        self.assertIsNone(writer.last_verification)
     def test_recovery_requires_matching_source_and_reruns_reviews(self):
         import json
         from gaffergpt.article_writer import SportsWriter
