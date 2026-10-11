@@ -175,7 +175,14 @@ def verify_event(packet,fixtures):
         outcomes=[]
         for d in details:
             f=by_id[d['match_id']]
-            delta=(d['penalties_for']-d['penalties_against']) if d.get('penalties_for') is not None else f['birmingham_score']-f['opponent_score']
+            if d.get('tie_key'):
+                legs=ties[d['tie_key']]
+                if len(legs)!=2 or {leg['leg'] for leg,fixture in legs}!={1,2}:
+                    raise ReportHold('A confirmed two-leg outcome needs both legs or must remain Unknown.')
+                shootouts=[leg for leg,fixture in legs if leg.get('penalties_for') is not None]
+                delta=shootouts[-1]['penalties_for']-shootouts[-1]['penalties_against'] if shootouts else sum(fixture['birmingham_score']-fixture['opponent_score'] for leg,fixture in legs)
+            else:
+                delta=(d['penalties_for']-d['penalties_against']) if d.get('penalties_for') is not None else f['birmingham_score']-f['opponent_score']
             outcomes.append((d,delta))
         if event['outcome']=='Champions' and not any((d.get('stage') or '').strip().lower() in ('final','grand final') and delta>0 for d,delta in outcomes):
             raise ReportHold('A trophy claim needs a confirmed final victory among the supplied results.')

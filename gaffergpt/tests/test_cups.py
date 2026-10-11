@@ -84,6 +84,12 @@ class CupTests(unittest.TestCase):
         self.db.execute('UPDATE competitions SET format=? WHERE competition_key=?',('Knockout final',KEY))
         with self.assertRaises(ValueError):configure_report(self.db,self.report['report_id'],KEY,'Champions')
         configure_report(self.db,self.report['report_id'],KEY,'Champions','Coach confirms final won 2-1')
+    def test_losing_two_leg_final_cannot_claim_champions(self):
+        a=self.add('2-0',tie_key='final-a',leg=1,stage='Final')
+        b=self.add('0-3',tie_key='final-a',leg=2,stage='Final')
+        configure_report(self.db,self.report['report_id'],KEY,'Champions','Coach supplied outcome')
+        with self.assertRaises(ReportHold):build_fact_sheet(self.packet([a,b]))
+
     def test_award_scope_required(self):
         with self.assertRaises(ValueError):configure_report(self.db,self.report['report_id'],KEY,award_label='Player of the Tournament')
     def test_cup_intake_requires_explicit_setup(self):
@@ -121,6 +127,15 @@ class CupTests(unittest.TestCase):
         self.assertTrue(Path(str(path)+'.pre-cup.bak').exists())
 
 class CupViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_modal_fields_obey_discord_limits(self):
+        from gaffergpt.bot import CupEventModal,CupMatchModal,CupAwardModal
+        for cls in (CupEventModal,CupMatchModal,CupAwardModal):
+            self.assertLessEqual(len(cls.__modal_children_items__),5)
+            for field in cls.__modal_children_items__.values():
+                self.assertLessEqual(len(field.label),45)
+                self.assertLessEqual(len(field.placeholder or ''),100)
+
+
     async def test_cup_and_legacy_menus_fit_discord(self):
         from gaffergpt.bot import GafferBot,ReportView
         from gaffergpt.config import Config

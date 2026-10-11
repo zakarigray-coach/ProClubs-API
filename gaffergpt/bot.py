@@ -283,7 +283,7 @@ class CupEventModal(discord.ui.Modal,title='Cup competition setup'):
     name=discord.ui.TextInput(label='Competition name',max_length=160)
     dates=discord.ui.TextInput(label='Event dates: start to end (YYYY-MM-DD)',max_length=30)
     format_text=discord.ui.TextInput(label='Confirmed format (optional)',required=False,max_length=1000,style=discord.TextStyle.paragraph)
-    outcome=discord.ui.TextInput(label='Outcome: Unknown / Advanced / Eliminated / ...',default='Unknown',max_length=30)
+    outcome=discord.ui.TextInput(label='Confirmed outcome (or Unknown)',default='Unknown',placeholder='Advanced / Eliminated / Champions / Still competing',max_length=30)
     evidence=discord.ui.TextInput(label='Outcome confirmation / source (optional)',required=False,max_length=1000,style=discord.TextStyle.paragraph)
 
     def __init__(self,bot,report_id):
