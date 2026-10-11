@@ -9,6 +9,22 @@ def normalize(text):
     return re.sub(r'\s+',' ',re.sub(r'[*_`#]','',text)).strip().casefold()
 
 
+def is_setup_prompt(text):
+    # Only known menu prompts qualify for automatic historical cleanup.
+    return bool(re.fullmatch(r'<@!?\d+>,\s*select a club (?:for automode|to view members for):',
+                             normalize(text)))
+
+
+def is_match_recap(text):
+    if not text.strip() or is_setup_prompt(text):
+        return False
+    if any(parse_recap(text)):
+        return True
+    # Preserve partial recaps without guessing their missing facts.
+    lines={normalize(line) for line in text.splitlines()}
+    return bool(lines & {'player stats','team stats','final score','match recap','match report'})
+
+
 def parse_recap(text, club='Birmingham City'):
     club_names={normalize(club)}
     if normalize(club)=='birmingham city':

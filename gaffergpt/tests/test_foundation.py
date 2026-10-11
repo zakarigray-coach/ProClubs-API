@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from gaffergpt.database import Database
-from gaffergpt.parser import parse_recap,parse_registration
+from gaffergpt.parser import parse_recap,parse_registration,is_match_recap
 from gaffergpt.reporter import Reporter
 from gaffergpt.scheduler import WeeklyScheduler,week_window,friday_due
 from gaffergpt.config import Config
@@ -33,6 +33,55 @@ class Delivery:
 
 
 class FoundationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_listener_ignores_menus_and_reads_embeds(self):
+        import discord
+        bot=GafferBot(Config('test',42,30,recap_channel_id=20,source_bot_id=99,database_path=self.path))
+        message=SimpleNamespace(id=10,guild=SimpleNamespace(id=30),channel=SimpleNamespace(id=20),
+            author=SimpleNamespace(id=99),created_at=NOW,content='<@42>, select a Club for Automode:',embeds=[])
+        try:
+            await bot.ingest_message(message)
+            message.content='<@42>, select a Club to view members for:'
+            await bot.ingest_message(message)
+            message.content='Automode enabled!'
+            await bot.ingest_message(message)
+            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
+            message.content=''; message.embeds=[discord.Embed(description='MPL Birmingham 1-3 AMADNESS FC')]
+            await bot.ingest_message(message); await bot.ingest_message(message)
+            row=bot.db.rows('SELECT * FROM matches')[0]
+            self.assertEqual((row['opponent'],row['birmingham_score'],row['opponent_score']),('AMADNESS FC',1,3))
+            self.assertEqual(row['match_type'],'Unknown')
+            self.assertEqual(len(bot.db.rows('SELECT * FROM matches')),1)
+            message.id=11; message.content='MPL Birmingham 2-1 Chelsea'
+            message.embeds=[discord.Embed(description=message.content)]
+            await bot.ingest_message(message)
+            self.assertEqual(len(bot.db.rows('SELECT * FROM matches')),2)
+        finally:
+            await bot.close()
+
+    def test_recap_detection_preserves_partial_data(self):
+        self.assertTrue(is_match_recap('PLAYER STATS\nStats unavailable'))
+        self.assertTrue(is_match_recap('Opponent: Chelsea'))
+        self.assertFalse(is_match_recap('Choose your club'))
+        self.assertFalse(is_match_recap('Division 3 | Skill Rating: 1613'))
+
+    def test_setup_cleanup_retains_records_and_leaves_real_matches(self):
+        menu='<@42>, select a Club for Automode:'
+        bad=self.add('menu',menu)[0]
+        partial=self.add('partial','PLAYER STATS\nStats unavailable')[0]
+        real=self.add('real')[0]
+        classified=self.add('classified','<@42>, select a Club to view members for:')[0]
+        self.db.classify(classified,'Practice','Unknown',42)
+        self.db.ingest('other',21,30,NOW.isoformat(),menu,parse_recap(menu))
+        self.assertEqual(self.db.ignore_setup_prompts(20,30,42),[bad])
+        self.assertEqual(self.db.ignore_setup_prompts(20,30,42),[])
+        row=self.db.match(bad)
+        self.assertEqual((row['match_type'],row['counts_official'],row['report_eligible']),('Ignored',0,0))
+        self.assertEqual(row['raw_recap'],menu)
+        self.assertEqual(self.db.match(partial)['match_type'],'Unknown')
+        self.assertEqual(self.db.match(real)['match_type'],'Unknown')
+        self.assertEqual(self.db.match(classified)['match_type'],'Practice')
+        self.assertEqual(len(self.db.rows('SELECT * FROM matches')),5)
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.path=str(Path(self.tmp.name)/'gaffergpt.db')

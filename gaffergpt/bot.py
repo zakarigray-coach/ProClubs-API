@@ -14,7 +14,7 @@ from .media_api import start_api
 from .feedback import player_feedback
 from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
-from .parser import parse_recap, parse_registration
+from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
 from .reporter import Reporter, match_label
 from .scheduler import WeeklyScheduler, week_window
 
@@ -239,6 +239,10 @@ class GafferBot(discord.Client):
     async def work(self):
         await self.wait_until_ready()
         try:
+            channel,_=self.recap_config()
+            ignored=self.db.ignore_setup_prompts(channel,self.config.guild_id,self.config.owner_id)
+            if ignored:
+                log.info('Ignored %s historical OurProClubs setup prompts; raw records retained',len(ignored))
             await self.refresh_footers()
         except Exception as error:
             log.error('Existing footer refresh failed: %s',type(error).__name__)
@@ -285,9 +289,23 @@ class GafferBot(discord.Client):
         channel,author=self.recap_config()
         if not channel or not author or not message.guild or message.guild.id!=self.config.guild_id:
             return
-        if message.channel.id!=channel or message.author.id!=author or not message.content.strip():
+        if message.channel.id!=channel or message.author.id!=author:
             return
-        self.db.ingest(message.id,channel,message.guild.id,message.created_at.astimezone(timezone.utc).isoformat(),message.content,parse_recap(message.content))
+        # Recaps may live in readable embeds rather than message.content.
+        blocks=[]
+        def add(value):
+            if value and value.strip() and value.strip() not in blocks:
+                blocks.append(value.strip())
+        add(message.content)
+        for embed in getattr(message,'embeds',[]):
+            add(embed.title); add(embed.description)
+            for field in embed.fields:
+                separator='\n' if field.name.strip().upper() in ('PLAYER STATS','TEAM STATS','FINAL SCORE') else ': '
+                add(f'{field.name}{separator}{field.value}')
+        text='\n'.join(blocks)
+        if not is_match_recap(text):
+            return
+        self.db.ingest(message.id,channel,message.guild.id,message.created_at.astimezone(timezone.utc).isoformat(),text,parse_recap(text))
 
     async def recover_recaps(self):
         channel_id,author=self.recap_config()
@@ -323,18 +341,26 @@ class GafferBot(discord.Client):
         channel=owner.dm_channel or await owner.create_dm()
         ids={r['review_message_id'] for r in self.db.rows('SELECT review_message_id FROM matches WHERE review_message_id IS NOT NULL')}
         ids.update(r['message_id'] for r in self.db.rows('SELECT message_id FROM weekly_jobs WHERE message_id IS NOT NULL'))
+        setup_ids={r['review_message_id'] for r in self.db.rows("SELECT review_message_id,raw_recap FROM matches WHERE match_type='Ignored' AND review_message_id IS NOT NULL") if is_setup_prompt(r['raw_recap'])}
         for message_id in ids:
             try:
                 message=await channel.fetch_message(int(message_id))
                 if message.author.id!=self.user.id:
                     continue
                 changed=False
+                archived=message_id in setup_ids
                 for embed in message.embeds:
+                    if archived and embed.description!='Ignored — this was an OurProClubs setup menu, not a match recap. No club statistics were counted.':
+                        embed.description='Ignored — this was an OurProClubs setup menu, not a match recap. No club statistics were counted.'
+                        changed=True
                     old=embed.footer.text if embed.footer else None
                     if old and not old.startswith(PEP_FOOTER+'\n'):
                         embed.set_footer(text=branded_footer(old));changed=True
-                if changed:
-                    await message.edit(embeds=message.embeds)
+                if changed or (archived and message.components):
+                    if archived:
+                        await message.edit(embeds=message.embeds,view=None)
+                    else:
+                        await message.edit(embeds=message.embeds)
             except discord.HTTPException:
                 continue
 

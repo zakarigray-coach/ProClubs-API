@@ -198,6 +198,8 @@ Existing RT JSON files still hold unrelated signing/schedule history; they are n
 
 Club stats parsing now supports explicitly labeled counts and percentages within TEAM STATS, including the supplied direction, length, possession-third and shooting fields. It does not infer possession or pass accuracy from direction/length counts. A real automode recap format still requires live verification. No test fixtures are imported into production.
 
+The listener checks readable message content and embed titles/descriptions/fields for a known club scoreline, supported match labels, or explicit recap/stat headings. Setup menus and generic bot replies do not create matches. Recognizable partial recaps remain Unknown with their original text. At startup, exact historical OurProClubs club-selection prompts in the configured channel are marked Ignored only when still Unknown and missing all opponent/score facts. Their raw records and classification history remain saved; old review DMs are updated and their controls removed. Other records and management classifications remain untouched. Image-only recaps and private “Only you can see this” replies cannot be imported by this listener. PCT recap parsing/source configuration is not implemented by this change.
+
 ## Live Google Sheets notebook
 
 Optional `PEP_GOOGLE_SERVICE_ACCOUNT_JSON` and `PEP_NOTEBOOK_SPREADSHEET_ID` enable a one-way mirror of the central database into the prepared Pep’s Notebook workbook. Enable Google Sheets API for the service account’s project and share only this workbook with the service account as Editor. Keep the JSON key only in Railway variables, never GitHub or chat. The bot uses only the Sheets scope; it cannot browse the rest of your Drive.

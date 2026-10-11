@@ -175,6 +175,18 @@ class Database:
     def match(self, match_id):
         return self.one('SELECT * FROM matches WHERE match_id=?', (match_id,))
 
+    def ignore_setup_prompts(self, channel_id, guild_id, actor):
+        from .parser import is_setup_prompt
+        ignored=[]
+        for row in self.rows("""SELECT * FROM matches WHERE match_type='Unknown'
+                AND source_channel_id=? AND source_guild_id=? AND opponent IS NULL
+                AND birmingham_score IS NULL AND opponent_score IS NULL""",
+                (str(channel_id),str(guild_id))):
+            if is_setup_prompt(row['raw_recap']):
+                self.classify(row['match_id'],'Ignored','Unknown',actor)
+                ignored.append(row['match_id'])
+        return ignored
+
     def period_matches(self, start, end, eligible=False):
         query = 'SELECT * FROM matches WHERE played_at>=? AND played_at<?'
         if eligible:
