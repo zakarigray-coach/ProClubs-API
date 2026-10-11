@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .coaching_ai import OpenAICoach
 from .article_facts import fact_registry
-from .report_verification import build_fact_sheet, validate_final, digest
+from .report_verification import build_fact_sheet, validate_final, digest, source_identity
 
 INSTRUCTIONS = """You are RT Football Media's senior football correspondent, writing a polished
 sports feature for MPL Birmingham City supporters. Use British English throughout. Work like a demanding newspaper sports desk:
@@ -129,7 +129,11 @@ class SportsWriter(OpenAICoach):
                 'Do not reference a fact merely because the same number exists. It must be the correct subject, scope and metric. '
                 'Mark every unsupported quotation, name, comparison, record, future fixture, emotion, motive, chronology or '
                 'tactical event in unsupported. Match outcomes do not prove dominance or a comeback. No assumed chronology. '
-                'Ordinary proportionate opinion may stand, but factual premises must match the source. '
+                'This is a claim locator, not a second stylistic review. Do NOT put a supported football interpretation in unsupported merely because its wording is not a literal database field. '
+                'Headlines and proportionate judgements such as an attacking contribution or award fitting goal/assist output may cite the underlying player/award/score facts. '
+                'Leading scorer must cite a comparison fact, not assume a rank. '
+                'Calendar dates and daily counts use date/schedule facts; dates support later DAYS, never ordering within a day. '
+                'Reserve unsupported for concrete missing/conflicting premises, invented events, emotions, tactics, roles, quotations or actual unverifiable comparisons. '
                 'If no supporting fact exists, put the claim in unsupported; never invent fact IDs.',
                 'input':analysis,'max_output_tokens':8000,'reasoning':{'effort':'low'},'store':False,
                 'text':{'format':{'type':'json_schema','name':'final_claim_sources','strict':True,
@@ -180,7 +184,7 @@ class SportsWriter(OpenAICoach):
         brief['writing_requirements']=brief['desk_task']
         async def draft_and_edit():
             recovery=clean.get('recovery') or {}
-            if recovery.get('source_hash')==sheet['source_hash']:
+            if (recovery.get('source_hash')==sheet['source_hash'] or recovery.get('source_identity')==source_identity(sheet)):
                 draft=recovery['article'];feedback=[recovery.get('error','Complete every current check.')]
                 self._local.attempts.append({'state':'recovered','source_hash':sheet['source_hash']})
             else:

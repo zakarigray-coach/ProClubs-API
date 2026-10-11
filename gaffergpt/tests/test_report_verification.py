@@ -1,5 +1,5 @@
 import unittest
-from gaffergpt.report_verification import build_fact_sheet,validate_final,ReportHold,digest
+from gaffergpt.report_verification import build_fact_sheet,validate_final,ReportHold,digest,source_identity
 
 
 def fixture(mid,kind='Practice',opponent='Chelsea',own=2,other=1):
@@ -90,8 +90,30 @@ class VerificationTests(unittest.TestCase):
         s=self.sheet([fixture(1,'Official'),fixture(2,'Official',own=1,other=3)], [stat(1,'Zak','goals',2),stat(2,'Zak','goals',1)])
         text='Zak scored two goals against Chelsea in official matches.'
         with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Zak','goals',text,classification='Official',fixture_id=1)])
+    def test_fixture_dates_and_daily_count_have_source_references(self):
+        s=self.sheet([fixture(1,opponent='Chelsea'),dict(fixture(2,opponent='Arsenal'),played_at='2026-10-01T20:00:00+00:00')])
+        text='Birmingham played two practice fixtures on 1 October.'
+        day=next(k for k,f in s['facts'].items() if f['kind']=='schedule')
+        self.validate(s,text,[{'fact_id':day,'quote':text}])
+        for text in ('Birmingham played three practice fixtures on 1 October.','Birmingham played two official fixtures on 1 October.'):
+            with self.assertRaises(ValueError):self.validate(s,text,[{'fact_id':day,'quote':text}])
+    def test_message_timestamp_does_not_become_verified_match_day(self):
+        s=self.sheet([dict(fixture(1),date_source='message')])
+        self.assertFalse(any(f['kind'] in ('date','schedule') for f in s['facts'].values()))
+    def test_not_league_does_not_misclassify_practice_claim(self):
+        s=self.sheet([fixture(1,own=7)],[stat(1,'Zak','goals',7)])
+        text='Zak scored seven goals in practice, not league fixtures.'
+        self.validate(s,text,[self.evidence(s,'Zak','goals',text)])
+    def test_derived_fact_changes_do_not_change_source_identity(self):
+        s=self.sheet();old=s['source_hash'];s['facts']['extra']={'kind':'comparison','value':True}
+        self.assertEqual(source_identity(s),old)
+    def test_leading_scorer_only_when_unrecorded_goals_cannot_overtake(self):
+        s=self.sheet([fixture(1,own=8)],[stat(1,'Zak','goals',7),stat(1,'Other','goals',1)])
+        self.assertTrue(any(f['kind']=='comparison' and f['subject']=='Zak' for f in s['facts'].values()))
+        s=self.sheet([fixture(1,own=20)],[stat(1,'Zak','goals',7),stat(1,'Other','goals',1)])
+        self.assertFalse(any(f['kind']=='comparison' for f in s['facts'].values()))
     def test_source_hash_remains_reproducible(self):
-        s=self.sheet();value=s.pop('source_hash');self.assertEqual(value,digest(s))
+        s=self.sheet();value=s.pop('source_hash');self.assertEqual(value,source_identity(s))
 
 
 class AuditTests(unittest.TestCase):

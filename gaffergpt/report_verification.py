@@ -4,6 +4,8 @@ import json
 import math
 import re
 from collections import defaultdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from .excel_stats import player_totals
 
 
@@ -13,6 +15,18 @@ class ReportHold(ValueError):
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+
+
+def source_identity(sheet):
+    refs=dict(sheet.get('references',{}))
+    period=next((f['value'] for f in sheet.get('facts',{}).values() if f['kind']=='period'),None)
+    if period:refs['report:period']={'dates':period}
+    return digest({'fixtures':sheet.get('fixtures',[]),'references':refs})
+
+
+def match_day(value):
+    try:return datetime.fromisoformat(value).astimezone(ZoneInfo('America/New_York')).date().isoformat()
+    except (ValueError,TypeError):return None
 
 
 def build_fact_sheet(packet):
@@ -42,6 +56,13 @@ def build_fact_sheet(packet):
         fixtures.append(fixture)
         add('fixture',row['opponent'],'score',{'for':own,'against':other,'result':fixture['result'],
             'venue':row.get('venue','Unknown'),'competition':row.get('competition')},kind,mid,[ref])
+    days=defaultdict(list)
+    for row,fixture in zip(rows,fixtures):
+        day=match_day(fixture['played_at'])
+        if day and row.get('date_source') not in ('message','detected'):
+            add('date',fixture['opponent'],'fixture_day',day,fixture['match_type'],fixture['match_id'],[f'match:{fixture["match_id"]}'])
+            days[(fixture['match_type'],day)].append(fixture['match_id'])
+    for (kind,day),mids in days.items():add('schedule','Birmingham City','fixtures_on_day',{'date':day,'count':len(mids)},kind,sources=[f'match:{mid}' for mid in mids])
     stats=[];unique={}
     for row in packet.get('statistics',[]):
         if row['match_id'] not in ids:continue
@@ -114,6 +135,12 @@ def build_fact_sheet(packet):
                 for metric in ('goals','assists','appearances','average_rating'):
                     if metric in old and metric in p and not math.isclose(old[metric],p[metric],rel_tol=1e-8,abs_tol=1e-8):
                         raise ReportHold(f'{p["player"]} {kind} {metric} conflicts: source rows {p[metric]}, cached total {old[metric]}. Please confirm the correct source.')
+        if players and all(p['metric_samples'].get('goals')==p['appearances'] for p in players):
+            recorded=sum(p.get('goals',0) for p in players)
+            highest=max(p.get('goals',0) for p in players)
+            if highest>0 and 0<=summary['goals_for']-recorded<highest:
+                for p in players:
+                    if p.get('goals')==highest:add('comparison',p['player'],'leading_scorer',True,kind,sources=[f'match:{mid}' for mid in sorted(mids)])
         groups[kind]={'summary':summary,'players':players}
     management=packet.get('management') or {}
     if management.get('player_name'):add('award',management['player_name'],'player_of_week',True,sources=['management:award'])
@@ -122,7 +149,7 @@ def build_fact_sheet(packet):
     sheet={'version':1,'fixtures':fixtures,'groups':groups,'facts':facts,'references':references,
            'warnings':warnings,'quotes':[],'narrative_evidence':[],
            'excluded_names':packet.get('excluded_names',[])}
-    sheet['source_hash']=digest(sheet)
+    sheet['source_hash']=source_identity(sheet)
     return sheet
 
 
@@ -156,6 +183,15 @@ def numeric_spans(text,sheet):
         yield match.start(),match.end(),number(match[0])
 
 
+MONTHS=('January','February','March','April','May','June','July','August','September','October','November','December')
+def date_spans(quote):
+    for month,name in enumerate(MONTHS,1):
+        for m in re.finditer(r'\b(\d{1,2})\s+('+name+r'|'+name[:3]+r')\b',quote,re.I):
+            yield m.start(1),m.end(1),month,int(m[1])
+        for m in re.finditer(r'\b('+name+r'|'+name[:3]+r')\s+(\d{1,2})\b',quote,re.I):
+            yield m.start(2),m.end(2),month,int(m[2])
+
+
 def validate_final(article,sheet,evidence):
     """The model locates claims; Python independently checks their referenced facts."""
     text=article['title']+'\n'+article['body'];facts=sheet['facts'];covered=set();fact_positions=defaultdict(set)
@@ -171,8 +207,11 @@ def validate_final(article,sheet,evidence):
         if name not in names and re.search(r'(?<!\w)'+re.escape(name)+r'(?!\w)',text,re.I):
             raise ValueError('Unselected fixture/player leaked into article: '+name)
     spans=list(numeric_spans(text,sheet))
+    def scope_labels(segment):
+        for name in sorted(names,key=len,reverse=True):segment=re.sub(re.escape(name),lambda m:' '*len(m[0]),segment,flags=re.I)
+        return [m for m in re.finditer(r'\b(practice|friendly|friendlies|official|competitive|league|cup)\b',segment,re.I) if not re.search(r'(?:not|rather than|instead of|outside|away from)\s+(?:the\s+)?$',segment[:m.start()],re.I)]
     def scope_at(position):
-        labels=list(re.finditer(r'\b(practice|friendly|friendlies|official|competitive|league|cup)\b',text[:position],re.I))
+        labels=scope_labels(text[:position])
         if not labels:return None
         return 'Practice' if labels[-1][0].lower() in ('practice','friendly','friendlies') else 'Official'
     for claim in evidence.get('claims',[]):
@@ -204,12 +243,32 @@ def validate_final(article,sheet,evidence):
                 if len(pairs)==1 and re.search(wrong,context):raise ValueError('Score/result contradiction for '+fact['subject'])
                 covered.update((start+pair.start(1),start+pair.end(1)) for _ in [0])
                 covered.add((start+pair.start(2),start+pair.end(2)))
+        elif kind in ('date','schedule'):
+            day=value if kind=='date' else value['date']
+            wanted=datetime.fromisoformat(day)
+            valid=[(a,b) for a,b,month,d in date_spans(quote) if (month,d)==(wanted.month,wanted.day)]
+            if kind=='date' and fact['subject'] not in quote:continue
+            if not valid:continue
+            covered.update((start+a,start+b) for a,b in valid)
+            covered.update((a,b) for a,b,n in candidates if n==wanted.year)
+            if kind=='schedule':
+                for a,b,n in candidates:
+                    if n!=value['count'] or not re.search(r'\b(?:matches|fixtures|games)\b',text[b:min(end,b+35)],re.I):continue
+                    scope=scope_at(a)
+                    qualifier=re.match(r'\s+(practice|friendly|official|competitive|league|cup)\b',text[b:end],re.I)
+                    if qualifier:scope='Practice' if qualifier[1].lower() in ('practice','friendly') else 'Official'
+                    if scope and scope!=fact['classification']:continue
+                    if len(sheet['groups'])>1 and not scope:continue
+                    covered.add((a,b))
+        elif kind=='comparison':
+            if fact['subject'] not in quote:raise ValueError('Comparison names the wrong player.')
         elif kind=='period':
             if not re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{4}-\d{2}-\d{2}',quote):continue
             allowed={v for _,_,v in numeric_spans(str(value),{'facts':{}})}
             covered.update((a,b) for a,b,v in candidates if v in allowed)
         elif kind in ('player','team'):
             if metric not in METRICS:raise ValueError('Unsupported metric in article: '+metric)
+            if kind=='team' and metric=='matches' and list(date_spans(quote)):continue
             for a,b,n in candidates:
                 if not math.isclose(float(value),n,abs_tol=0.011):continue
                 previous=max([end_pos for begin,end_pos,_ in spans if end_pos<=a]+[start])
@@ -245,7 +304,7 @@ def validate_final(article,sheet,evidence):
                 if len(sheet['groups'])>1 and not nearby_scope:continue
                 # Explicit nearby practice/official labels cannot contradict the source scope.
                 para=text[max(0,text.rfind('\n\n',0,start)+2):end].lower()
-                labels=set(re.findall(r'\b(practice|official|competitive|league)\b',para))
+                labels={m[0].lower() for m in scope_labels(para)}
                 if fact['classification']=='Practice' and labels & {'official','competitive','league'}:continue
                 if fact['classification']=='Official' and labels=={'practice'}:continue
                 covered.add((a,b))
