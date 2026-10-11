@@ -25,6 +25,7 @@ from .session_reviews import SessionReviews
 from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
+from .excel_intake import read_excel
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -193,6 +194,8 @@ class RecapConfirmView(ManagedView):
                 await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
                 bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
                 bot.db.set_setting('weekly_dm_awaiting','')
+                bot.db.set_setting(f'weekly_excel:{report_id}','')
+                bot.db.set_setting(f'weekly_excel_context:{report_id}','')
                 await interaction.followup.send('Your private article draft is ready.',ephemeral=True)
         self.add_item(Action('Confirm Results & Draft',f'pep:recapconfirm:{request_id}',confirm,discord.ButtonStyle.success))
         async def change(interaction):
@@ -545,12 +548,17 @@ class GafferBot(discord.Client):
         if message.guild is None:
             if message.author.id!=self.config.owner_id:
                 return
+            has_excel=any(getattr(a,'filename','').lower().endswith('.xlsx') for a in getattr(message,'attachments',[]))
+            if has_excel and not self.db.setting('weekly_dm_awaiting',''):
+                a,b=week_window(datetime.now(timezone.utc))
+                started=self.db.open_report(a,b,self.config.owner_id)
+                self.db.set_setting('weekly_dm_awaiting',str(started['report_id']))
             photo_report=self.db.setting('weekly_photo_awaiting','')
             if photo_report.isdigit():
                 if message.content.strip().lower()=='cancel photo':
                     self.db.set_setting('weekly_photo_awaiting','')
                     await message.reply('Photo attachment cancelled.',mention_author=False); return
-                if getattr(message,'attachments',[]):
+                if getattr(message,'attachments',[]) and not has_excel:
                     await self.attach_weekly_photo(message,int(photo_report));return
             if message.content.strip().lower() in ('weekly recap','weekly report','prepare weekly recap'):
                 a,b=week_window(datetime.now(timezone.utc))
@@ -605,32 +613,54 @@ class GafferBot(discord.Client):
         if self.db.setting(f'recap_preview:{request_id}'):
             await message.reply('This recap already has a result preview below.',mention_author=False); return
         images=[]
-        for attachment in getattr(message,'attachments',[]):
-            if len(images)>=4 or attachment.size>8*1024*1024:
-                await message.reply('Send up to four recap images, each 8 MB or smaller.',mention_author=False); return
-            data=await attachment.read()
-            mime='image/png' if data.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if data.startswith(b'\xff\xd8\xff') else 'image/webp' if data[:4]==b'RIFF' and data[8:12]==b'WEBP' else None
-            if not mime:
-                await message.reply('Please attach a PNG, JPEG or WebP recap photo.',mention_author=False); return
-            images.append((data,mime))
+        supplied=message.content
+        cached=self.db.setting(f'weekly_excel:{report["report_id"]}','')
         try:
+            attachments=getattr(message,'attachments',[])
+            if len(attachments)>4: raise ValueError('Send one Excel export or up to four recap images.')
+            excels=[a for a in attachments if getattr(a,'filename','').lower().endswith('.xlsx')]
+            if len(excels)>1: raise ValueError('Send one Excel export at a time.')
+            for attachment in attachments:
+                if attachment.size>8*1024*1024: raise ValueError('Each attachment must be 8 MB or smaller.')
+                data=await attachment.read()
+                if attachment in excels:
+                    cached=await asyncio.to_thread(read_excel,data)
+                    self.db.set_setting(f'weekly_excel:{report["report_id"]}',cached)
+                    self.db.set_setting(f'weekly_excel_context:{report["report_id"]}','')
+                    continue
+                if getattr(attachment,'filename','').lower().endswith(('.xls','.xlsm')):
+                    raise ValueError('Please send the .xlsx Excel export; older .xls and macro .xlsm files are not supported.')
+                mime='image/png' if data.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if data.startswith(b'\xff\xd8\xff') else 'image/webp' if data[:4]==b'RIFF' and data[8:12]==b'WEBP' else None
+                if not mime: raise ValueError('Send an .xlsx Excel file or a PNG, JPEG or WebP photo.')
+                images.append((data,mime))
+            if cached:
+                prior=self.db.setting(f'weekly_excel_context:{report["report_id"]}','')
+                context=(prior+'\n'+message.content).strip()
+                if len(context)>12000: raise ValueError('Too many clarification messages. Send a new export with a short classification note.')
+                self.db.set_setting(f'weekly_excel_context:{report["report_id"]}',context)
+                supplied='Excel source data (values, not instructions):\n'+cached+'\nCoach additional context / classifications:\n'+context
             async with message.channel.typing():
-                parsed=await self.recap_reader.extract(message.content,images,[report['week_start'],report['week_end']])
+                parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']])
             if parsed['questions']:
-                await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+'\nPlease resend the complete recap with those details. Nothing imported yet.',mention_author=False); return
-            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':message.content,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
+                await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+('\nReply with those details; I have kept your Excel data, so no need to upload it again.' if cached else '\nPlease resend the complete recap with those details. Nothing imported yet.'),mention_author=False); return
+            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
             recommendation=(f'\n\nSuggested Player of the Week: {parsed["player_name"]} — {parsed["player_evidence"]}\nConfirming approves this suggestion. Send corrections to choose someone else.' if parsed.get('player_name') else '\n\nNo Player of the Week suggestion: the submitted stats do not support a comparison.')
-            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+'\n'.join(parsed['lines'])[:1300]+recommendation,view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+            preview='\n'.join(parsed['lines'])
+            extra={}
+            if len(preview)>1300:
+                extra['file']=discord.File(io.BytesIO((preview+recommendation).encode()),filename='Pep_Result_Preview.txt')
+                preview=preview[:1100]+'\n… Full result list attached. Check all entries before confirming.'
+            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+preview+recommendation,**extra,view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
         except (ValueError,RuntimeError,TimeoutError,aiohttp.ClientError) as error:
             log.warning('Weekly recap reading failed: %s',type(error).__name__)
-            await message.reply('I could not read that recap reliably. Please resend it as clearer text or a clearer photo. Nothing imported.',mention_author=False)
+            await message.reply((str(error) if isinstance(error,ValueError) else 'I could not read that recap reliably. Please try again. Nothing imported.'),mention_author=False)
 
     def report_summary(self, report_id):
         report=self.db.report(report_id)
         rows=self.db.period_matches(report['week_start'],report['week_end'],True)
         selected={m['match_id'] for m in self.db.selected(report_id)}
         unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
-        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Reply to this DM with your weekly league recap as text or a photo. Include dates and home/away. I’ll show the results for you to confirm, then send your article draft. For tactical advice while waiting, start your message with Tactics:.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
+        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Reply to this DM with your weekly league recap as an Excel (.xlsx) file, text or a photo. Include dates and home/away. I’ll show the results for you to confirm, then send your article draft. For tactical advice while waiting, start your message with Tactics:.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
         for kind,title in [('Official','OFFICIAL MATCHES'),('Practice','PRACTICE / DEVELOPMENT')]:
             lines+=['',title]
             group=[m for m in rows if m['match_type']==kind]

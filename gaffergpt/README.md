@@ -314,3 +314,15 @@ If weekly player statistics support a comparison, Pep proposes Player of the Wee
 reason in the result preview. Coach confirms the suggestion. Missing player statistics produce no award
 suggestion. The **Attach Player Photo** button on the preview or draft lets Coach send the image in DM,
 without a slash command. Recap screenshots and featured player photos are handled separately.
+
+
+### Excel recap uploads
+Send the original PCT+ `.xlsx` export to Pep's private DM (8 MB maximum).
+An Excel attachment can start the weekly intake without typing `weekly recap` first.
+Pep reads cell values from all worksheets, including player-week totals and player-match details;
+formulas/macros/external links are not executed. `.xls` and `.xlsm` are not supported.
+If the export lacks official/practice classification or venue, reply with those details;
+Pep keeps the uploaded values and clarification context, so reuploading is unnecessary.
+For example: **All these matches were practices.** EA's `league` label never establishes MPL status.
+Large match lists include a complete text preview attachment before confirmation.
+Player-week aggregates may cover practices and official games together; suggestions must state that scope.
