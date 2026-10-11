@@ -42,6 +42,8 @@ def render_checked(result,facts,packet):
     body=re.sub(r'\b(?:'+count_words+r') (?:practice |official )?appearances\b','the recorded appearances',body,flags=re.I)
     body=re.sub(r'\b(?:'+count_words+r') results\b','the results',body,flags=re.I)
     body=re.sub(r'\bthe the\b','the',body,flags=re.I)
+    for old,new in [('profile data','figures'),('material provided','available figures'),('documented assists','assists'),('packet','report'),('ledger','record')]:
+        body=re.sub(r'\b'+old+r'\b',new,body,flags=re.I)
     used=TOKEN.findall(body)
     if not used or any(k not in facts for k in used):raise ValueError('Unknown or missing fact references')
     if any(n>1 for n in Counter(used).values()):raise ValueError('Repeated statistical paragraph')
@@ -58,6 +60,19 @@ def render_checked(result,facts,packet):
         if score not in scores:raise ValueError('Score not in selected fixtures: '+score)
         return 'SCORE'
     raw=re.sub(r'\b\d{1,2}[–-]\d{1,2}\b',verified_score,raw)
+    count_names=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty']
+    allowed_counts=set()
+    for kind in ('Official','Practice'):
+        rows=[m for m in packet['matches'] if m['match_type']==kind and m['birmingham_score'] is not None and m['opponent_score'] is not None]
+        if rows:
+            for label,comparison in [('wins',lambda a,b:a>b),('draws',lambda a,b:a==b),('defeats',lambda a,b:a<b)]:
+                count=sum(comparison(m['birmingham_score'],m['opponent_score']) for m in rows)
+                allowed_counts.add((count,label))
+    def checked_count(match):
+        count=count_names.index(match[1].lower());label=match[2].lower()
+        if (count,label) not in allowed_counts:raise ValueError('Unverified result count')
+        return 'RESULTCOUNT'
+    raw=re.sub(r'\b('+ '|'.join(count_names)+r') (wins|draws|defeats)\b',checked_count,raw,flags=re.I)
     unbound=re.search(r'\d+(?:\.\d+)?',raw) or NUMBER_WORDS.search(raw)
     if unbound:
         excerpt=raw[max(0,unbound.start()-45):unbound.end()+55].replace('\n',' ')
