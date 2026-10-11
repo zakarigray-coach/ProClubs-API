@@ -9,8 +9,8 @@ const ml1Pattern = /(^|[^a-z0-9])ml[-_ ]?1(?=$|[^a-z0-9])/gi;
 function scrubDescription(text) {
   if (text == null || !/\bCrown\s*FC\b/i.test(text)) return text;
   return String(text)
-    .replace(/(Birmingham City(?:\s+in\s+MPL)?)\s+(?:and|&|\/|\|)\s+Crown\s*FC(?:\s+in\s+MLPC)?/gi, '$1')
-    .replace(/Crown\s*FC(?:\s+in\s+MLPC)?\s+(?:and|&|\/|\|)\s+(Birmingham City(?:\s+in\s+MPL)?)/gi, '$1')
+    .replace(/(Birmingham City(?:\s+(?:in\s+)?MPL)?)\s+(?:and|&|\/|\|)\s+Crown\s*FC(?:\s+(?:in\s+)?MLPC)?/gi, '$1')
+    .replace(/Crown\s*FC(?:\s+(?:in\s+)?MLPC)?\s+(?:and|&|\/|\|)\s+(Birmingham City(?:\s+(?:in\s+)?MPL)?)/gi, '$1')
     .replace(/\bCrown\s*FC(?:['’]s)?\b/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/^[ \t]*[—–:|•-][ \t]*/gm, '')
@@ -93,7 +93,11 @@ async function runBirminghamRebrand(client, options = {}) {
     }
     for (const channel of guild.channels.cache.values()) {
       const name=mplName(channel.name);
-      const topic=scrubDescription(channel.topic);
+      const original=journal.originals.find(item => item.kind==='channel' && item.id===channel.id);
+      const lastApplied=journal.applied.findLast(item => item.id===channel.id && Object.hasOwn(item,'topic'));
+      // Refine our own prior edit without overwriting any later human changes.
+      const topic=scrubDescription(original && lastApplied && channel.topic===lastApplied.topic
+        ? original.topic : channel.topic);
       const update={};
       if (name!==channel.name) update.name=name;
       if (topic!==channel.topic) update.topic=topic;

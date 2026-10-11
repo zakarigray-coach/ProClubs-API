@@ -9,6 +9,7 @@ const { scrubDescription, mplName, leagueChannelKeys, runBirminghamRebrand }=req
 test('description cleanup removes the old club without changing unrelated names',()=>{
   assert.equal(scrubDescription('Home of Birmingham City and CrownFC.'),'Home of Birmingham City.');
   assert.equal(scrubDescription('Birmingham City in MPL and CrownFC in MLPC.'),'Birmingham City in MPL.');
+  assert.equal(scrubDescription('Birmingham City MPL and CrownFC MLPC.'),'Birmingham City MPL.');
   assert.equal(scrubDescription('CrownFC squad updates'),'squad updates');
   assert.equal(scrubDescription('Castle & Crown community'),'Castle & Crown community');
   assert.equal(scrubDescription('CrownFC'),null);
