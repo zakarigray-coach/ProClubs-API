@@ -115,11 +115,13 @@ class SportsWriter(OpenAICoach):
             'Lead with the confirmed award winner’s goals when the main story is his scoring, and contrast the team results. '
             'Mention the award and supporting figures once, integrated into the narrative. '
             'No Other contributors section, roster list, or concluding explanation of reporting policy. '
-            'Use only the featured players, not extra roster names. Explain recognition through their factual output.')
+            'Use only the featured players, not extra roster names. Explain recognition through their factual output. '
+            'Do not calculate new combined totals. Prefer the provided individual results and week totals. '
+            'Distinguish Birmingham goals from total match goals. Do not repeat the reporting dates in the body.')
         async def draft_and_edit():
             draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
             feedback=''
-            for attempt in range(3):
+            for attempt in range(5):
                 editing=dict(brief,editing_draft=draft,validation_feedback=feedback,
                     desk_task='Act as the final newspaper copy editor. Rewrite the COMPLETE article in natural prose. '
                     'Fix grammar, singular/plural agreement, awkward possessives, repetition and unsupported interpretations. '
@@ -136,6 +138,11 @@ class SportsWriter(OpenAICoach):
                     review=json.loads(await self.advise(json.dumps(audit,ensure_ascii=False)))
                     if review.get('title')!='PASS':
                         raise ValueError(review.get('body') or 'Final editorial review rejected the article')
+                    audit['review_focus']='Second review: assess only the six newspaper-quality requirements. '
+                    audit['review_focus']+='Strong standout-player opening, selective figures, no repeated stats, natural language, football ending, no roster roll-call. Reject any failure.'
+                    second=json.loads(await self.advise(json.dumps(audit,ensure_ascii=False)))
+                    if second.get('title')!='PASS':
+                        raise ValueError(second.get('body') or 'Second newspaper-quality review rejected the draft')
                     return edited['title'].strip(),edited['body'].strip()
                 except ValueError as error:
                     feedback=str(error);draft=edited

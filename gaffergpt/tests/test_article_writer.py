@@ -90,9 +90,9 @@ class FinishedArticleTests(unittest.TestCase):
                 return json.dumps({'title':'Birmingham weigh contrasting practice returns','body':prose})
         title,body=Writer('test').write({'matches':[],'observations':{},'management':{}})
         self.assertEqual(body,prose)
-        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),2)
+        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),3)
         self.assertEqual(calls[-1]['finished_article']['body'],prose)
-        self.assertEqual(calls[-2]['validation_feedback'],'Remove repetition')
+        self.assertEqual(calls[-3]['validation_feedback'],'Remove repetition')
 
     def test_equivalent_decimal_display_does_not_reject_correct_rating(self):
         from gaffergpt.article_writer import check_finished_prose
