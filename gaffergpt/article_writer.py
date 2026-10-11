@@ -100,7 +100,7 @@ class SportsWriter(OpenAICoach):
                 'Maintain a proper feature length, 400–550 words, and combine isolated stat lines into paragraphs. '
                 'Do not recite every match if the record and key results convey the story. '
                 'Use a natural closing without restating the opening. Return corrected title/body JSON.')
-            for attempt in range(2):
+            for attempt in range(3):
                 edited=json.loads(await self.advise(json.dumps(edit,ensure_ascii=False)))
                 try:
                     title,body=render_checked(edited,facts,clean)

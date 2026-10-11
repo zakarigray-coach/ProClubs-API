@@ -44,7 +44,10 @@ def render_checked(result,facts,packet):
     names=[p['player'] for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps]
     names += [m['opponent'] for m in packet['matches']]
     for name in sorted(names,key=len,reverse=True):raw=raw.replace(name,'NAME')
-    if re.search(r'\d',raw) or NUMBER_WORDS.search(raw):raise ValueError('Unbound numerical claim')
+    unbound=re.search(r'\d+(?:\.\d+)?',raw) or NUMBER_WORDS.search(raw)
+    if unbound:
+        excerpt=raw[max(0,unbound.start()-45):unbound.end()+55].replace('\n',' ')
+        raise ValueError('Unbound numerical claim: '+repr(excerpt)+'. Replace this claim with its verified phrase token or remove it')
     if re.search(r'\b(packet|ledger|profile data|material provided|documented assists)\b',raw,re.I):raise ValueError('Internal reporting language')
     if 'award' in facts and 'award' not in used:raise ValueError('Confirmed award omitted')
     return title,TOKEN.sub(lambda m:facts[m[1]],body)
