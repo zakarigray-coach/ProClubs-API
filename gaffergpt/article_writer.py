@@ -123,7 +123,7 @@ class SportsWriter(OpenAICoach):
                     return edited['title'].strip(),edited['body'].strip()
                 except ValueError as error:
                     feedback=str(error);draft=edited
-                    logging.getLogger(__name__).warning('Final sports desk check rejected draft; attempt=%s',attempt+1)
+                    logging.getLogger(__name__).warning('Final sports desk check rejected draft; attempt=%s reason=%s',attempt+1,feedback[:1200])
             raise RuntimeError('The finished article did not pass editorial review. Saved results are ready for retry.')
         return asyncio.run(draft_and_edit())
 
@@ -137,8 +137,8 @@ def check_finished_prose(article,facts):
     if re.search(r'\b(?:one|1) (?:goals|assists|appearances)\b|\bthe the\b|\bThose the\b|\ba commanding the\b',body,re.I):
         raise ValueError('Broken grammar or singular/plural agreement')
     # Block invented numeric values before semantic review checks their attribution.
-    allowed=set(re.findall(r'\d+(?:\.\d+)?',' '.join(facts.values())))
-    if set(re.findall(r'\d+(?:\.\d+)?',title+' '+body))-allowed:
+    allowed={float(n) for n in re.findall(r'\d+(?:\.\d+)?',' '.join(facts.values()))}
+    if {float(n) for n in re.findall(r'\d+(?:\.\d+)?',title+' '+body)}-allowed:
         raise ValueError('Article introduces a numeric value outside the verified evidence')
 
 def period_label(report):

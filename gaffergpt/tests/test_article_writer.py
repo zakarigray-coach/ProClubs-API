@@ -93,3 +93,9 @@ class FinishedArticleTests(unittest.TestCase):
         self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),2)
         self.assertEqual(calls[-1]['finished_article']['body'],prose)
         self.assertEqual(calls[-2]['validation_feedback'],'Remove repetition')
+
+    def test_equivalent_decimal_display_does_not_reject_correct_rating(self):
+        from gaffergpt.article_writer import check_finished_prose
+        check_finished_prose({'title':'Birmingham review practice returns',
+            'body':('The training fixtures offered a useful snapshot of the club’s results. '*5)+'A player averaged 8.1.'},
+            {'rating':'A player averaged 8.10.'})
