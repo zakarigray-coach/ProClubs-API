@@ -353,7 +353,7 @@ def verified_short_outline(packet,sheet):
     kind,group=next(iter(sheet['groups'].items()))
     award=(packet.get('management') or {}).get('player_name')
     winner=next((p for p in group['players'] if p['player']==award),None)
-    if not winner or 'goals' not in winner or winner['goals']<3:return None
+    if not winner or 'goals' not in winner or winner['goals']<3 or winner['metric_samples'].get('goals')!=winner['appearances']:return None
     words={0:'no',1:'one',2:'two',3:'three',4:'four',5:'five',6:'six',7:'seven',8:'eight',9:'nine',10:'ten'}
     count=lambda n:words.get(n,str(n))
     summary=group['summary'];scope='practice' if kind=='Practice' else 'league'
@@ -369,10 +369,10 @@ def verified_short_outline(packet,sheet):
         results.append(f"Birmingham recorded {result} against {fixture['opponent']}, {fixture['birmingham_score']}–{fixture['opponent_score']}")
     fixtures='. '.join(results)+'.'
     details=[]
-    if 'assists' in winner:details.append(f"{count(int(winner['assists']))} "+('assist' if winner['assists']==1 else 'assists'))
-    if 'average_rating' in winner:details.append(f"an average rating of {winner['average_rating']:.2f}")
+    if 'assists' in winner and winner['metric_samples'].get('assists')==winner['appearances']:details.append(f"{count(int(winner['assists']))} "+('assist' if winner['assists']==1 else 'assists'))
+    if 'average_rating' in winner and winner['metric_samples'].get('rating')==winner['appearances']:details.append(f"an average rating of {winner['average_rating']:.2f}")
     extra=f"Across {count(winner['appearances'])} {scope} appearances, his other returns were {' and '.join(details)}." if details else ''
-    others=sorted((p for p in group['players'] if p['player']!=award and 'goals' in p and 'assists' in p),key=lambda p:p['goals']+p['assists'],reverse=True)
+    others=sorted((p for p in group['players'] if p['player']!=award and 'goals' in p and 'assists' in p and p['metric_samples'].get('goals')==p['appearances'] and p['metric_samples'].get('assists')==p['appearances']),key=lambda p:p['goals']+p['assists'],reverse=True)
     teammate=''
     if others:
         p=others[0]

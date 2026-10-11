@@ -161,3 +161,10 @@ class SourceOutlineTests(unittest.TestCase):
         self.assertEqual(outline['body'].count('seven goals'),1)
         packet['competition_context']={'event':{'report_type':'Cup'}}
         self.assertIsNone(verified_short_outline(packet,build_fact_sheet(dict(packet,competition_context=None))))
+
+    def test_partial_statistics_do_not_become_full_period_outline_totals(self):
+        from gaffergpt.article_writer import verified_short_outline
+        from gaffergpt.report_verification import build_fact_sheet
+        from gaffergpt.tests.test_report_verification import fixture,stat
+        packet={'matches':[fixture(1,own=3),fixture(2,own=2)],'statistics':[stat(1,'Zak','goals',3),stat(2,'Zak','rating',7)],'management':{'player_name':'Zak','player_evidence':'Confirmed'}}
+        self.assertIsNone(verified_short_outline(packet,build_fact_sheet(packet)))
