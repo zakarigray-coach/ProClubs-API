@@ -298,3 +298,14 @@ RT's independent 6 PM draft and scheduled player interviews are retired.
 Raine and Teagan rotate with persisted opening history. Draft length follows the available facts;
 600–800 words is an editorial goal for a full match week, not a reason to invent detail or pad a sparse week.
 Automatic recap collection remains paused. Owner DMs outside the results form remain tactical advice requests.
+
+
+### Reply directly to the Friday DM
+No results command is required. Reply with your weekly recap text or up to four PNG/JPEG/WebP
+photos (8 MB each). Pep reads them with the existing configured AI provider, asks for missing
+facts, and shows a result preview. **Confirm Results & Draft** saves only those results,
+selects them, and generates a private draft. No facts import before confirmation and no auto-publication.
+The pending conversation and confirmation buttons survive restarts. Send `weekly recap`
+in a private DM to start early. While waiting for recap replies, prefix tactical requests with `Tactics:`.
+Photos submitted as recaps are source material, not automatically featured player photos.
+NACL and PCT are not scraped. Dates, venue and scores must be present or supplied by Coach.

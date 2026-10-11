@@ -1,5 +1,6 @@
 """Discord adapter: all football records live in the shared SQLite database."""
 import asyncio
+import aiohttp
 import io
 import json
 import logging
@@ -23,6 +24,7 @@ from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
 from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
+from .recap_intake import RecapReader
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -150,6 +152,44 @@ class MatchSelect(discord.ui.Select):
         view=self.parent_view
         view.bot.db.replace_page_selection(view.report_id,self.page_ids,[int(v) for v in self.values])
         await interaction.response.edit_message(content=view.bot.report_summary(view.report_id),view=ReportView(view.bot,view.report_id,view.page))
+
+
+class RecapConfirmView(ManagedView):
+    def __init__(self,bot,report_id,request_id):
+        super().__init__(bot)
+        async def confirm(interaction):
+            if interaction.user.id!=bot.config.owner_id:
+                await interaction.response.send_message('Only Coach can confirm these results.',ephemeral=True); return
+            async with bot.coaching_lock:
+                saved=json.loads(bot.db.setting(f'recap_preview:{request_id}','{}'))
+                if not saved or saved.get('used'):
+                    await interaction.response.send_message('This preview has already been used. Send your recap again to change it.',ephemeral=True); return
+                try:
+                    existing=report_content(bot.db,report_id)
+                    save_submission(bot.db,report_id,interaction.user.id,bot.config.guild_id,'\n'.join(saved['lines']),existing.get('notes',''),existing.get('player_name',''),existing.get('player_evidence',''))
+                    matches=bot.db.period_matches(bot.db.report(report_id)['week_start'],bot.db.report(report_id)['week_end'],True)
+                    wanted=set(saved['lines'])
+                    ids=[m['match_id'] for m in matches if m['raw_recap'] in wanted]
+                    bot.db.replace_page_selection(report_id,[m['match_id'] for m in matches],ids)
+                    bot.db.confirm_report(report_id)
+                except ValueError as error:
+                    await interaction.response.send_message(str(error),ephemeral=True); return
+                saved['used']=True;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
+                await interaction.response.defer(ephemeral=True)
+                article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                owner=await bot.fetch_user(bot.config.owner_id)
+                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
+                if existing.get('photo'):
+                    files.append(discord.File(io.BytesIO(existing['photo']),filename=f'Featured_Player_{report_id}.{existing["photo_extension"]}'))
+                await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+                bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
+                bot.db.set_setting('weekly_dm_awaiting','')
+                await interaction.followup.send('Your private article draft is ready.',ephemeral=True)
+        self.add_item(Action('Confirm Results & Draft',f'pep:recapconfirm:{request_id}',confirm,discord.ButtonStyle.success))
+        async def change(interaction):
+            bot.db.set_setting('weekly_dm_awaiting',str(report_id))
+            await interaction.response.send_message('Reply to Pep with the corrected recap text or photo. No new results have been saved by this button.',ephemeral=True)
+        self.add_item(Action('Send Corrections',f'pep:recapcorrect:{request_id}',change))
 
 
 class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes'):
@@ -285,6 +325,7 @@ class DiscordDelivery:
         embed=discord.Embed(title='PEP — WEEKLY RECAP',description=self.bot.report_summary(report_id))
         embed.set_footer(text=branded_footer(marker))
         message=await channel.send(embed=embed,view=ReportView(self.bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+        self.bot.db.set_setting('weekly_dm_awaiting',str(report_id))
         return message.id
 
 
@@ -304,6 +345,7 @@ class GafferBot(discord.Client):
         self.session_review_lock=asyncio.Lock()
         self.coach=OpenAICoach.from_environment()
         self.coaching_lock=asyncio.Lock()
+        self.recap_reader=RecapReader(self.coach) if self.coach else None
         self.reporter=Reporter(self.db)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
@@ -329,6 +371,10 @@ class GafferBot(discord.Client):
             for page in range(max(1,(len(eligible)+19)//20)):
                 self.add_view(ReportView(self,report['report_id'],page))
             self.add_view(DraftView(self,report['report_id']))
+        for row in self.db.rows("SELECT key,value FROM settings WHERE key LIKE 'recap_preview:%'"):
+            saved=json.loads(row['value'])
+            if not saved.get('used'):
+                self.add_view(RecapConfirmView(self,saved['report_id'],row['key'].split(':',1)[1]))
         guild=discord.Object(id=self.config.guild_id)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
@@ -349,6 +395,15 @@ class GafferBot(discord.Client):
                 log.info('Tactical AI connection test passed; model=%s response_chars=%s',self.coach.model,len(sample))
             except Exception as error:
                 log.error('Tactical AI connection test failed: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
+        if self.recap_reader and self.db.setting('recap_reader_smoke:v1')!='passed':
+            try:
+                check=await self.recap_reader.extract('Synthetic connectivity test: 2026-10-15, Official Home, Birmingham City 3-1 Chelsea.',[],['2026-10-12','2026-10-19'])
+                if len(check['lines'])!=1 or check['questions']:
+                    raise ValueError('Recap reader could not extract test facts')
+                self.db.set_setting('recap_reader_smoke:v1','passed')
+                log.info('Weekly recap reader connection verified; no match data imported')
+            except Exception as error:
+                log.error('Weekly recap reader check failed: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
         # One requested compatibility check; does not import or classify anything.
         if not self.db.setting('league_stats_check:v1'):
             try:
@@ -479,6 +534,16 @@ class GafferBot(discord.Client):
         if message.guild is None:
             if message.author.id!=self.config.owner_id:
                 return
+            if message.content.strip().lower() in ('weekly recap','weekly report','prepare weekly recap'):
+                a,b=week_window(datetime.now(timezone.utc))
+                report=self.db.open_report(a,b,self.config.owner_id)
+                self.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
+                await message.reply('Send this week’s league recap text or photo, with dates and home/away. I’ll check the results with you, then prepare a private draft.',mention_author=False); return
+            pending=self.db.setting('weekly_dm_awaiting','')
+            report=self.db.report(int(pending)) if pending.isdigit() else None
+            if report and report['status'] not in ('approved','skipped') and not message.content.lower().startswith(('tactics:', 'coaching:')):
+                await self.read_weekly_dm(message,report)
+                return
             if not message.content.strip():
                 await message.reply('Paste PCT’s written analysis as text. Screenshots and links alone are not read yet.',mention_author=False)
                 return
@@ -496,12 +561,38 @@ class GafferBot(discord.Client):
             self.db.register_player(message.author.id,message.author.name,*parsed)
             await message.reply(f'Saved your preferred position: {parsed[0]}; role: {parsed[1]}.',mention_author=False)
 
+    async def read_weekly_dm(self,message,report):
+        if not self.recap_reader:
+            await message.reply('Photo/text reading is unavailable. Use Add Results / Notes for now; your recap has not been imported.',mention_author=False); return
+        request_id=str(message.id)
+        if self.db.setting(f'recap_preview:{request_id}'):
+            await message.reply('This recap already has a result preview below.',mention_author=False); return
+        images=[]
+        for attachment in getattr(message,'attachments',[]):
+            if len(images)>=4 or attachment.size>8*1024*1024:
+                await message.reply('Send up to four recap images, each 8 MB or smaller.',mention_author=False); return
+            data=await attachment.read()
+            mime='image/png' if data.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if data.startswith(b'\xff\xd8\xff') else 'image/webp' if data[:4]==b'RIFF' and data[8:12]==b'WEBP' else None
+            if not mime:
+                await message.reply('Please attach a PNG, JPEG or WebP recap photo.',mention_author=False); return
+            images.append((data,mime))
+        try:
+            async with message.channel.typing():
+                parsed=await self.recap_reader.extract(message.content,images,[report['week_start'],report['week_end']])
+            if parsed['questions']:
+                await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+'\nPlease resend the complete recap with those details. Nothing imported yet.',mention_author=False); return
+            self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':message.content,'used':False}))
+            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+'\n'.join(parsed['lines'])[:1600],view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+        except (ValueError,RuntimeError,TimeoutError,aiohttp.ClientError) as error:
+            log.warning('Weekly recap reading failed: %s',type(error).__name__)
+            await message.reply('I could not read that recap reliably. Please resend it as clearer text or a clearer photo. Nothing imported.',mention_author=False)
+
     def report_summary(self, report_id):
         report=self.db.report(report_id)
         rows=self.db.period_matches(report['week_start'],report['week_end'],True)
         selected={m['match_id'] for m in self.db.selected(report_id)}
         unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
-        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Use Add Results / Notes to submit verified NACL results and PCT findings. Then select your matches below. Optional photo: /reportphoto.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
+        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Reply to this DM with your weekly league recap as text or a photo. Include dates and home/away. I’ll show the results for you to confirm, then send your article draft. For tactical advice while waiting, start your message with Tactics:.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
         for kind,title in [('Official','OFFICIAL MATCHES'),('Practice','PRACTICE / DEVELOPMENT')]:
             lines+=['',title]
             group=[m for m in rows if m['match_type']==kind]
