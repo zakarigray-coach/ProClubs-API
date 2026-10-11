@@ -28,4 +28,25 @@ async function fixYourBotLiveAccess(client,options={}) {
   journal.completedAt=new Date().toISOString();journal.checks=checks;save();
   log('RT FIX 1 complete: '+JSON.stringify({channel:verified.name,bot:member.user.username,checks}));
 }
-module.exports={fixYourBotLiveAccess};
+async function fixWelcomeAccess(client,options={}) {
+  const env=options.env || process.env,log=options.log || console.log;
+  if(env.DISCORD_GUILD_ID!==GUILD)return;
+  const file=path.join(env.RT_DATA_DIR || '/data','workflow-fix-2-welcome.json');
+  const journal=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{originals:[],applied:[]};
+  if(journal.completedAt)return;
+  const guild=await client.guilds.fetch(GUILD);
+  const save=()=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(journal,null,2));fs.renameSync(file+'.tmp',file);};
+  const grant={ViewChannel:true,ReadMessageHistory:true,SendMessages:false,CreatePublicThreads:false,CreatePrivateThreads:false,SendMessagesInThreads:false};
+  for(const id of ['1540112327033102486','1536967792862175334','1551687518003658822']) {
+    const channel=await guild.channels.fetch(id);
+    if(channel.guildId!==GUILD)throw new Error('Welcome channel scope mismatch');
+    if(!journal.originals.some(item=>item.channelId===id)){const previous=channel.permissionOverwrites.cache.get(GUILD);journal.originals.push({channelId:id,overwrite:previous?{allow:previous.allow.bitfield.toString(),deny:previous.deny.bitfield.toString()}:null});save();}
+    await channel.permissionOverwrites.edit(guild.roles.everyone,grant,{reason:'Owner approved audit fix 2: readable Welcome, Rules and Directory'});
+    const verified=await guild.channels.fetch(id),permissions=verified.permissionsFor(guild.roles.everyone);
+    if(Object.entries(grant).some(([name,allowed])=>permissions.has(P[name])!==allowed))throw new Error('Welcome access verification failed: '+id);
+    journal.applied.push(id);save();
+    log('RT FIX 2 verified: '+JSON.stringify({channel:verified.name,view:true,history:true,generalPosting:false}));
+  }
+  journal.completedAt=new Date().toISOString();save();log('RT FIX 2 complete');
+}
+module.exports={fixYourBotLiveAccess,fixWelcomeAccess};
