@@ -35,6 +35,8 @@ NUMBER_WORDS=re.compile(r'\b(?:zero|two|three|four|five|six|seven|eight|nine|ten
 
 def render_checked(result,facts,packet):
     title=result.get('title','').strip();body=result.get('body','').strip()
+    body=re.sub(r'\b[Tt]wo (other|additional) fixtures\b',lambda m:m[1].capitalize()+' fixtures',body)
+    body=re.sub(r'\bThose two summary phrases\b','Those results',body,flags=re.I)
     if not title or len(body.split())<20:raise ValueError('Incomplete article')
     used=TOKEN.findall(body)
     if not used or any(k not in facts for k in used):raise ValueError('Unknown or missing fact references')

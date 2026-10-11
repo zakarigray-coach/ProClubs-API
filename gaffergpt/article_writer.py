@@ -90,6 +90,8 @@ class SportsWriter(OpenAICoach):
             'Do not invent numerical claims outside tokens, including spelled numbers. '
             'Use each token only once. Discuss at most three players and avoid repeating the same information. '
             'Include [[award]] in a clear Player of the Week section, with evidence elsewhere or in that paragraph. '
+            'Never describe your writing process or call facts phrases, tokens, records or metrics in the article. '
+            'Do not count extra fixtures outside tokens; say other fixtures if needed. '
             'Use natural transitions and varied rhythm. No extra facts, tactical diagnoses or imagined match events. '
             'Do not pad with generic summaries, selection disclaimers, packet/ledger/management-supplied wording. '
             'Keep official and practice coverage separate. Give readers meaning without pretending to have watched the games.')
