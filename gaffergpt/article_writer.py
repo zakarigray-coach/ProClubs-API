@@ -98,7 +98,7 @@ class SportsWriter(OpenAICoach):
                 'Use title FAIL with body explaining concrete corrections when any check fails. '
                 'On PASS set body to an empty string. Return exactly title/body JSON; never rewrite in this audit.')
         return {'model':self.model,'instructions':instructions,'input':analysis,
-                'max_output_tokens':5500,'reasoning':{'effort':'low'},'store':False,
+                'max_output_tokens':5500,'reasoning':{'effort':'medium'},'store':False,
                 'text':{'format':{'type':'json_schema','name':'sports_article','strict':True,
                     'schema':{'type':'object','properties':{'title':{'type':'string'},'body':{'type':'string'}},
                               'required':['title','body'],'additionalProperties':False}}}}
@@ -108,6 +108,7 @@ class SportsWriter(OpenAICoach):
         # Complete factual sentences are evidence, never fragments pasted into prose.
         brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
         brief['verified_facts']=feature_facts(clean)
+        if clean.get('period'):brief['verified_facts']['report_period']=clean['period']
         brief['desk_task']=('Write complete natural sentences from this evidence. No placeholders. '
             'Use a compelling factual lead, selective statistics, smooth transitions and a concise ending. '
             'Target 400–550 words when evidence supports it; prefer a shorter strong article to filler. '
@@ -145,7 +146,7 @@ class SportsWriter(OpenAICoach):
                         raise ValueError(second.get('body') or 'Second newspaper-quality review rejected the draft')
                     return edited['title'].strip(),edited['body'].strip()
                 except ValueError as error:
-                    feedback=str(error);draft=edited
+                    feedback=(feedback+'\n'+str(error)).strip();draft=edited
                     logging.getLogger(__name__).warning('Final sports desk check rejected draft; attempt=%s reason=%s',attempt+1,feedback[:1200])
             raise RuntimeError('The finished article did not pass editorial review. Saved results are ready for retry.')
         return asyncio.run(draft_and_edit())
@@ -176,8 +177,9 @@ def feature_facts(packet):
 def check_feature_quality(article,packet):
     body=article['body']
     banned=r'other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff'
-    if re.search(banned,body,re.I):
-        raise ValueError('Remove roster roll-call, bureaucratic phrasing and reporting-policy conclusions')
+    bad=re.search(banned,body,re.I)
+    if bad:
+        raise ValueError('Remove this exact wording: '+repr(bad[0])+'. Delete the policy explanation or roster heading; end on the football story.')
     names=[p['player'] for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps]
     if len({name for name in names if name in body})>3:
         raise ValueError('Highlight at most three players; remove the roster roll-call')
