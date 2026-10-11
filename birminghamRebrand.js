@@ -82,6 +82,8 @@ async function runBirminghamRebrand(client, options = {}) {
   const directory = await directorySnapshot(guild,log);
   try { await require('./clubDirectoryUpdate').updateClubDirectory(client,options); }
   catch(error) { log('RT club directory update failed: '+(error.code || error.message)); }
+  try { await require('./liveWorkflowAudit').runLiveWorkflowAudit(client,options); }
+  catch(error) { log('RT AUDIT failed: '+(error.code || error.message)); }
   if (!journal.completedAt) {
     const reason='Owner-requested Birmingham cleanup: remove CrownFC descriptions and rename ML1 to MPL';
     const description=scrubDescription(guild.description);
