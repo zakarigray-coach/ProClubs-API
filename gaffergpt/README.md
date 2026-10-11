@@ -1,3 +1,31 @@
+# Current Pep workflow — tactical coaching
+
+Pep now coaches from PCT+ findings supplied by management. Automatic recap imports and
+session classification DMs are paused; existing database records remain intact. The
+Friday 8:00 AM America/New_York weekly recap DM remains enabled, including persisted
+restart recovery and duplicate prevention. It asks for verified NACL results and PCT
+findings; it does not fetch either website or publish an article automatically.
+
+Use `/tacticaladvice analysis:<paste PCT findings> formation:<optional>` in the club
+server for a private response, or paste written analysis into an owner DM to Pep.
+Only the configured owner receives DM coaching; the server command follows existing
+management permissions. Paste text, not just a link or screenshot. AI requests contain
+only the supplied analysis/formation, not the central match database. Supplied findings
+and suggested causes must stay distinct. Focus stays on club tactics, team movement,
+one practice drill and what to check in the next session, not individual development.
+
+`PEP_COACH_API_KEY` uses a Railway reference to the existing RT Media OpenAI key; no
+secret is written into source control. `PEP_COACH_MODEL` defaults to `gpt-5-mini`.
+Requests run only on demand (plus one deployment connection smoke test), with bounded
+input/output and no provider response storage. These calls use the existing OpenAI API
+balance. Timeouts, quota failures and missing keys fall back to a clearly labelled
+practical coaching library; unsupported issues prompt for clearer written findings.
+Coaching inputs/answers are saved in `coaching_notes` in the existing central database.
+They do not alter scores, classifications, statistics or report selections.
+
+The sections below document retained foundations and the earlier collection design;
+automatic intake and session-review delivery are currently paused.
+
 # Pep — Birmingham Tactical Coach
 
 Gaffer is Birmingham City's assistant coach. Reporter is the writing service.

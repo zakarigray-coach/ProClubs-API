@@ -33,7 +33,7 @@ class Delivery:
 
 
 class FoundationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_listener_ignores_menus_and_reads_embeds(self):
+    async def test_paused_listener_ignores_menus_and_match_embeds(self):
         import discord
         bot=GafferBot(Config('test',42,30,recap_channel_id=20,source_bot_id=99,database_path=self.path))
         message=SimpleNamespace(id=10,guild=SimpleNamespace(id=30),channel=SimpleNamespace(id=20),
@@ -47,14 +47,11 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
             message.content=''; message.embeds=[discord.Embed(description='MPL Birmingham 1-3 AMADNESS FC')]
             await bot.ingest_message(message); await bot.ingest_message(message)
-            row=bot.db.rows('SELECT * FROM matches')[0]
-            self.assertEqual((row['opponent'],row['birmingham_score'],row['opponent_score']),('AMADNESS FC',1,3))
-            self.assertEqual(row['match_type'],'Unknown')
-            self.assertEqual(len(bot.db.rows('SELECT * FROM matches')),1)
+            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
             message.id=11; message.content='MPL Birmingham 2-1 Chelsea'
             message.embeds=[discord.Embed(description=message.content)]
             await bot.ingest_message(message)
-            self.assertEqual(len(bot.db.rows('SELECT * FROM matches')),2)
+            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
         finally:
             await bot.close()
 
@@ -498,12 +495,12 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue({'status','matches','reviewmatches','match','weeklyreport','testweeklydm'}<=commands)
         await bot.close()
 
-    async def test_listener_only_configured_source_and_duplicates(self):
+    async def test_paused_listener_does_not_import_even_configured_source(self):
         bot=GafferBot(Config('test',42,30,recap_channel_id=20,source_bot_id=99,database_path=self.path))
         msg=SimpleNamespace(id=1,guild=SimpleNamespace(id=30),channel=SimpleNamespace(id=20),author=SimpleNamespace(id=98),created_at=NOW,content='Birmingham City 2–1 Chelsea')
         await bot.ingest_message(msg);self.assertEqual(self.db.rows('SELECT * FROM matches'),[])
         msg.author.id=99;await bot.ingest_message(msg);await bot.ingest_message(msg)
-        self.assertEqual(len(self.db.rows('SELECT * FROM matches')),1)
+        self.assertEqual(len(self.db.rows('SELECT * FROM matches')),0)
         await bot.close()
 
     async def test_empty_week_dm_summary(self):

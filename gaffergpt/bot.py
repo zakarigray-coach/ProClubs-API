@@ -20,6 +20,8 @@ from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
+from .tactical_coach import PracticalCoach
+from .coaching_ai import OpenAICoach
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -268,6 +270,8 @@ class GafferBot(discord.Client):
                 log.warning('Owner player link needs management correction.')
         self.session_reviews=SessionReviews(self.db,config.session_quiet_minutes)
         self.session_review_lock=asyncio.Lock()
+        self.coach=OpenAICoach.from_environment()
+        self.coaching_lock=asyncio.Lock()
         self.reporter=Reporter(self.db)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
@@ -306,6 +310,13 @@ class GafferBot(discord.Client):
 
     async def work(self):
         await self.wait_until_ready()
+        if self.coach and self.db.setting('tactical_ai_smoke:v1')!='passed':
+            try:
+                sample=await self.coach.advise('Synthetic connection test only: forced passes and vulnerability to counterattacks. Give one club coaching priority.','4-2-3-1')
+                self.db.set_setting('tactical_ai_smoke:v1','passed')
+                log.info('Tactical AI connection test passed; model=%s response_chars=%s',self.coach.model,len(sample))
+            except Exception as error:
+                log.error('Tactical AI connection test failed: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
         # One requested compatibility check; does not import or classify anything.
         if not self.db.setting('league_stats_check:v1'):
             try:
@@ -366,33 +377,14 @@ class GafferBot(discord.Client):
         return channel,author
 
     async def ingest_message(self,message):
-        channel,author=self.recap_config()
-        if not channel or not author or not message.guild or message.guild.id!=self.config.guild_id:
-            return
-        if message.channel.id!=channel or message.author.id!=author:
-            return
-        text=readable_message(message)
-        if not is_match_recap(text):
-            return
-        self.db.ingest(message.id,channel,message.guild.id,message.created_at.astimezone(timezone.utc).isoformat(),text,parse_recap(text))
+        # Preserve existing records; automatic collection is paused.
+        return
 
     async def recover_recaps(self):
-        channel_id,author=self.recap_config()
-        if not channel_id or not author:
-            return
-        channel=self.get_channel(channel_id) or await self.fetch_channel(channel_id)
-        cursor=self.db.setting(f'cursor:{channel_id}')
-        if cursor is None:
-            # Configuration records the starting point; don't import unrelated old history.
-            self.db.set_setting(f'cursor:{channel_id}',str(discord.utils.time_snowflake(datetime.now(timezone.utc))))
-            return
-        async for message in channel.history(limit=None,after=discord.Object(id=int(cursor)),oldest_first=True):
-            await self.ingest_message(message)
-            self.db.set_setting(f'cursor:{channel_id}',str(message.id))
+        return
 
     async def pending_reviews(self, force=False):
-        async with self.session_review_lock:
-            return await self.session_reviews.tick(SessionDelivery(self),force=force)
+        return False
 
     async def refresh_footers(self):
         owner=await self.fetch_user(self.config.owner_id)
@@ -422,9 +414,50 @@ class GafferBot(discord.Client):
             except discord.HTTPException:
                 continue
 
+    async def coaching_advice(self, user_id, request_id, analysis, formation=''):
+        analysis=analysis.strip()
+        if not analysis or len(analysis)>12000:
+            raise ValueError('Paste PCT’s analysis as text, up to 12,000 characters.')
+        async with self.coaching_lock:
+            saved=self.db.one('SELECT advice FROM coaching_notes WHERE request_id=?',(str(request_id),))
+            if saved:
+                return saved['advice']
+            provider='practical-library'
+            if self.coach:
+                try:
+                    advice=await self.coach.advise(analysis,formation)
+                    provider=self.coach.model
+                except Exception as error:
+                    log.error('Tactical AI unavailable: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
+                    advice='AI coaching is temporarily unavailable. Here is general coaching guidance from Pep’s practical library:\n\n'+PracticalCoach().advise(analysis,formation)
+            else:
+                advice='AI coaching is not connected. General coaching guidance:\n\n'+PracticalCoach().advise(analysis,formation)
+            self.db.execute('INSERT INTO coaching_notes(request_id,user_id,created_at,supplied_analysis,formation,advice,provider) VALUES (?,?,?,?,?,?,?)',
+                (str(request_id),str(user_id),utcnow(),analysis,formation,advice,provider))
+            return advice
+
+    def coaching_embed(self, advice):
+        embed=discord.Embed(title='PEP — TACTICAL ADVICE',description=advice[:3900])
+        embed.set_footer(text=PEP_FOOTER)
+        return embed
+
     async def on_message(self,message):
-        await self.ingest_message(message)
-        if message.author.bot or not message.guild or message.guild.id!=self.config.guild_id:
+        if message.author.bot:
+            return
+        if message.guild is None:
+            if message.author.id!=self.config.owner_id:
+                return
+            if not message.content.strip():
+                await message.reply('Paste PCT’s written analysis as text. Screenshots and links alone are not read yet.',mention_author=False)
+                return
+            async with message.channel.typing():
+                advice=await self.coaching_advice(message.author.id,message.id,message.content)
+            kwargs={'embed':self.coaching_embed(advice),'mention_author':False}
+            if len(advice)>3900:
+                kwargs['file']=discord.File(io.BytesIO(advice.encode()),filename='pep-tactical-advice.txt')
+            await message.reply(**kwargs)
+            return
+        if message.guild.id!=self.config.guild_id:
             return
         parsed=parse_registration(message.content)
         if parsed:
@@ -436,7 +469,7 @@ class GafferBot(discord.Client):
         rows=self.db.period_matches(report['week_start'],report['week_end'],True)
         selected={m['match_id'] for m in self.db.selected(report_id)}
         unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
-        lines=['Morning Coach. Choose the matches for your Birmingham City report.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
+        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Paste this week’s verified NACL results and PCT findings when ready. Saved match selections remain available below.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
         for kind,title in [('Official','OFFICIAL MATCHES'),('Practice','PRACTICE / DEVELOPMENT')]:
             lines+=['',title]
             group=[m for m in rows if m['match_type']==kind]
@@ -461,6 +494,20 @@ class GafferBot(discord.Client):
             if interaction.guild_id!=self.config.guild_id:
                 raise app_commands.CheckFailure('Use player commands in the club server.')
             return True
+
+        @self.tree.command(name='tacticaladvice',description='Paste PCT analysis for private club tactical advice')
+        @app_commands.check(authorized)
+        @app_commands.describe(analysis='Paste PCT’s written findings and your observations',formation='Optional: the formation you used')
+        async def tacticaladvice(interaction,analysis:str,formation:str=''):
+            await interaction.response.defer(ephemeral=True)
+            try:
+                advice=await self.coaching_advice(interaction.user.id,interaction.id,analysis,formation)
+            except ValueError as error:
+                await interaction.followup.send(str(error),ephemeral=True); return
+            kwargs={'embed':self.coaching_embed(advice),'ephemeral':True}
+            if len(advice)>3900:
+                kwargs['file']=discord.File(io.BytesIO(advice.encode()),filename='pep-tactical-advice.txt')
+            await interaction.followup.send(**kwargs)
 
         @self.tree.command(name='linkplayer',description='Connect your Discord account to your exact OurProClubs player name')
         @app_commands.check(player_server)
@@ -551,7 +598,7 @@ class GafferBot(discord.Client):
         @app_commands.check(authorized)
         async def status(interaction):
             unknown=self.db.one("SELECT COUNT(*) AS n FROM matches WHERE match_type='Unknown'")['n']
-            await interaction.response.send_message(f'Pep is online. {unknown} matches await review. Friday reminders: {"enabled" if self.config.schedule_enabled else "test mode"}.',ephemeral=True)
+            await interaction.response.send_message(f'Pep is online in tactical coaching mode. Automatic match imports and review DMs are paused. {unknown} saved Unknown matches remain. Friday reminders: {"enabled" if self.config.schedule_enabled else "test mode"}.',ephemeral=True)
 
         @self.tree.command(name='configurepep',description='Choose the OurProClubs text recap channel and source bot')
         @app_commands.check(authorized)
@@ -563,7 +610,7 @@ class GafferBot(discord.Client):
             self.db.set_setting('recap_channel',channel.id); self.db.set_setting('recap_author',source_bot.id)
             if self.db.setting(f'cursor:{channel.id}') is None:
                 self.db.set_setting(f'cursor:{channel.id}',discord.utils.time_snowflake(datetime.now(timezone.utc)))
-            await interaction.response.send_message('Saved. Future text recaps from that bot will enter the Unknown queue.',ephemeral=True)
+            await interaction.response.send_message('Source settings saved. Automatic match imports are paused. Paste analysis into /tacticaladvice or DM Pep.',ephemeral=True)
 
         @self.tree.command(name='matches',description='List recent saved matches and their classifications')
         @app_commands.check(authorized)
@@ -577,7 +624,7 @@ class GafferBot(discord.Client):
             await interaction.response.defer(ephemeral=True)
             await self.recover_recaps()
             sent=await self.pending_reviews(force=True)
-            await interaction.followup.send('Session review sent to Coach.' if sent else 'No new matches need a session review.',ephemeral=True)
+            await interaction.followup.send('Session review sent to Coach.' if sent else 'Automatic session reviews are paused. Use /tacticaladvice or DM Pep with PCT’s analysis.',ephemeral=True)
 
         @self.tree.command(name='reviewmatches',description='Review the next ten unclassified matches')
         @app_commands.check(authorized)

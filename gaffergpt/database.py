@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS session_review_matches (
  batch_id INTEGER NOT NULL REFERENCES session_reviews(batch_id),
  match_id INTEGER NOT NULL UNIQUE REFERENCES matches(match_id), PRIMARY KEY(batch_id,match_id)
 );
+CREATE TABLE IF NOT EXISTS coaching_notes (
+ note_id INTEGER PRIMARY KEY, request_id TEXT NOT NULL UNIQUE,
+ user_id TEXT NOT NULL, created_at TEXT NOT NULL, supplied_analysis TEXT NOT NULL,
+ formation TEXT NOT NULL DEFAULT '', advice TEXT NOT NULL, provider TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 """
