@@ -38,6 +38,10 @@ def render_checked(result,facts,packet):
     body=re.sub(r'\b[Tt]wo (other|additional) fixtures\b',lambda m:m[1].capitalize()+' fixtures',body)
     body=re.sub(r'\bThose two summary phrases\b','Those results',body,flags=re.I)
     if not title or len(body.split())<20:raise ValueError('Incomplete article')
+    count_words='two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty'
+    body=re.sub(r'\b(?:'+count_words+r') (?:practice |official )?appearances\b','the recorded appearances',body,flags=re.I)
+    body=re.sub(r'\b(?:'+count_words+r') results\b','the results',body,flags=re.I)
+    body=re.sub(r'\bthe the\b','the',body,flags=re.I)
     used=TOKEN.findall(body)
     if not used or any(k not in facts for k in used):raise ValueError('Unknown or missing fact references')
     if any(n>1 for n in Counter(used).values()):raise ValueError('Repeated statistical paragraph')
