@@ -21,7 +21,7 @@ STRUCTURE: An original, specific headline, usually 6–12 words, followed by a d
 of 35–60 words built around the main result, contrast or standout contribution. Follow with
 short connected paragraphs: important results, two or three telling numbers, player highlights,
 and a grounded closing thought. Use at most three section headings when they aid the story.
-For four matches target 450–650 words; a substantial larger week 500–750. Less evidence warrants
+For four matches target 300–450 words; a substantial larger week 500–750. Less evidence warrants
 a shorter piece. Do not inflate thin evidence to reach a word count. No compulsory sections.
 Use active verbs and varied sentence lengths. Let details create interest. Avoid strained
 alliteration, grand metaphors, filler, repeated summaries or generic scene-setting.
@@ -44,7 +44,14 @@ or changes the competitive record. Missing data is unknown, never zero. Individu
 conceded and goalkeeper clean-sheet totals are for confirmed goalkeeper appearances only;
 never discuss an outfield player's conceded-goals ledger. Team conceded goals can be reported.
 Highlight at most three players; choose statistics that explain their documented contribution.
-For confirmed Player of the Week, give a clear named section and a concise statistical reason.
+For confirmed Player of the Week, incorporate the award into the main narrative, with the
+winner's decisive statistics ONCE. Do not add a second award paragraph repeating those figures.
+Lead with the strongest individual contribution when it is the main story, then connect it to
+the contrast in team results. Use at most two or three telling figures per highlighted player.
+Never add an Other contributors section or a roster roll-call. No reporting-policy conclusion.
+Avoid non-negligible, supplied figures, defensive actions noted, factual snapshot, confirmed
+figures, conclusions belong to coaching staff, and similar bureaucratic filler.
+Do not call a share the bulk or majority unless it exceeds half; prefer the actual contribution.
 Do not choose a winner without management confirmation. Avoid bureaucratic wording such as
 'management supplied a suggestion flagging'. Say who earned recognition and explain the facts.
 
@@ -81,7 +88,13 @@ class SportsWriter(OpenAICoach):
                 'Also require grammatical sentences, correct singular/plural agreement, no awkward possessives, '
                 'no repeated name/statistic padding, no invented chronology, roles, motives or tactical causes. '
                 'Passing accuracy cannot prove composure; results cannot establish defensive shape or how the team opened up. '
-                'Reject generic filler and mechanical statistical recitation. A short polished article is acceptable. '
+                'Reject generic filler and mechanical statistical recitation. Require a strong story-led opening, '
+                'selective statistics, no repeated award figures, no Other contributors roll-call, '
+                'natural language, and a football-focused ending rather than reporting rules. '
+                'Check comparative wording mathematically: six of thirteen is not the bulk or majority. '
+                'Reject more than three player summaries or more than three metrics per player. '
+                'Reject supplied figures, non-negligible, defensive actions noted and factual snapshot. '
+                'A short polished article is acceptable. '
                 'Use title FAIL with body explaining concrete corrections when any check fails. '
                 'On PASS set body to an empty string. Return exactly title/body JSON; never rewrite in this audit.')
         return {'model':self.model,'instructions':instructions,'input':analysis,
@@ -94,12 +107,15 @@ class SportsWriter(OpenAICoach):
         clean=editorial_packet(packet)
         # Complete factual sentences are evidence, never fragments pasted into prose.
         brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
-        brief['verified_facts']=fact_registry(clean)
+        brief['verified_facts']=feature_facts(clean)
         brief['desk_task']=('Write complete natural sentences from this evidence. No placeholders. '
             'Use a compelling factual lead, selective statistics, smooth transitions and a concise ending. '
             'Target 400–550 words when evidence supports it; prefer a shorter strong article to filler. '
             'Do not repeat player names in every clause or turn passing figures into claims of composure. '
-            'Explain the confirmed award using the winner’s documented contributions.')
+            'Lead with the confirmed award winner’s goals when the main story is his scoring, and contrast the team results. '
+            'Mention the award and supporting figures once, integrated into the narrative. '
+            'No Other contributors section, roster list, or concluding explanation of reporting policy. '
+            'Use only the featured players, not extra roster names. Explain recognition through their factual output.')
         async def draft_and_edit():
             draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
             feedback=''
@@ -114,6 +130,7 @@ class SportsWriter(OpenAICoach):
                 edited=json.loads(await self.advise(json.dumps(editing,ensure_ascii=False)))
                 try:
                     check_finished_prose(edited,brief['verified_facts'])
+                    check_feature_quality(edited,clean)
                     audit=dict(selected_records=clean,verified_facts=brief['verified_facts'],
                                finished_article=edited,desk_task='audit_finished_article')
                     review=json.loads(await self.advise(json.dumps(audit,ensure_ascii=False)))
@@ -126,6 +143,42 @@ class SportsWriter(OpenAICoach):
             raise RuntimeError('The finished article did not pass editorial review. Saved results are ready for retry.')
         return asyncio.run(draft_and_edit())
 
+
+def feature_facts(packet):
+    """Give the desk a focused story brief instead of a roster-wide stat dump."""
+    facts=fact_registry(packet)
+    focused={k:v for k,v in facts.items() if '_player_' not in k}
+    award=(packet.get('management') or {}).get('player_name')
+    for kind,players in packet.get('observations',{}).get('player_statistics',{}).items():
+        candidates=sorted(players,key=lambda p:(p['player']==award,p.get('assists',0),p.get('goals',0)),reverse=True)[:2]
+        for player in candidates:
+            i=players.index(player);prefix=f'{kind}_player_{i}_'
+            parts=[]
+            for metric,label in [('goals','goal'),('assists','assist')]:
+                if metric in player:
+                    value=player[metric]
+                    parts.append(f'{value:g} {label}'+('' if value==1 else 's'))
+            if parts:
+                appearances=player['appearances']
+                focused[prefix+'attack']=f"{player['player']} contributed "+' and '.join(parts)+f" in {appearances} {kind.lower()} "+('appearance.' if appearances==1 else 'appearances.')
+            if player['player']==award and 'average_rating' in player:
+                focused[prefix+'rating']=f"{player['player']} averaged a {player['average_rating']:.2f} rating in {player['appearances']} {kind.lower()} appearances."
+    return focused
+
+
+def check_feature_quality(article,packet):
+    body=article['body']
+    banned=r'other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff'
+    if re.search(banned,body,re.I):
+        raise ValueError('Remove roster roll-call, bureaucratic phrasing and reporting-policy conclusions')
+    names=[p['player'] for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps]
+    if len({name for name in names if name in body})>3:
+        raise ValueError('Highlight at most three players; remove the roster roll-call')
+    award=(packet.get('management') or {}).get('player_name')
+    winner=next((p for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
+    lead=body.split('\n\n')[0]
+    if winner and winner.get('goals',0)>=3 and award not in lead:
+        raise ValueError('Lead with the award winner’s scoring and connect it to the contrast in results')
 
 def check_finished_prose(article,facts):
     title,body=article.get('title',''),article.get('body','')

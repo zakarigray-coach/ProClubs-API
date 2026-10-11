@@ -500,8 +500,17 @@ class GafferBot(discord.Client):
             for player in diagnostic:
                 if player['player'] in ('DaddyGray10420','TraapxLit'):
                     log.info('Four-match fact audit: player=%s dribbles=%s appearances=%s',player['player'],player.get('dribbles_completed'),player['appearances'])
-            self.db.confirm_report(report_id)
-            article=await asyncio.to_thread(self.reporter.generate,report_id)
+            if request.endswith(':deliver'):
+                saved=self.db.report(report_id)
+                if saved['status']!='draft' or not saved['article']:raise ValueError('No reviewed draft available.')
+                article=saved['article']
+            else:
+                self.db.confirm_report(report_id)
+                article=await asyncio.to_thread(self.reporter.generate,report_id)
+            if request.endswith(':preview'):
+                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article},ensure_ascii=False))
+                self.db.set_setting('report_rewrite:'+request,'complete')
+                return
             owner=await self.fetch_user(self.config.owner_id)
             await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
                 files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Verified.txt')],

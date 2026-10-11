@@ -99,3 +99,30 @@ class FinishedArticleTests(unittest.TestCase):
         check_finished_prose({'title':'Birmingham review practice returns',
             'body':('The training fixtures offered a useful snapshot of the club’s results. '*5)+'A player averaged 8.1.'},
             {'rating':'A player averaged 8.10.'})
+
+class NewspaperQualityTests(unittest.TestCase):
+    def setUp(self):
+        self.packet={'matches':[], 'management':{'player_name':'TraapxLit'},
+                     'observations':{'player_statistics':{'Practice':[
+                         {'player':'TraapxLit','goals':7,'assists':2,'appearances':3,'average_rating':8.633333},
+                         {'player':'DaddyGray10420','goals':3,'assists':6,'appearances':4,'dribbles_completed':80},
+                         {'player':'Third','goals':1,'assists':0,'appearances':1},
+                         {'player':'Fourth','goals':1,'assists':0,'appearances':1}]}}}
+    def test_previous_roll_call_and_policy_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_feature_quality
+        for body in ('TraapxLit scored seven goals. Other contributors',
+                     'TraapxLit scored seven goals. The week produced a non-negligible volume of goals conceded.',
+                     'TraapxLit scored seven goals. Those are the confirmed figures; any conclusions belong to the coaching staff.',
+                     'TraapxLit DaddyGray10420 Third Fourth'):
+            with self.assertRaises(ValueError):check_feature_quality({'body':body},self.packet)
+    def test_opening_must_feature_main_story(self):
+        from gaffergpt.article_writer import check_feature_quality
+        with self.assertRaises(ValueError):
+            check_feature_quality({'body':'Birmingham played four games.\n\nTraapxLit scored seven goals.'},self.packet)
+        check_feature_quality({'body':'TraapxLit scored seven goals during a mixed practice block.'},self.packet)
+    def test_story_brief_excludes_roster_and_secondary_metrics(self):
+        from gaffergpt.article_writer import feature_facts
+        facts=' '.join(feature_facts(self.packet).values())
+        self.assertIn('TraapxLit',facts);self.assertIn('DaddyGray10420',facts)
+        self.assertNotIn('Third',facts);self.assertNotIn('Fourth',facts)
+        self.assertNotIn('dribbles',facts);self.assertIn('8.63',facts)

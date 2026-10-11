@@ -8,3 +8,5 @@ Articles remain private review drafts. Optional player-photo attachment and manu
 
 ## Final article review
 The writer produces complete prose from selected match evidence. No statistical phrase is inserted after writing. A copy-edit pass checks natural sentences and removes unsupported interpretations. The finished title and body then undergo numeric and grammar guards plus a separate AI fact/quality audit. Rejected drafts are edited up to three times; failure preserves the confirmed selection for retry. This reduces errors but does not guarantee subjective writing quality: management still reviews every draft before publication.
+
+The story brief now highlights the confirmed award winner and one leading contributor, limiting each to telling figures. Final guards reject a buried standout-player lead, roster roll-calls and named bureaucratic phrases. Comparative claims and repeated award statistics require final editorial review. Owner-requested preview mode allows a private inspection before delivery of the same saved draft.
