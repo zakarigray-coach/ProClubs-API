@@ -126,3 +126,9 @@ class NewspaperQualityTests(unittest.TestCase):
         self.assertIn('TraapxLit',facts);self.assertIn('DaddyGray10420',facts)
         self.assertNotIn('Third',facts);self.assertNotIn('Fourth',facts)
         self.assertNotIn('dribbles',facts);self.assertIn('8.63',facts)
+
+    def test_preview_repetition_and_ledger_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_feature_quality
+        for body in ('TraapxLit scored seven goals and two assists.\n\nHis seven goals earned the award.',
+                     'TraapxLit scored seven goals. The week’s ledger presents a mixture of high-scoring outings.'):
+            with self.assertRaises(ValueError):check_feature_quality({'body':body},self.packet)

@@ -98,7 +98,7 @@ class SportsWriter(OpenAICoach):
                 'Use title FAIL with body explaining concrete corrections when any check fails. '
                 'On PASS set body to an empty string. Return exactly title/body JSON; never rewrite in this audit.')
         return {'model':self.model,'instructions':instructions,'input':analysis,
-                'max_output_tokens':5500,'reasoning':{'effort':'medium'},'store':False,
+                'max_output_tokens':8000,'reasoning':{'effort':'medium'},'store':False,
                 'text':{'format':{'type':'json_schema','name':'sports_article','strict':True,
                     'schema':{'type':'object','properties':{'title':{'type':'string'},'body':{'type':'string'}},
                               'required':['title','body'],'additionalProperties':False}}}}
@@ -109,6 +109,14 @@ class SportsWriter(OpenAICoach):
         brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
         brief['verified_facts']=feature_facts(clean)
         if clean.get('period'):brief['verified_facts']['report_period']=clean['period']
+        brief['style_example']=('Match the clarity and rhythm of this invented style example, never its facts or names: '
+            'Harbour find their scorer, but the results remain uneven. Vale gave Harbour their clearest headline in a mixed run of friendlies, '
+            'his goals earning the club’s weekly award while the team alternated emphatic wins with costly defeats. '
+            'The biggest victory offered a sharp contrast to the heaviest loss. A draw elsewhere kept the overall return balanced. '
+            'Reed supplied the assists alongside Vale’s scoring. Their contributions gave the attack its main talking points, '
+            'but the club’s goals against kept the overall picture mixed. The award belonged to Vale; the uneven results belonged to Harbour. '
+            'Write with concrete facts and this natural newspaper rhythm. Do not mention supplied records, confirmed figures, '
+            'statistical contributions, ledgers, reporting policies or the act of analysing data.')
         brief['desk_task']=('Write complete natural sentences from this evidence. No placeholders. '
             'Use a compelling factual lead, selective statistics, smooth transitions and a concise ending. '
             'Target 400–550 words when evidence supports it; prefer a shorter strong article to filler. '
@@ -176,10 +184,14 @@ def feature_facts(packet):
 
 def check_feature_quality(article,packet):
     body=article['body']
-    banned=r'other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff'
+    banned=r'\bledger\b|supplied (?:match )?records|statistical contribution|recorded practice results|named weekly award|defined, match-by-match numbers|other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff'
     bad=re.search(banned,body,re.I)
     if bad:
         raise ValueError('Remove this exact wording: '+repr(bad[0])+'. Delete the policy explanation or roster heading; end on the football story.')
+    claims=re.findall(r'\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen) (?:goals?|assists?|rating)\b',body,re.I)
+    duplicates={claim.lower() for claim in claims if sum(c.lower()==claim.lower() for c in claims)>1}
+    if duplicates:
+        raise ValueError('Repeated statistical phrases: '+', '.join(sorted(duplicates))+'. State each figure once; delete the redundant sentence.')
     names=[p['player'] for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps]
     if len({name for name in names if name in body})>3:
         raise ValueError('Highlight at most three players; remove the roster roll-call')
