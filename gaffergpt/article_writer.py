@@ -146,7 +146,7 @@ class SportsWriter(OpenAICoach):
                         'unsupported':{'type':'array','items':{'type':'string'}}},
                         'required':['claims','unsupported'],'additionalProperties':False}}}}
         return {'model':self.model,'instructions':instructions,'input':analysis,
-                'max_output_tokens':8000,'reasoning':{'effort':'medium'},'store':False,
+                'max_output_tokens':8000,'reasoning':{'effort':'medium' if task=='audit_finished_article' else 'low'},'store':False,
                 'text':{'format':{'type':'json_schema','name':'sports_article','strict':True,
                     'schema':{'type':'object','properties':{'title':{'type':'string'},'body':{'type':'string'}},
                               'required':['title','body'],'additionalProperties':False}}}}
