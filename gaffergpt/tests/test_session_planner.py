@@ -163,3 +163,17 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             token=self.store.issue_login(1);self.db.execute('UPDATE planner_logins SET expires_at=?',('2000-01-01T00:00:00+00:00',))
             self.assertEqual((await client.get('/planner/login?token='+token,allow_redirects=False)).status,401)
         finally:await client.close()
+
+    async def test_api_binds_public_ipv4_and_private_ipv6(self):
+        import socket
+        from aiohttp import ClientSession
+        from gaffergpt.media_api import start_api
+        sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+        runner=await start_api(self.db,'x'*48,port,self.bot)
+        try:
+            async with ClientSession() as client:
+                for host in ('127.0.0.1','[::1]'):
+                    async with client.get(f'http://{host}:{port}/planner/assets/planner.js') as response:
+                        self.assertEqual(response.status,200)
+                        self.assertIn('Session Planner',await response.text())
+        finally:await runner.cleanup()

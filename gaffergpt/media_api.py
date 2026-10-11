@@ -85,7 +85,9 @@ async def start_api(db, secret, port, bot=None):
     runner=web.AppRunner(create_app(db,secret,bot),access_log=None)
     await runner.setup()
     try:
-        await web.TCPSite(runner,'::',port).start()
+        await web.TCPSite(runner,None,port).start()
+        import logging
+        logging.getLogger(__name__).info('Pep HTTP service listening on IPv4 and IPv6; port=%s',port)
     except Exception:
         await runner.cleanup()
         raise

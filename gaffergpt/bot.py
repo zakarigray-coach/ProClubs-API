@@ -666,6 +666,10 @@ class GafferBot(discord.Client):
 
     async def on_ready(self):
         log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
+        guild=self.get_guild(self.config.guild_id)
+        permissions=guild.me.guild_permissions if guild and guild.me else None
+        if permissions:
+            log.info('Session Planner ready; native_create_events=%s native_manage_events=%s',permissions.create_events,permissions.manage_events)
         request=os.getenv('PEP_REPORT_REWRITE_REQUEST','')
         if request and not getattr(self,'rewrite_running',False) and not self.db.setting('report_rewrite:'+request):
             self.rewrite_running=True
