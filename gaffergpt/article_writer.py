@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .coaching_ai import OpenAICoach
+from .article_facts import fact_registry, render_checked
 
 INSTRUCTIONS = """You are RT Football Media's senior football correspondent, writing a polished
 sports feature for Birmingham City supporters. Work like a demanding newspaper sports desk:
@@ -75,10 +76,30 @@ class SportsWriter(OpenAICoach):
                               'required':['title','body'],'additionalProperties':False}}}}
 
     def write(self, packet):
-        result=json.loads(asyncio.run(self.advise(json.dumps(editorial_packet(packet),ensure_ascii=False))))
-        if not result['title'].strip() or len(result['body'].split())<80:
-            raise RuntimeError('Sports article was incomplete; please retry generation.')
-        return result['title'].strip(),result['body'].strip()
+        clean=editorial_packet(packet)
+        facts=fact_registry(clean)
+        brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
+        brief['verified_sentences']=facts
+        brief['writing_contract']=('Insert selected verified sentences using [[fact_key]] as complete sentences. '
+            'Never rewrite their figures, names or attribution. No numerical claims outside tokens, including spelled numbers. '
+            'Use each fact once. Highlight at most three players. Do not repeat scores/totals elsewhere. '
+            'Keep prose around facts concise, natural and evidence-based. Include [[award]] under Player of the Week if present. '
+            'A headline and fluent story matter more than length. Do not invent tactical causes. '
+            'Use tokens as whole sentences, never append them to another player name. '
+            'Avoid packet, ledger, profile data and management supplied wording.')
+        async def draft_and_edit():
+            draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
+            edit=dict(brief,editing_draft=draft,desk_task='Edit this draft for accuracy and newspaper quality. '
+                'Remove repeated information and speculative claims. Keep fact tokens intact. '
+                'Do not recite every match if the record and key results convey the story. '
+                'Use a natural closing without restating the opening. Return corrected title/body JSON.')
+            for attempt in range(2):
+                edited=json.loads(await self.advise(json.dumps(edit,ensure_ascii=False)))
+                try:return render_checked(edited,facts,clean)
+                except ValueError as error:
+                    edit['editing_draft']=edited;edit['validation_error']=str(error)
+            raise RuntimeError('The article failed its fact checks. Saved results are ready for retry.')
+        return asyncio.run(draft_and_edit())
 
 def period_label(report):
     zone=ZoneInfo('America/New_York')

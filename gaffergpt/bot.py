@@ -29,7 +29,7 @@ from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
 from .excel_intake import read_excel
-from .excel_stats import save_excel_statistics, imported_statistics, player_totals, stats_text, records
+from .excel_stats import player_totals, save_excel_statistics, imported_statistics, stats_text, records
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -485,6 +485,32 @@ class GafferBot(discord.Client):
 
     async def on_ready(self):
         log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
+        request=os.getenv('PEP_REPORT_REWRITE_REQUEST','')
+        if request and not getattr(self,'rewrite_running',False) and not self.db.setting('report_rewrite:'+request):
+            self.rewrite_running=True
+            asyncio.create_task(self.rewrite_verified_report(request))
+
+    async def rewrite_verified_report(self,request):
+        try:
+            report_id=int(request.split(':',1)[0])
+            selected=self.db.selected(report_id)
+            if len(selected)!=4:raise ValueError('Four-match test requires exactly four selections.')
+            stats=self.db.rows('SELECT s.* FROM match_statistics s JOIN report_matches r USING(match_id) WHERE r.report_id=?',(report_id,))
+            diagnostic=player_totals(stats)
+            for player in diagnostic:
+                if player['player'] in ('DaddyGray10420','TraapxLit'):
+                    log.info('Four-match fact audit: player=%s dribbles=%s appearances=%s',player['player'],player.get('dribbles_completed'),player['appearances'])
+            self.db.confirm_report(report_id)
+            article=await asyncio.to_thread(self.reporter.generate,report_id)
+            owner=await self.fetch_user(self.config.owner_id)
+            await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
+                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Verified.txt')],
+                view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
+            self.db.set_setting('report_rewrite:'+request,'complete')
+            log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))
+        except Exception as error:
+            log.error('Verified rewrite failed: %s',str(error) if isinstance(error,(ValueError,RuntimeError)) else type(error).__name__)
+        finally:self.rewrite_running=False
 
     async def close(self):
         if self.notebook_worker:
