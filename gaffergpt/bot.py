@@ -7,7 +7,8 @@ import logging
 import math
 import os
 from .recap_reset import reset_recap
-from .report_verification import ReportHold, digest
+from .report_verification import ReportHold, digest, validate_final
+from .report_audit import assert_current
 import sys
 from datetime import datetime, timezone, timedelta
 import discord
@@ -331,8 +332,18 @@ class DraftView(ManagedView):
         async def approve(interaction):
             if interaction.user.id!=bot.config.owner_id:
                 await interaction.response.send_message('Only Coach can approve this draft.',ephemeral=True); return
-            with bot.db.connect() as conn:
-                cur=conn.execute("UPDATE weekly_reports SET status='approved' WHERE report_id=? AND status='draft'",(report_id,))
+            try:
+                with bot.db.connect() as conn:
+                    conn.execute('BEGIN IMMEDIATE')
+                    audit=conn.execute("SELECT fact_sheet,article_hash FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,)).fetchone()
+                    if audit:
+                        saved=conn.execute('SELECT title,article FROM weekly_reports WHERE report_id=?',(report_id,)).fetchone()
+                        if not saved['article'] or digest({'title':saved['title'],'body':saved['article'].split('\n\n',1)[1].strip()})!=audit['article_hash']:
+                            raise ReportHold('This draft changed after verification. Generate a fresh checked article before approval.')
+                        assert_current(bot.db,report_id,json.loads(audit['fact_sheet']))
+                    cur=conn.execute("UPDATE weekly_reports SET status='approved' WHERE report_id=? AND status='draft'",(report_id,))
+            except ReportHold as error:
+                await interaction.response.send_message(str(error),ephemeral=True);return
             await interaction.response.send_message('Approved and saved. Nothing was published.' if cur.rowcount else 'This draft has changed. Generate a fresh draft.',ephemeral=True)
         async def change(interaction):
             if bot.db.report(report_id)['status']=='skipped':
@@ -527,6 +538,12 @@ class GafferBot(discord.Client):
                 checked={'title':saved['title'],'body':article.split('\n\n',1)[1].strip()}
                 if not audits or audits[0]['article_hash']!=digest(checked):
                     raise ValueError('Saved draft has no matching completed verification. Generate it through the reporting workflow first.')
+                sheet=json.loads(audits[0]['fact_sheet'])
+                assert_current(self.db,report_id,sheet)
+                proof=json.loads(audits[0]['verification'])
+                validate_final(checked,sheet,proof['evidence'])
+                check_feature_quality(checked,{'management':report_content(self.db,report_id),'observations':{'player_statistics':{kind:group['players'] for kind,group in sheet['groups'].items()}}})
+
             else:
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(self.reporter.generate,report_id)
@@ -542,6 +559,7 @@ class GafferBot(discord.Client):
             self.db.set_setting('report_rewrite:'+request,'complete')
             log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))
         except Exception as error:
+            self.db.set_setting('report_rewrite:'+request,'held')
             log.error('Verified rewrite failed: %s',str(error) if isinstance(error,(ValueError,RuntimeError)) else type(error).__name__)
         finally:self.rewrite_running=False
 

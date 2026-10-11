@@ -84,10 +84,15 @@ class VerificationTests(unittest.TestCase):
         match=fixture(1,'Official');match['venue']='Away';s=self.sheet([match])
         text='Birmingham City 1–2 Chelsea in an official fixture.'
         with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Chelsea','score',text,kind='fixture',classification='Official',fixture_id=1)])
+    def test_written_count_with_classification_cannot_escape_check(self):
+        with self.assertRaises(ValueError):self.validate(self.sheet(),'Birmingham played seven practice fixtures.',[])
+    def test_separate_same_opponent_stat_requires_fixture_identity(self):
+        s=self.sheet([fixture(1,'Official'),fixture(2,'Official',own=1,other=3)], [stat(1,'Zak','goals',2),stat(2,'Zak','goals',1)])
+        text='Zak scored two goals against Chelsea in official matches.'
+        with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Zak','goals',text,classification='Official',fixture_id=1)])
     def test_source_hash_remains_reproducible(self):
         s=self.sheet();value=s.pop('source_hash');self.assertEqual(value,digest(s))
 
-if __name__=='__main__':unittest.main()
 
 class AuditTests(unittest.TestCase):
     def test_failed_review_and_source_reference_are_stored(self):
@@ -108,6 +113,23 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(row['state'],'held')
             self.assertEqual(json.loads(row['fact_sheet'])['references']['match:1']['raw_recap'],'Original recap')
             self.assertEqual(json.loads(row['attempts'])[0]['error'],'Wrong attribution')
+    def test_changed_source_blocks_delivery_and_approval(self):
+        import tempfile
+        from pathlib import Path
+        from gaffergpt.database import Database
+        from gaffergpt.parser import parse_recap
+        from gaffergpt.report_audit import assert_current
+        with tempfile.TemporaryDirectory() as folder:
+            db=Database(Path(folder)/'pep.db')
+            text='Birmingham City 2–1 Chelsea'
+            mid=db.ingest('123',20,30,'2026-10-06T22:00:00+00:00',text,parse_recap(text))[0]
+            db.classify(mid,'Practice','Unknown',42)
+            rid=db.open_report('2026-10-05','2026-10-12',42)['report_id']
+            db.replace_page_selection(rid,[mid],[mid])
+            sheet=build_fact_sheet({'matches':db.selected(rid)})
+            assert_current(db,rid,sheet)
+            db.execute('UPDATE matches SET birmingham_score=3 WHERE match_id=?',(mid,))
+            with self.assertRaisesRegex(ReportHold,'fixture changed'):assert_current(db,rid,sheet)
     def test_bounded_retries_never_return_failed_article(self):
         import json
         from gaffergpt.article_writer import SportsWriter
@@ -122,3 +144,5 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(sum(a.get('state')=='rejected' for a in writer.last_attempts),3)
         self.assertIsNone(writer.last_verification)
         self.assertLessEqual(writer.calls,10)
+
+if __name__=='__main__':unittest.main()

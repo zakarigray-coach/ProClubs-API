@@ -39,7 +39,8 @@ class OpenAICoach:
     @staticmethod
     def extract(payload):
         if payload.get('status')!='completed':
-            raise RuntimeError('AI response did not complete')
+            reason=(payload.get('incomplete_details') or {}).get('reason') or payload.get('status','unknown')
+            raise RuntimeError('AI response did not complete: '+str(reason))
         parts=[block['text'] for item in payload.get('output',[]) if item.get('type')=='message'
                for block in item.get('content',[]) if block.get('type')=='output_text' and block.get('text')]
         text='\n'.join(parts).strip()

@@ -138,6 +138,8 @@ class Reporter:
                 packet['excluded_names']=[r['opponent'] for r in conn.execute(
                     'SELECT DISTINCT opponent FROM matches WHERE match_id NOT IN ('+','.join('?' for _ in matches)+') AND opponent IS NOT NULL',
                     [m['match_id'] for m in matches]) if r['opponent'] not in {m['opponent'] for m in included}]
+                known_players={s['subject_key'] for s in packet['statistics'] if s['subject_type']=='player'}
+                packet['excluded_names'] += [r['subject_key'] for r in conn.execute("SELECT DISTINCT subject_key FROM match_statistics WHERE subject_type='player'") if r['subject_key'] not in known_players]
                 # Release the write lock while the remote sports desk works.
                 conn.commit()
                 title,body=self.writer.write(packet)

@@ -152,7 +152,7 @@ def numeric_spans(text,sheet):
         masked=re.sub(re.escape(name),lambda m:' '*len(m[0]),masked)
     for match in re.finditer(r'\b(?:'+NUMBER+r')\b',masked,re.I):
         # Ordinary "one" is not always a numerical claim; metric context disambiguates.
-        if match[0].casefold() in WORDS and not re.match(r'\s*[-–]?\s*(?:'+ '|'.join(METRICS.values())+r')\b',masked[match.end():],re.I):continue
+        if match[0].casefold() in WORDS and not re.match(r'\s*[-–]?\s*(?:(?:practice|official|competitive|league|cup|friendly)\s+)?(?:'+ '|'.join(METRICS.values())+r')\b',masked[match.end():],re.I):continue
         yield match.start(),match.end(),number(match[0])
 
 
@@ -227,10 +227,18 @@ def validate_final(article,sheet,evidence):
                         if fixture['opponent'] not in quote:continue
                         if re.search(r'\b(?:week|across|total|programme|period)\b',quote,re.I):continue
                         same=[m for m in sheet['fixtures'] if m['opponent']==fixture['opponent']]
-                        if len(same)>1 and not any(str(m['played_at'])[:10] in quote for m in [fixture]):continue
+                        if len(same)>1:
+                            own,other=fixture['birmingham_score'],fixture['opponent_score']
+                            identified=(fixture['venue'] in ('Home','Away') and re.search(r'\b'+fixture['venue']+r'\b',quote,re.I)) or re.search(r'\b'+str(own)+r'[-–]'+str(other)+r'\b',quote)
+                            if not identified:continue
                     player_names={f['subject'] for f in facts.values() if f['kind']=='player'}
                     paragraph_start=max(0,text.rfind('\n\n',0,a)+2)
                     positions=[(p.start(),name) for name in player_names for p in re.finditer(re.escape(name),text[paragraph_start:a])]
+                    if not positions and re.match(r'\s*(?:He|His|She|Her)\b',text[paragraph_start:a]):
+                        previous_start=max(0,text.rfind('\n\n',0,max(0,paragraph_start-2))+2)
+                        previous_text=text[previous_start:paragraph_start]
+                        prior={name for name in player_names if name in previous_text}
+                        if len(prior)==1:positions=[(0,next(iter(prior)))]
                     if not positions or max(positions)[1]!=fact['subject']:continue
                 nearby_scope=scope_at(a)
                 if nearby_scope and nearby_scope!=fact['classification']:continue
@@ -246,7 +254,7 @@ def validate_final(article,sheet,evidence):
             if fact['subject'] not in quote:raise ValueError('Award recipient does not match management selection.')
     repeated=[key for key,positions in fact_positions.items() if len(positions)>1]
     if repeated:raise ValueError('Repeated statistical claims: '+', '.join(repeated))
-    missing=[text[a:b] for a,b,_ in spans if (a,b) not in covered]
+    missing=[text[max(0,a-45):min(len(text),b+45)].replace('\n',' ') for a,b,_ in spans if (a,b) not in covered]
     if missing:raise ValueError('Final numeric claims lack correctly attributed source evidence: '+', '.join(missing)[:300])
     return {'source_hash':sheet['source_hash'],'article_hash':digest(article),
             'checks':['selected_fixtures','arithmetic','claim_attribution','numeric_coverage','names',
