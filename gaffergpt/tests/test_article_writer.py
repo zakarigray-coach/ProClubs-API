@@ -60,3 +60,36 @@ class SportsArticleTests(unittest.TestCase):
         self.assertEqual(self.db.setting('weekly_dm_awaiting'),str(self.rid))
         self.assertFalse(reset_recap(self.db,self.rid,'1','test'))
         self.assertFalse(self.db.setting('recap_preview:old'))
+
+class FinishedArticleTests(unittest.TestCase):
+    def test_known_broken_grammar_is_rejected(self):
+        from gaffergpt.article_writer import check_finished_prose
+        for broken in ('one goals and one assists across one practice appearances',
+                       'before a commanding the win', 'Those the results'):
+            with self.assertRaises(ValueError):
+                check_finished_prose({'title':'Birmingham find goals','body':('Birmingham played practice football. '*15)+broken},{})
+
+    def test_audit_is_about_rendered_language_and_attribution(self):
+        import json
+        payload=SportsWriter('test').payload(json.dumps({'desk_task':'audit_finished_article'}))
+        self.assertIn('correct player and fixture',payload['instructions'])
+        self.assertIn('FINISHED article',payload['instructions'])
+
+    def test_failed_final_review_retries_before_returning(self):
+        import json
+        calls=[]
+        prose=('Birmingham’s practice programme brought contrasting results, with attacking contributions providing the clearest individual talking points. '
+               'The fixtures belong to the training ground rather than the competitive record. '
+               'For supporters, the immediate interest lies in those contributions; league conclusions will need competitive evidence.')
+        class Writer(SportsWriter):
+            async def advise(self,analysis,formation=''):
+                request=json.loads(analysis);calls.append(request)
+                if request.get('desk_task')=='audit_finished_article':
+                    audits=sum(c.get('desk_task')=='audit_finished_article' for c in calls)
+                    return json.dumps({'title':'FAIL' if audits==1 else 'PASS','body':'Remove repetition' if audits==1 else ''})
+                return json.dumps({'title':'Birmingham weigh contrasting practice returns','body':prose})
+        title,body=Writer('test').write({'matches':[],'observations':{},'management':{}})
+        self.assertEqual(body,prose)
+        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),2)
+        self.assertEqual(calls[-1]['finished_article']['body'],prose)
+        self.assertEqual(calls[-2]['validation_feedback'],'Remove repetition')
