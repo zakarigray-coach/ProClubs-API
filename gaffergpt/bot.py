@@ -679,7 +679,11 @@ class GafferBot(discord.Client):
             for player in diagnostic:
                 if player['player'] in ('DaddyGray10420','TraapxLit'):
                     log.info('Four-match fact audit: player=%s dribbles=%s appearances=%s',player['player'],player.get('dribbles_completed'),player['appearances'])
-            if request.endswith(':deliver'):
+            if request.endswith(':recheck'):
+                from .recheck_article import ReviewedDraftRecheck
+                self.db.confirm_report(report_id)
+                article=await asyncio.to_thread(Reporter(self.db,writer=ReviewedDraftRecheck(self.db,report_id)).generate,report_id)
+            elif request.endswith(':deliver'):
                 saved=self.db.report(report_id)
                 if saved['status']!='draft' or not saved['article']:raise ValueError('No reviewed draft available.')
                 article=saved['article']
