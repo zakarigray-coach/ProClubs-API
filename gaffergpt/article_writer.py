@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .coaching_ai import OpenAICoach
-from .article_facts import fact_registry, render_checked
+from .article_facts import phrase_registry, render_checked
 
 INSTRUCTIONS = """You are RT Football Media's senior football correspondent, writing a polished
 sports feature for Birmingham City supporters. Work like a demanding newspaper sports desk:
@@ -78,26 +78,37 @@ class SportsWriter(OpenAICoach):
 
     def write(self, packet):
         clean=editorial_packet(packet)
-        facts=fact_registry(clean)
+        facts=phrase_registry(clean)
         brief={k:clean.get(k) for k in ('period','reporter','style','recent_articles')}
-        brief['verified_sentences']=facts
-        brief['writing_contract']=('Insert selected verified sentences using [[fact_key]] as complete sentences. '
-            'Never rewrite their figures, names or attribution. No numerical claims outside tokens, including spelled numbers. '
-            'Return the literal [[fact_key]] tokens in the JSON body, do not expand them; code expands them later. '
-            'Use each fact once. Highlight at most three players. Do not repeat scores/totals elsewhere. '
-            'Keep prose around facts concise, natural and evidence-based. Include [[award]] under Player of the Week if present. '
-            'A headline and fluent story matter more than length. Do not invent tactical causes. '
-            'Use tokens as whole sentences, never append them to another player name. '
-            'Avoid packet, ledger, profile data and management supplied wording.')
+        brief['verified_phrases']=facts
+        brief['writing_contract']=('Use the literal [[fact_key]] tokens as short grammatical phrases INSIDE your own sentences. '
+            'They are phrases, NOT complete sentences. Code inserts their exact verified wording after editing. '
+            'Write a flowing 400–550 word newspaper feature in six to nine substantial paragraphs, not isolated stat lines. '
+            'Build a clear story around the contrast in results and leading goal/assist contributions. '
+            'Prioritize attack contributions for the award winner and leading creator; ratings, passing and dribbles are secondary. '
+            'Integrate two related fact phrases naturally in a paragraph; never put tokens alone on their own lines. '
+            'Do not invent numerical claims outside tokens, including spelled numbers. '
+            'Use each token only once. Discuss at most three players and avoid repeating the same information. '
+            'Include [[award]] in a clear Player of the Week section, with evidence elsewhere or in that paragraph. '
+            'Use natural transitions and varied rhythm. No extra facts, tactical diagnoses or imagined match events. '
+            'Do not pad with generic summaries, selection disclaimers, packet/ledger/management-supplied wording. '
+            'Keep official and practice coverage separate. Give readers meaning without pretending to have watched the games.')
         async def draft_and_edit():
             draft=json.loads(await self.advise(json.dumps(brief,ensure_ascii=False)))
             edit=dict(brief,editing_draft=draft,desk_task='Edit this draft for accuracy and newspaper quality. '
-                'Remove repeated information and speculative claims. Keep fact tokens intact. '
+                'Remove repeated information and speculative claims. Keep phrase tokens intact inside natural sentences. '
+                'Maintain a proper feature length, 400–550 words, and combine isolated stat lines into paragraphs. '
                 'Do not recite every match if the record and key results convey the story. '
                 'Use a natural closing without restating the opening. Return corrected title/body JSON.')
             for attempt in range(2):
                 edited=json.loads(await self.advise(json.dumps(edit,ensure_ascii=False)))
-                try:return render_checked(edited,facts,clean)
+                try:
+                    title,body=render_checked(edited,facts,clean)
+                    if len(clean['matches'])>=4 and len(body.split())<300:
+                        raise ValueError('Feature too short: develop connected paragraphs to at least 300 words without inventing facts')
+                    if any(line.strip().startswith('[[') and line.strip().endswith(']]') for line in edited['body'].splitlines()):
+                        raise ValueError('Isolated fact line: weave each phrase into an original sentence')
+                    return title,body
                 except ValueError as error:
                     logging.getLogger(__name__).warning('Sports desk validation: %s',error)
                     edit['editing_draft']=edited;edit['validation_error']=str(error)

@@ -48,3 +48,32 @@ def render_checked(result,facts,packet):
     if re.search(r'\b(packet|ledger|profile data|material provided|documented assists)\b',raw,re.I):raise ValueError('Internal reporting language')
     if 'award' in facts and 'award' not in used:raise ValueError('Confirmed award omitted')
     return title,TOKEN.sub(lambda m:facts[m[1]],body)
+
+
+def phrase_registry(packet):
+    """Short, attributed fact phrases leave sentence structure to the reporter."""
+    phrases={}
+    words=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty']
+    def n(v):return words[int(v)] if int(v)==v and 0<=v<=20 else f'{v:g}'
+    for kind in ('Official','Practice'):
+        rows=[m for m in packet['matches'] if m['match_type']==kind and m['birmingham_score'] is not None and m['opponent_score'] is not None]
+        if not rows:continue
+        w=sum(m['birmingham_score']>m['opponent_score'] for m in rows);d=sum(m['birmingham_score']==m['opponent_score'] for m in rows);l=len(rows)-w-d
+        phrases[kind+'_record']=f"{n(w)} {'win' if w==1 else 'wins'}, {n(d)} {'draw' if d==1 else 'draws'} and {n(l)} {'defeat' if l==1 else 'defeats'} across {n(len(rows))} {kind.lower()} matches"
+        phrases[kind+'_goals']=f"Birmingham’s {n(sum(m['birmingham_score'] for m in rows))} goals scored and {n(sum(m['opponent_score'] for m in rows))} conceded in {kind.lower()}"
+        for i,m in enumerate(rows):
+            result='win over' if m['birmingham_score']>m['opponent_score'] else 'draw with' if m['birmingham_score']==m['opponent_score'] else 'defeat against'
+            phrases[f'{kind}_match_{i}']=f"the {m['birmingham_score']}–{m['opponent_score']} {result} {m['opponent']}"
+        for i,p in enumerate(packet.get('observations',{}).get('player_statistics',{}).get(kind,[])):
+            name=p['player'];scope=f"across {n(p['appearances'])} {kind.lower()} appearances"
+            if 'goals' in p or 'assists' in p:
+                parts=[f"{n(p[k])} {label}" for k,label in [('goals','goals'),('assists','assists')] if k in p]
+                phrases[f'{kind}_player_{i}_attack']=f"{name}’s "+' and '.join(parts)+' '+scope
+            if 'average_rating' in p:phrases[f'{kind}_player_{i}_rating']=f"{name}’s average rating of {p['average_rating']:.2f} {scope}"
+            for key,label in [('dribbles_completed','completed dribbles'),('saves','saves'),('tackles_won','tackles won'),('interceptions','interceptions')]:
+                if p.get(key,0)>0:phrases[f'{kind}_player_{i}_{key}']=f"{name}’s {n(p[key])} {label} {scope}"
+            if 'shots' in p and 'shots_on_target' in p:phrases[f'{kind}_player_{i}_shots']=f"{name}’s {n(p['shots_on_target'])} shots on target from {n(p['shots'])} attempts {scope}"
+            if p.get('pass_accuracy') is not None:phrases[f'{kind}_player_{i}_passing']=f"{name}’s {p['pass_accuracy']:.1f}% pass completion ({p['passes_completed']:g} of {p['passes_attempted']:g} passes)"
+    winner=(packet.get('management') or {}).get('player_name')
+    if winner:phrases['award']=f'{winner}, Birmingham’s Player of the Week'
+    return phrases

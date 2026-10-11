@@ -25,3 +25,11 @@ class ArticleFactTests(unittest.TestCase):
         self.assertIn('2 wins, 1 draw and 1 defeat',self.facts['Practice_record'])
         self.assertIn('13 goals and conceding 10',self.facts['Practice_record'])
         self.assertIn('8.63',self.facts['Practice_player_1_rating'])
+
+    def test_phrase_facts_preserve_attribution_without_fixed_sentences(self):
+        from gaffergpt.article_facts import phrase_registry
+        facts=phrase_registry(self.packet)
+        self.assertIn('DaddyGray10420’s 80 completed dribbles',facts['Practice_player_0_dribbles_completed'])
+        self.assertIn('three goals and six assists',facts['Practice_player_0_attack'])
+        self.assertFalse(facts['Practice_player_0_attack'].endswith('.'))
+        self.assertIn('8.63',facts['Practice_player_1_rating'])

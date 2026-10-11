@@ -341,3 +341,5 @@ Weekly articles now use the configured Pep AI provider for a story-led sports fe
 Sports desk quality: concrete leads, restrained reporter voices, evidence-only descriptions, rounded readable figures and explicit confirmed Player of the Week recognition. Legacy outfield conceded-goal totals are stripped before AI writing; new Excel imports retain individual conceded goals/clean sheets only for goalkeeper appearances.
 
 Article figures are calculated in Python and rendered from named factual sentence references; the AI cannot substitute a different player’s number. A second sports desk pass removes repetition, and validation blocks invented numerical claims, repeated references and internal wording. A requested four-match live rewrite can be run once through PEP_REPORT_REWRITE_REQUEST (report ID plus unique request marker); it sends only a private review draft.
+
+The sports writer now embeds short verified, player-attributed fact phrases within original paragraphs instead of using fixed factual sentences. The editor targets 400–550 words for four fixtures and prioritizes goals/assists over secondary metrics.
