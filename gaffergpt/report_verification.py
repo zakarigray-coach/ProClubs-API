@@ -188,7 +188,8 @@ def validate_final(article,sheet,evidence):
             for pair in pairs:
                 own,other=map(int,pair.groups())
                 direct=(own,other)==(score['for'],score['against'])
-                reverse=(own,other)==(score['against'],score['for']) and score['venue']=='Away'
+                reverse=((own,other)==(score['against'],score['for']) and score['venue']=='Away'
+                         and fact['subject'] in quote[:pair.start()] and re.search(r'Birmingham(?: City)?',quote[pair.end():]))
                 if not (direct or reverse):continue
                 nearby_scope=scope_at(start+pair.start())
                 if nearby_scope and nearby_scope!=fact['classification']:continue
@@ -215,6 +216,11 @@ def validate_final(article,sheet,evidence):
                 following=min([begin for begin,_,_ in spans if begin>=b]+[end])
                 window=text[max(start,previous,a-35):min(end,following,b+45)]
                 if not re.search(METRICS[metric],window,re.I):continue
+                if kind=='team':
+                    actors={f['subject'] for f in facts.values() if f['kind']=='player'}|{'Birmingham City','Birmingham'}
+                    context_start=max(0,text.rfind('\n\n',0,a)+2)
+                    mentioned=[(p.start(),name) for name in actors for p in re.finditer(re.escape(name),text[context_start:a])]
+                    if mentioned and max(mentioned)[1] not in ('Birmingham City','Birmingham'):continue
                 if kind=='player':
                     if fact['fixture_id'] is not None:
                         fixture=next(m for m in sheet['fixtures'] if m['match_id']==fact['fixture_id'])

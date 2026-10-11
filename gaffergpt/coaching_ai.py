@@ -24,6 +24,7 @@ class OpenAICoach:
     def __init__(self, key, model='gpt-5-mini'):
         self.key=key
         self.model=model
+        self.request_timeout=60
 
     @classmethod
     def from_environment(cls):
@@ -47,7 +48,7 @@ class OpenAICoach:
         return text
 
     async def advise(self, analysis, formation=''):
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.request_timeout)) as session:
             async with session.post('https://api.openai.com/v1/responses',
                 headers={'Authorization':'Bearer '+self.key},json=self.payload(analysis,formation)) as response:
                 if response.status!=200:

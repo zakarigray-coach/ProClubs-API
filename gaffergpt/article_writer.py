@@ -82,6 +82,12 @@ class SportsWriter(OpenAICoach):
     def __init__(self,key,model='gpt-5-mini'):
         super().__init__(key,model)
         self._local=threading.local()
+        self.request_timeout=180
+
+    async def advise(self,analysis,formation=''):
+        task=json.loads(analysis).get('desk_task','draft')
+        logging.getLogger(__name__).info('Sports desk provider request started: %s',task[:70])
+        return await super().advise(analysis,formation)
 
     @property
     def last_fact_sheet(self):return getattr(self._local,'sheet',None)
@@ -145,6 +151,7 @@ class SportsWriter(OpenAICoach):
         self._local.sheet={'source_snapshot':{'matches':clean.get('source_matches',clean.get('matches',[])),'statistics':clean.get('statistics',[])}}
         sheet=build_fact_sheet(clean)
         self._local.sheet=sheet
+        logging.getLogger(__name__).info('Report source snapshot: %s',json.dumps({'source_hash':sheet['source_hash'],'fixtures':sheet['fixtures'],'summaries':{k:g['summary'] for k,g in sheet['groups'].items()}},ensure_ascii=False))
         # Replace cached totals with source-calculated totals before choosing the story.
         clean.setdefault('observations',{})['player_statistics']=json.loads(json.dumps({kind:group['players'] for kind,group in sheet['groups'].items()}))
         # Keep partial metrics in the separate stats recap, not in full-period prose.
@@ -205,7 +212,10 @@ class SportsWriter(OpenAICoach):
                     feedback.append(str(error));draft=edited;record.update(state='rejected',error=str(error))
                     logging.getLogger(__name__).warning('Article held for automatic revision; attempt=%s check=%s',attempt+1,str(error)[:500])
             raise RuntimeError('Article held after three revision attempts. Results and selections are saved; no draft was sent.')
-        return asyncio.run(draft_and_edit())
+        try:return asyncio.run(draft_and_edit())
+        except Exception as error:
+            self._local.attempts.append({'state':'held','error':str(error) or type(error).__name__})
+            raise
 
 
 def feature_facts(packet):

@@ -23,4 +23,4 @@ def finish(db,audit_id,writer,state,error=None):
     with db.connect() as conn:
         conn.execute('UPDATE report_generation_audit SET finished_at=?,state=?,source_hash=?,fact_sheet=?,attempts=?,article_hash=?,verification=?,error=? WHERE audit_id=?',
                      (utcnow(),state,(sheet or {}).get('source_hash'),json.dumps(sheet,ensure_ascii=False) if sheet else None,
-                      json.dumps(getattr(writer,'last_attempts',[]),ensure_ascii=False),proof.get('article_hash'),json.dumps(proof,ensure_ascii=False),str(error)[:2000] if error else None,audit_id))
+                      json.dumps(getattr(writer,'last_attempts',[]),ensure_ascii=False),proof.get('article_hash'),json.dumps(proof,ensure_ascii=False),(str(error) or type(error).__name__)[:2000] if error is not None else None,audit_id))

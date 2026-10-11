@@ -76,6 +76,14 @@ class VerificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.validate(s,text,[])
     def test_review_pass_cannot_replace_numeric_evidence(self):
         with self.assertRaises(ValueError):self.validate(self.sheet(),'Birmingham scored 99 goals.',[])
+    def test_team_total_cannot_be_used_as_player_goals(self):
+        s=self.sheet(stats=[stat(1,'Zak','goals',1)])
+        text='Zak scored two goals in practice.'
+        with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Birmingham City','goals_for',text,kind='team')])
+    def test_reversed_score_requires_away_opponent_first(self):
+        match=fixture(1,'Official');match['venue']='Away';s=self.sheet([match])
+        text='Birmingham City 1–2 Chelsea in an official fixture.'
+        with self.assertRaises(ValueError):self.validate(s,text,[self.evidence(s,'Chelsea','score',text,kind='fixture',classification='Official',fixture_id=1)])
     def test_source_hash_remains_reproducible(self):
         s=self.sheet();value=s.pop('source_hash');self.assertEqual(value,digest(s))
 
@@ -111,6 +119,6 @@ class AuditTests(unittest.TestCase):
         writer=RejectingWriter('test')
         with self.assertRaisesRegex(RuntimeError,'three revision'):
             writer.write({'matches':[fixture(1)],'statistics':[]})
-        self.assertEqual(len(writer.last_attempts),3)
+        self.assertEqual(sum(a.get('state')=='rejected' for a in writer.last_attempts),3)
         self.assertIsNone(writer.last_verification)
         self.assertLessEqual(writer.calls,10)
