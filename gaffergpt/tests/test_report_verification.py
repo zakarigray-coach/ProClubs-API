@@ -80,6 +80,15 @@ class VerificationTests(unittest.TestCase):
         s=self.sheet(stats=[stat(1,'Zak','goals',2)])
         text='Zak scored two goals against Chelsea in practice.'
         self.validate(s,text,[self.evidence(s,'Zak','goals',text,fixture_id=1)])
+    def test_each_score_in_a_result_list_binds_to_its_own_clause(self):
+        matches=[fixture(1,opponent='FRESH CAKES FC',own=2,other=5),fixture(2,opponent='bandzwillmake',own=3,other=3),fixture(3,opponent='LittleD',own=6,other=2),fixture(4,opponent='Gougherton FC',own=2,other=0)]
+        sheet=self.sheet(matches)
+        text='In practice: a 2–5 defeat to FRESH CAKES FC, a 3–3 draw with bandzwillmake, a 6–2 victory over LittleD, and a 2–0 victory over Gougherton FC.'
+        claims=[self.evidence(sheet,m['opponent'],'score',text,kind='fixture',fixture_id=m['match_id']) for m in matches]
+        self.validate(sheet,text,claims)
+        wrong=text.replace('3–3 draw','3–3 victory')
+        with self.assertRaises(ValueError):self.validate(sheet,wrong,[dict(c,quote=wrong) for c in claims])
+
     def test_wrong_score_and_result_rejected(self):
         s=self.sheet()
         for text in ('Birmingham lost 2–1 against Chelsea in practice.','Birmingham won 4–1 against Chelsea in practice.'):

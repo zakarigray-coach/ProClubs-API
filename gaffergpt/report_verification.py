@@ -265,12 +265,22 @@ def validate_final(article,sheet,evidence):
                 if len(sheet['groups'])>1 and not nearby_scope:continue
                 # Bind the score to its nearest named opponent, not merely any selected pair.
                 opponents={m['opponent'] for m in sheet['fixtures']}
-                positions=[(min(abs(p.start()-pair.start()),abs(p.end()-pair.end())),name) for name in opponents for p in re.finditer(re.escape(name),quote)]
+                left=max((m.end() for m in re.finditer(r'[,;.!?]',quote[:pair.start()])),default=0)
+                stop=re.search(r'[,;.!?]',quote[pair.end():])
+                right=pair.end()+stop.start() if stop else len(quote)
+                clause=quote[left:right]
+                local_names={name for name in opponents if name in clause}
+                if local_names:
+                    positions=[(min(abs(p.start()-pair.start()+left),abs(p.end()-pair.end()+left)),name)
+                               for name in local_names for p in re.finditer(re.escape(name),clause)]
+                else:
+                    positions=[(min(abs(p.start()-pair.start()),abs(p.end()-pair.end())),name)
+                               for name in opponents for p in re.finditer(re.escape(name),quote)]
                 if positions and min(positions)[1]!=fact['subject']:continue
-                context=quote.lower()
+                context=(clause if local_names else quote).lower()
                 result=score['result']
                 wrong={'win':r'\b(?:lost|defeat)\b','defeat':r'\b(?:beat|victory|won)\b','draw':r'\b(?:beat|lost|victory|defeat)\b'}[result]
-                if len(pairs)==1 and re.search(wrong,context):raise ValueError('Score/result contradiction for '+fact['subject'])
+                if (local_names or len(pairs)==1) and re.search(wrong,context):raise ValueError('Score/result contradiction for '+fact['subject'])
                 covered.update((start+pair.start(1),start+pair.end(1)) for _ in [0])
                 covered.add((start+pair.start(2),start+pair.end(2)))
         elif kind in ('date','schedule'):
