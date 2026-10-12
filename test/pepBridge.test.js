@@ -46,3 +46,15 @@ test('weekly approved media cards use the same private bridge', async () => {
   assert.equal(delivered.files[1].name,'RT_Media_7_1.png');
   assert.deepEqual(delivered.allowedMentions,{parse:[]});
 });
+
+test('content-only report delivers readable paragraphs after one cover and JSON', async()=>{
+ const replies=[];
+ const current={...report,cover_count:1,cover_payload:{headline:'Blues Find Mixed Fortunes'},discord_article:'By Raine | RT Football Media\n\n'+ 'A'.repeat(1100)+'\n\n'+'B'.repeat(1100)};
+ await sendReview({user:{id:'owner'},editReply:async r=>replies.push(r),followUp:async r=>replies.push(r)},7,'owner',{
+  ...options,fetchImpl:async url=>({ok:true,json:async()=>current,arrayBuffer:async()=>Buffer.from('cover')})
+ });
+ assert.equal(replies.length,3);
+ assert.equal(replies.slice(1).map(r=>r.content).join('\n\n'),current.discord_article);
+ assert.ok(replies[0].files.some(f=>f.name==='RT_Cover_7.json'));
+ assert.ok(replies.slice(1).every(r=>r.ephemeral && r.content.length<=2000));
+});

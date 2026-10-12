@@ -164,10 +164,25 @@ class MatchSelect(discord.ui.Select):
 
 async def report_attachments(db,report_id,article):
     from .article_layout import media_pages
+    from .recap_output import checked_outputs
+    payload,text=await asyncio.to_thread(checked_outputs,db,report_id)
     pages=await asyncio.to_thread(media_pages,db,report_id)
     files=[discord.File(io.BytesIO(data),filename=f'RT_Media_{report_id}_{i+1}.png') for i,data in enumerate(pages)]
-    files.append(discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt'))
+    files.append(discord.File(io.BytesIO(text.encode()),filename=f'RT_Report_{report_id}.txt'))
+    files.append(discord.File(io.BytesIO(json.dumps(payload,ensure_ascii=False,indent=2).encode()),filename=f'RT_Cover_{report_id}.json'))
     return files
+
+
+async def send_article_text(target,article):
+    from .recap_output import discord_chunks
+    for chunk in discord_chunks(article):
+        await target.send(chunk,allowed_mentions=discord.AllowedMentions.none())
+
+
+async def send_checked_article(target,db,report_id,sample=False):
+    from .recap_output import checked_outputs
+    payload,article=await asyncio.to_thread(checked_outputs,db,report_id,sample)
+    await send_article_text(target,article)
 
 
 def player_photo_button(bot,report_id,context):
@@ -222,6 +237,7 @@ class RecapConfirmView(ManagedView):
                 if existing.get('photo'):
                     files.append(discord.File(io.BytesIO(existing['photo']),filename=f'Featured_Player_{report_id}.{existing["photo_extension"]}'))
                 await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+                await send_checked_article(owner,bot.db,report_id)
                 bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
                 bot.db.set_setting('weekly_dm_awaiting','')
                 bot.db.set_setting(f'weekly_excel:{report_id}','')
@@ -428,6 +444,7 @@ class ReportView(ManagedView):
                 files.append(discord.File(io.BytesIO(supplied['photo']),filename=f'Featured_Player_{report_id}.{supplied["photo_extension"]}'))
             await owner.send(content=f'RT Football Media draft #{report_id} — review only. Nothing has been published.',
                 files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+            await send_checked_article(owner,bot.db,report_id)
             bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
             await interaction.followup.send('Draft sent to Coach for review.',ephemeral=True)
         async def remind(interaction):
@@ -724,6 +741,7 @@ class GafferBot(discord.Client):
                 await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
                     files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Draft.txt')],
                     view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
+            await send_checked_article(owner,self.db,report_id,sample=request.endswith(':sampledeliver'))
             self.db.set_setting('report_rewrite:'+request,'complete')
             log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))
         except Exception as error:
@@ -890,6 +908,7 @@ class GafferBot(discord.Client):
                 files=await report_attachments(self.db,report_id,article)
                 saved=report_content(self.db,report_id)
                 await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=files,view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+                await send_checked_article(message.channel,self.db,report_id)
             else:
                 await message.reply('Player photo saved. Tap Confirm Results & Draft on the recap preview to include it with your article.',mention_author=False)
         except (ValueError,RuntimeError,aiohttp.ClientError) as error:

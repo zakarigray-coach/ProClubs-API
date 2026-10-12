@@ -427,6 +427,8 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch,AsyncMock
         media_patch=patch('gaffergpt.bot.report_attachments',AsyncMock(return_value=[]))
         media_patch.start();self.addCleanup(media_patch.stop)
+        text_patch=patch('gaffergpt.bot.send_checked_article',AsyncMock())
+        text_patch.start();self.addCleanup(text_patch.stop)
         bot=GafferBot(Config('test',42,30,database_path=self.path))
         mid=self.add()[0]; self.db.classify(mid,'Official','Home',42);rid=self.report([mid])
         owner=SimpleNamespace(send=AsyncMock())

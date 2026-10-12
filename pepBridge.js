@@ -30,7 +30,18 @@ async function sendReview(interaction, reportId, ownerId, options) {
     return interaction.editReply('Only Coach can retrieve Pep’s weekly drafts.');
   }
   const report = await fetchReport(reportId, options);
-  const bytes = Buffer.from(report.article, 'utf8');
+  const text = report.discord_article || report.article;
+  const chunks = [];
+  if (report.cover_payload) {
+    let current = '';
+    for (const paragraph of text.trim().split('\n\n')) {
+      if (paragraph.length > 2000) throw new Error('Article paragraph exceeds Discord limit; shorten it before delivery.');
+      const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+      if (candidate.length > 2000) { chunks.push(current); current = paragraph; } else current = candidate;
+    }
+    if (current) chunks.push(current);
+  }
+  const bytes = Buffer.from(text, 'utf8');
   if (bytes.length > 7500000) throw new Error('This draft is too large for Discord.');
   const files = [{ attachment: bytes, name: `RT_Pep_Report_${reportId}.txt` }];
   if (['png', 'jpg', 'webp'].includes(report.photo_extension)) {
@@ -43,12 +54,15 @@ async function sendReview(interaction, reportId, ownerId, options) {
       files.push({ attachment: cover, name: `${report.competition_context?.event?.report_type === 'Cup' ? 'RT_Cup' : 'RT_Media'}_${reportId}_${i + 1}.png` });
     }
   }
+  if (report.cover_payload) files.push({attachment:Buffer.from(JSON.stringify(report.cover_payload,null,2)),name:`RT_Cover_${reportId}.json`});
   // Ephemeral download only; no public post and no legacy statistics writes.
-  return interaction.editReply({
+  const reply = await interaction.editReply({
     content: `RT Football Media — Pep draft #${reportId}. Private review copy; nothing has been published.`,
     files,
     allowedMentions: { parse: [] },
   });
+  for (const content of chunks) await interaction.followUp({content,ephemeral:true,allowedMentions:{parse:[]}});
+  return reply;
 }
 
 async function checkConnection(options) {

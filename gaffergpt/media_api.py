@@ -27,7 +27,9 @@ def report_payload(db, report_id):
         checked=conn.execute("SELECT 1 FROM sqlite_master WHERE name='report_generation_audit'").fetchone()
         passed=conn.execute("SELECT 1 FROM report_generation_audit WHERE report_id=? AND state='passed'",(report_id,)).fetchone() if checked else None
         covers=media_pages(db,report_id) if passed and all(m['match_type'] in ('Official','Cup') for m in matches) else []
-        return {'competition_context':context,'cover_count':len(covers),'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
+        from .recap_output import checked_outputs
+        cover_payload,discord_article=checked_outputs(db,report_id) if covers else (None,report['article'])
+        return {'cover_payload':cover_payload,'discord_article':discord_article,'competition_context':context,'cover_count':len(covers),'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
                 'status':report['status'],'week_start':report['week_start'],'week_end':report['week_end'],
                 'matches':facts,'published':False}
 

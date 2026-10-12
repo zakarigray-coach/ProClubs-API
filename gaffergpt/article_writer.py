@@ -10,7 +10,7 @@ from .coaching_ai import OpenAICoach
 from .article_facts import fact_registry
 from .report_verification import build_fact_sheet, validate_final, digest, source_identity
 
-WRITING_VERSION="recap-mvp-20261012"
+WRITING_VERSION="content-only-20261012"
 
 INSTRUCTIONS = """You are RT Football Media's senior football correspondent, writing a polished
 sports feature for MPL Birmingham City supporters. Use British English throughout. Work like a demanding newspaper sports desk:
@@ -26,12 +26,12 @@ usually of 20–45 words built around the main result, contrast or standout cont
 short connected paragraphs: important results, two or three telling numbers, player highlights,
 and a grounded closing thought. Use at most three section headings when they aid the story.
 Default to 350–550 words for a weekly article, but use fewer when the evidence is thin. Less evidence warrants
-a shorter piece. Do not inflate thin evidence to reach a word count. No compulsory sections.
+a shorter piece. Do not inflate thin evidence to reach a word count. Include a dedicated featured-player section using the confirmed award label (Player of the Week for league reports; the supplied cup award label for cups) for the confirmed winner and an Other Contributors section when verified contributions support it. End with an outlook grounded in verified future context when available, otherwise a closing observation about the documented results; never invent fixtures. Keep paragraphs below 1,500 characters for readable Discord delivery.
 Use active verbs and varied sentence lengths. Let details create interest. Avoid strained
 alliteration, grand metaphors, filler, repeated summaries or generic scene-setting.
 Never use phrases like 'harmlessly encouraging', 'strikecraft', 'practical laboratories',
 'compact picture', 'probing weaknesses' or 'the numbers tell the story'.
-Round percentages to one decimal and ratings to two decimals. Preserve exact player names.
+Copy the already-rounded percentages and ratings from verified facts. Preserve exact player names.
 
 EVIDENCE: Every factual claim must be traceable to the supplied selected records or explicitly
 attributed management notes. Scores show results, not how matches unfolded. A clean sheet does
@@ -43,16 +43,15 @@ watched these matches. No invented quotes, events, injuries, opponents or future
 Any proposed coaching change must be explicitly framed as a suggestion, never the known cause.
 Only use chronology from supplied timestamps. Never describe a three-goal defeat as narrow.
 
-STATISTICS: Official and practice totals stay separate. Practice never earns league points
+STATISTICS: Never calculate totals, averages, percentages, differences or ratios. Copy only precomputed verified fact-sheet values. Official and practice totals stay separate. Practice never earns league points
 or changes the competitive record. Missing data is unknown, never zero. Individual goals
 conceded and goalkeeper clean-sheet totals are for confirmed goalkeeper appearances only;
 never discuss goals conceded as an outfield player's statistic. Team conceded goals can be reported.
 Highlight at most three players; choose statistics that explain their documented contribution.
-For confirmed Player of the Week, incorporate the award into the main narrative, with the
-winner's decisive statistics ONCE. Do not add a second award paragraph repeating those figures.
+For confirmed Player of the Week, put the award and decisive statistics ONCE in a dedicated Player of the Week section. Use an opening lead about the main story without repeating those figures.
 Lead with the strongest individual contribution when it is the main story, then connect it to
 the contrast in team results. Use at most two or three telling figures per highlighted player.
-Never add an Other contributors section or a roster roll-call. No reporting-policy conclusion.
+Add Other Contributors only when supported by verified data; avoid a roster roll-call. No reporting-policy conclusion.
 Avoid non-negligible, supplied figures, defensive actions noted, factual snapshot, confirmed
 figures, conclusions belong to coaching staff, and similar bureaucratic filler.
 Do not call a share the bulk or majority unless it exceeds half; prefer the actual contribution.
@@ -196,18 +195,16 @@ class SportsWriter(OpenAICoach):
             'Finish on the football story, not reporting rules. No fictional names, quotes or scene-setting. '
             'Only confirmed competition labels; do not equate EA league/friendly labels with official MPL status. '
             'Never use ledger, non-negligible, supplied figures, defensive actions noted, factual snapshot, '
-            'Other contributors, firm headline, headline return or file away. Player positions and tactical roles are unknown unless explicitly sourced. '
+            'firm headline, headline return or file away. Player positions and tactical roles are unknown unless explicitly sourced. '
             'Delete unsupported clauses entirely. Never turn correction notes into prose about what cannot be inferred. '
             'Do not describe absent evidence, explain the reporting process, or copy validation feedback into the article.')
         brief['writing_requirements']=brief['desk_task']
         if event.get('report_type')=='Cup':
             brief['writing_requirements']+=' This is a separate CUP EDITION event report, not a weekly league or practice article. Lead with the strongest verified cup story. Organise around confirmed stages when available; unknown stages do not establish chronology. Match scores exclude penalty kicks. Aggregates and shootouts must be explicitly labelled and never added to player goals. Unknown progression means no claimed qualification, elimination or trophy. Use Cup Standout for the management-selected featured player; use Player of the Tournament only when explicitly confirmed with scope in event metadata. Do not call them Player of the Week. The Pre-Season Cup shows these verified results ahead of the MPL season; do not invent predictions, momentum or chemistry.'
         if len(sheet['fixtures'])<=4 and not sheet['narrative_evidence'] and not sheet['quotes']:
-            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Aim for 200–320 words when four fixtures and meaningful player contributions support a developed story; write less if the evidence is genuinely thin. Four fixtures are not automatically thin evidence. Do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play. Write connected newspaper paragraphs, not one result or metric per paragraph. Integrate the confirmed award with its statistical case, then close on the supported contrast between individual output and team results. A lesson, outlook, coaching recommendation, cause-and-effect summary or forecast is not required; never invent one to manufacture a conclusion.'
+            brief['writing_requirements']+=' These records contain results and numerical contributions only, with no match narrative or interviews. Aim for 200–320 words when four fixtures and meaningful player contributions support a developed story; write less if the evidence is genuinely thin. Four fixtures are not automatically thin evidence. Do not pad it towards the usual weekly length. Describe the contrasting scorelines and contributions, not unseen passages of play. Write connected newspaper paragraphs, not one result or metric per paragraph. Give the confirmed award its own section with its statistical case, then close on the supported contrast between individual output and team results. Use the closing documented-results observation when no future context is verified; never invent a lesson, coaching recommendation, causal claim or forecast.'
         award=(clean.get('management') or {}).get('player_name')
         winner=next((p for ps in clean.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
-        if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3:
-            brief['writing_requirements']+=f' The FIRST SENTENCE must name {award} exactly and describe the verified {winner["goals"]:g} goals, linked to the contrasting practice/official results. Mention that scoring total only once in the body.'
         async def draft_and_edit():
             mapping_retried=False
             recovery=clean.get('recovery') or {}
@@ -305,7 +302,7 @@ def feature_facts(packet):
 
 def check_feature_quality(article,packet):
     body=article['body']
-    banned=r'\bledger\b|supplied (?:match )?records|statistical contribution|recorded practice results|named weekly award|defined, match-by-match numbers|other contributors|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff|without drawing larger conclusions|firm headline|headline return|file away'
+    banned=r'\bledger\b|supplied (?:match )?records|statistical contribution|recorded practice results|named weekly award|defined, match-by-match numbers|non-negligible|supplied figures|defensive actions noted|factual snapshot|those are the confirmed figures|conclusions.*belong to the coaching staff|without drawing larger conclusions|firm headline|headline return|file away'
     bad=re.search(banned,body,re.I)
     if bad:
         raise ValueError('Remove this exact wording: '+repr(bad[0])+'. Delete the policy explanation or roster heading; end on the football story.')
@@ -332,8 +329,8 @@ def check_feature_quality(article,packet):
     winner=next((p for ps in packet.get('observations',{}).get('player_statistics',{}).values() for p in ps if p['player']==award),None)
     lead=re.split(r'(?<=[.!?])\s+',body,1)[0]
     event=(packet.get('competition_context') or {}).get('event',{})
-    if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3 and (award not in lead or not re.search(r'\bgoals?\b',lead,re.I)):
-        raise ValueError('The FIRST SENTENCE must name '+award+' exactly and describe the verified goals. Link that opening to the contrast in results; do not defer the name or goals to a later sentence.')
+    if event.get('report_type')!='Cup' and winner and winner.get('goals',0)>=3 and award not in lead:
+        raise ValueError('The FIRST SENTENCE must name '+award+' exactly. Keep detailed award figures in the Player of the Week section.')
 
 def check_finished_prose(article,facts):
     title,body=article.get('title',''),article.get('body','')

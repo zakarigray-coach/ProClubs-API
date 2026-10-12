@@ -111,7 +111,7 @@ class NewspaperQualityTests(unittest.TestCase):
                          {'player':'Fourth','goals':1,'assists':0,'appearances':1}]}}}
     def test_previous_roll_call_and_policy_ending_are_rejected(self):
         from gaffergpt.article_writer import check_feature_quality
-        for body in ('TraapxLit scored seven goals. Other contributors',
+        for body in ('TraapxLit scored seven goals. A factual snapshot.',
                      'TraapxLit scored seven goals. The week produced a non-negligible volume of goals conceded.',
                      'TraapxLit scored seven goals. Those are the confirmed figures; any conclusions belong to the coaching staff.',
                      'TraapxLit DaddyGray10420 Third Fourth'):
