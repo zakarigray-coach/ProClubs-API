@@ -37,10 +37,10 @@ async function sendReview(interaction, reportId, ownerId, options) {
     const photo = await centralRequest(`/reports/${reportId}/photo`, { ...options, binary: true });
     files.push({ attachment: photo, name: `Featured_Player_${reportId}.${report.photo_extension}` });
   }
-  if (Number.isInteger(report.cover_count) && report.cover_count > 0 && report.cover_count <= 6) {
+  if (Number.isInteger(report.cover_count) && report.cover_count > 0 && report.cover_count <= 8) {
     for (let i = 0; i < report.cover_count; i++) {
       const cover = await centralRequest(`/reports/${reportId}/covers/${i}`, { ...options, binary: true });
-      files.push({ attachment: cover, name: `RT_Cup_${reportId}_${i + 1}.png` });
+      files.push({ attachment: cover, name: `${report.competition_context?.event?.report_type === 'Cup' ? 'RT_Cup' : 'RT_Media'}_${reportId}_${i + 1}.png` });
     }
   }
   // Ephemeral download only; no public post and no legacy statistics writes.

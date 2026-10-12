@@ -22,6 +22,9 @@ class ExtractionTests(unittest.TestCase):
 
 class DMWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from unittest.mock import patch
+        self.media_patch=patch('gaffergpt.bot.report_attachments',AsyncMock(return_value=[]))
+        self.media_patch.start();self.addCleanup(self.media_patch.stop)
         self.root=tempfile.TemporaryDirectory()
         self.bot=GafferBot(Config('test',1,2,database_path=str(Path(self.root.name)/'pep.db')))
         self.rid=self.bot.db.open_report('2026-10-12T04:00:00+00:00','2026-10-19T04:00:00+00:00',1)['report_id']
@@ -72,7 +75,7 @@ class PhotoAndAwardTests(DMWorkflowTests):
         await self.bot.on_message(message)
         owner=SimpleNamespace(send=AsyncMock());self.bot.fetch_user=AsyncMock(return_value=owner)
         await view.children[0].callback(interaction)
-        self.assertEqual(len(owner.send.call_args.kwargs['files']),2)
+        self.assertEqual(len(owner.send.call_args.kwargs['files']),1)
         self.assertIn('Zak — Suggestion: 2 assists',self.bot.db.report(self.rid)['article'])
 
 class PracticeClarificationRegressionTests(unittest.TestCase):

@@ -1,5 +1,9 @@
 """Reporter reads the shared store and prepares drafts; it never publishes."""
 import json
+import secrets
+import sqlite3
+from datetime import datetime,timezone,timedelta
+from .database import utcnow
 from .article_writer import period_label
 from . import report_audit
 from .report_verification import source_identity
@@ -27,16 +31,49 @@ class Reporter:
 
     def generate(self, report_id):
         if not self.writer:return self._generate(report_id)
-        if hasattr(self.writer,'reset_audit'):self.writer.reset_audit()
-        audit_id=report_audit.start(self.db,report_id)
+        lease=secrets.token_hex(16)
+        with self.db.connect() as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS report_generation_leases(report_id INTEGER PRIMARY KEY REFERENCES weekly_reports(report_id),owner TEXT NOT NULL,expires_at TEXT NOT NULL)')
+            conn.execute('DELETE FROM report_generation_leases WHERE expires_at<=?',(utcnow(),))
+            try:conn.execute('INSERT INTO report_generation_leases VALUES(?,?,?)',(report_id,lease,(datetime.now(timezone.utc)+timedelta(minutes=20)).isoformat()))
+            except sqlite3.IntegrityError:
+                raise ValueError('This article is already being prepared. Wait for its private draft; do not generate another copy.') from None
         try:
-            article=self._generate(report_id)
-            report_audit.finish(self.db,audit_id,self.writer,
-                'passed' if getattr(self.writer,'last_verification',None) else 'unverified_legacy_writer')
-            return article
-        except Exception as error:
-            report_audit.finish(self.db,audit_id,self.writer,'held',error)
-            raise
+            cached=self._cached(report_id)
+            if cached:return cached
+            if hasattr(self.writer,'reset_audit'):self.writer.reset_audit()
+            audit_id=report_audit.start(self.db,report_id)
+            try:
+                article=self._generate(report_id)
+                report_audit.finish(self.db,audit_id,self.writer,
+                    'passed' if getattr(self.writer,'last_verification',None) else 'unverified_legacy_writer')
+                return article
+            except Exception as error:
+                report_audit.finish(self.db,audit_id,self.writer,'held',error)
+                raise
+        finally:self.db.execute('DELETE FROM report_generation_leases WHERE report_id=? AND owner=?',(report_id,lease))
+
+    def _cached(self,report_id):
+        from .article_writer import WRITING_VERSION
+        from .report_verification import digest
+        report=self.db.report(report_id)
+        if not report or report['status']!='confirmed' or not report['article']:return None
+        exists=self.db.one("SELECT 1 FROM sqlite_master WHERE name='report_generation_audit'")
+        if not exists:return None
+        audit=self.db.one("SELECT * FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
+        if not audit:return None
+        proof=json.loads(audit['verification'] or '{}')
+        if proof.get('writing_version')!=WRITING_VERSION or proof.get('model')!=getattr(self.writer,'model',None):return None
+        checked={'title':report['title'],'body':report['article'].split('\n\n',1)[1].strip()}
+        if digest(checked)!=audit['article_hash']:return None
+        with self.db.connect() as conn:
+            conn.execute(CONTENT_SCHEMA)
+            management=conn.execute('SELECT notes,player_name,player_evidence FROM weekly_report_content WHERE report_id=?',(report_id,)).fetchone()
+        if proof.get('management_hash')!=digest(dict(management) if management else None):return None
+        try:report_audit.assert_current(self.db,report_id,json.loads(audit['fact_sheet']))
+        except ValueError:return None
+        self.db.execute("UPDATE weekly_reports SET status='draft' WHERE report_id=? AND status='confirmed'",(report_id,))
+        return report['article']
 
     def _generate(self, report_id):
         # One transaction prevents classification changes racing draft creation.

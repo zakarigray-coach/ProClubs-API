@@ -23,20 +23,20 @@ def report_payload(db, report_id):
         photo=conn.execute('SELECT photo_extension FROM weekly_report_content WHERE report_id=? AND photo IS NOT NULL',(report_id,)).fetchone()
         from .competitions import snapshot
         context=snapshot(db,report_id)
-        from .cup_cover import report_covers
-        covers=report_covers(db,report_id) if context and context['event']['report_type']=='Cup' else []
+        from .article_layout import media_pages
+        checked=conn.execute("SELECT 1 FROM sqlite_master WHERE name='report_generation_audit'").fetchone()
+        passed=conn.execute("SELECT 1 FROM report_generation_audit WHERE report_id=? AND state='passed'",(report_id,)).fetchone() if checked else None
+        covers=media_pages(db,report_id) if passed and all(m['match_type'] in ('Official','Cup') for m in matches) else []
         return {'competition_context':context,'cover_count':len(covers),'photo_extension':photo['photo_extension'] if photo else None,'version':1,'report_id':report_id,'title':report['title'],'article':report['article'],
                 'status':report['status'],'week_start':report['week_start'],'week_end':report['week_end'],
                 'matches':facts,'published':False}
 
 
-def create_app(db, secret, bot=None):
+def create_app(db, secret):
     if len(secret)<32:
         raise ValueError('Reporter connection needs a strong configured secret.')
     @web.middleware
     async def authenticate(request, handler):
-        if bot is not None and request.path.startswith('/planner/'):
-            return await handler(request)
         supplied=request.headers.get('Authorization','')
         if not hmac.compare_digest(supplied.encode(),('Bearer '+secret).encode()):
             return web.json_response({'error':'Unauthorized'},status=401)
@@ -63,10 +63,10 @@ def create_app(db, secret, bot=None):
             return web.json_response({'error':'Photo unavailable'},status=404)
     async def cover(request):
         try:
-            from .cup_cover import report_covers
+            from .article_layout import media_pages
             rid=int(request.match_info['report_id']);index=int(request.match_info['index'])
             report_payload(db,rid)
-            pages=report_covers(db,rid)
+            pages=media_pages(db,rid)
             if index<0 or index>=len(pages):raise ValueError('Unknown card')
             return web.Response(body=pages[index],content_type='image/png',headers={'Cache-Control':'no-store'})
         except (ValueError,TypeError):
@@ -75,14 +75,11 @@ def create_app(db, secret, bot=None):
     app.router.add_get('/reports/{report_id}/photo',photo)
     app.router.add_get('/health',health)
     app.router.add_get('/reports/{report_id}',report)
-    if bot is not None:
-        from .session_dashboard import install_dashboard
-        install_dashboard(app,bot)
     return app
 
 
-async def start_api(db, secret, port, bot=None):
-    runner=web.AppRunner(create_app(db,secret,bot),access_log=None)
+async def start_api(db, secret, port):
+    runner=web.AppRunner(create_app(db,secret),access_log=None)
     await runner.setup()
     try:
         await web.TCPSite(runner,None,port).start()

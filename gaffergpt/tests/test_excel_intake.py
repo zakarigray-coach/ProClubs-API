@@ -67,6 +67,11 @@ class ExcelDMTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(msg)
             self.assertIn('All these matches were practices',bot.recap_reader.extract.call_args.args[0])
             self.assertIn('Zak',bot.recap_reader.extract.call_args.args[0])
+            self.assertIn('No eligible MPL matches',msg.reply.call_args.args[0])
+            self.assertNotIn('view',msg.reply.call_args.kwargs)
+            msg.id=22;msg.content='New league fixture: Chelsea, 2-2, at home.'
+            bot.recap_reader.extract.return_value={'lines':['2026-10-06 | Official Home | Chelsea | 2-2'],'questions':[]}
+            await bot.on_message(msg)
             self.assertTrue(msg.reply.call_args.kwargs['view'].is_persistent())
             self.assertFalse(bot.db.rows('SELECT * FROM matches'))
             await bot.close()

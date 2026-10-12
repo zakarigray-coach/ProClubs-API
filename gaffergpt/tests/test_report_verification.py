@@ -219,7 +219,7 @@ class RecoveryTests(unittest.TestCase):
         writer=Writer(True)
         self.assertEqual(writer.write(packet),(article['title'],article['body']))
         self.assertEqual(sum('reference_feedback' in c for c in writer.calls),1)
-        self.assertEqual(len(writer.calls),5)
+        self.assertEqual(len(writer.calls),4)
         writer=Writer(False)
         with self.assertRaises(RuntimeError):writer.write(packet)
         self.assertEqual(sum('reference_feedback' in c for c in writer.calls),1)
@@ -240,7 +240,7 @@ class RecoveryTests(unittest.TestCase):
         for matching in (True,False):
             source=build_fact_sheet(packet)['source_hash'] if matching else 'obsolete-source'
             writer=Writer();writer.write(dict(packet,recovery={'source_hash':source,'article':article,'error':'Correct the headline.'}))
-            self.assertEqual(len(writer.calls),3 if matching else 4)
+            self.assertEqual(len(writer.calls),3)
             self.assertTrue(writer.last_verification)
             self.assertEqual(sum(a.get('state')=='recovered' for a in writer.last_attempts),int(matching))
             self.assertTrue(any(c.get('desk_task')=='audit_finished_article' for c in writer.calls))

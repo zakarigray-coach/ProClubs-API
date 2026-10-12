@@ -10,6 +10,8 @@ from .coaching_ai import OpenAICoach
 from .article_facts import fact_registry
 from .report_verification import build_fact_sheet, validate_final, digest, source_identity
 
+WRITING_VERSION="recap-mvp-20261012"
+
 INSTRUCTIONS = """You are RT Football Media's senior football correspondent, writing a polished
 sports feature for MPL Birmingham City supporters. Use British English throughout. Work like a demanding newspaper sports desk:
 find the strongest evidenced story, write it clearly, then silently edit every sentence.
@@ -227,7 +229,8 @@ class SportsWriter(OpenAICoach):
                     'Never invent a new fact while editing. Keep the strongest supported story in the opening. '
                     'Combine related facts into connected paragraphs; never output a sequence of isolated score and metric sentences. '
                     'Read the final sentences aloud internally. Return finished title/body JSON.')
-                edited=json.loads(await self.advise(json.dumps(editing,ensure_ascii=False)))
+                # Primary drafting already includes copy editing; revise only recovered or rejected prose.
+                edited=json.loads(await self.advise(json.dumps(editing,ensure_ascii=False))) if feedback or attempt else draft
                 edited={'title':edited['title'].strip(),'body':edited['body'].strip()}
                 record={'attempt':attempt+1,'draft_hash':digest(edited),'article':edited,'checks':[]}
                 self._local.attempts.append(record)
@@ -260,6 +263,7 @@ class SportsWriter(OpenAICoach):
                     check_feature_quality(edited,clean)
                     proof['checks']+=['deterministic_style','editorial_review','final_recheck']
                     proof['evidence']=evidence
+                    proof.update(writing_version=WRITING_VERSION,model=self.model,management_hash=digest(clean.get('management')))
                     record['checks'].append('final_source_validation');record['state']='passed'
                     self._local.verification=proof
                     return edited['title'].strip(),edited['body'].strip()

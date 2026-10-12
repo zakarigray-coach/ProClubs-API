@@ -1,3 +1,7 @@
+## Current MVP: MPL and cup recaps
+
+Pep’s active reporting workflows are `/weeklyreport` and `/cupreport`, plus the Friday 8 AM Eastern DM. Practice recap controls and the Session Planner are retired. The existing central database, historical records, RT Media masthead/fonts/photo layout, player links and notebook remain intact. Older sections below describe preserved implementation history; the Final recap MVP section describes current operation.
+
 # Current Pep workflow — tactical coaching
 
 Pep now coaches from PCT+ findings supplied by management. Automatic recap imports and
@@ -362,20 +366,13 @@ Migration 3 backs up a legacy SQLite file to `.pre-cup.bak`, then replaces const
 
 Cup regression tests run with the existing command: `python -m unittest discover -s gaffergpt/tests -q`. Pillow is the single added dependency for deterministic covers; it is not an AI service. Sample data must use a temporary database, never the production store.
 
-### Session Planner
 
-Use `/session create` in the club server. Dates use `YYYY-MM-DD`; start/end times use `HH:MM` in Eastern time. Select a template, posting channel and optional voice channel. Overnight sessions accept an end date. The response deadline uses `YYYY-MM-DD HH:MM` and cannot be later than the start.
+### Final recap MVP
 
-Players use **Available / Maybe / Unavailable**. Their latest choice replaces their previous choice. The original post updates with counts and names; long attendance lists remain available in the planner. Responses close at the deadline (or start if no deadline). Management can correct a response with `/session attendance`.
+Pep focuses on Friday MPL league recaps and manually triggered cup/tournament recaps. Use `/weeklyreport` for MPL selection or `/cupreport` for the relevant tournament. There is no recap-type menu, practice reporting control or `/session` planner. Historical practice data, older drafts, player records and statistics remain stored; existing tactical advice and notebook integrations are preserved.
 
-`/session edit` updates the original post and linked Discord Scheduled Event. `/session cancel` marks it cancelled and preserves its history. `/session events` shows upcoming and past sessions. Existing recap-session commands keep their original meaning.
+Friday reminders still run at 8 AM America/New_York with persisted delivery markers, leases and restart catch-up. Articles require explicit match confirmation and remain private drafts until Coach approves. Cup reports are keyed by competition and date range; repeated triggers reopen the same report. Stage, aggregate and shootout evidence remain separate from league/player totals.
 
-`/session dashboard` supplies a private, one-use sign-in link, valid for ten minutes. The authenticated dashboard includes Events, full session pages, session editing, manual attendance corrections and **Layouts & templates**. Managers can change header, blue/gold colours, images, footer, date display, button labels/emojis, custom fields and section order/visibility. Saving a template updates upcoming sessions using it. Players can view sessions and change only their own attendance. Permissions are checked against current Discord membership and configured management roles, on every request.
+Verified articles now feed the approved RT brushstroke masthead, fixed fonts, blue/navy weekly presentation and optional right-hand player-photo panel. Cup editions retain their existing gold cover. Measured continuation cards keep the complete article readable without clipping, alongside an optional text download. RT's existing `/pepreport` bridge retrieves the same media and central data; there is no second database or paid image generation.
 
-Configuration: `PEP_DASHBOARD_URL` is the HTTPS address of the existing Pep service. The dashboard shares `PEP_REPORTER_PORT` (8080) and the existing central SQLite database. Reporter API routes remain protected by `PEP_REPORTER_TOKEN`. Dashboard links and cookies are secrets: do not forward them. Cookies expire after twelve hours; sign out to revoke one immediately. No additional provider, subscription or package is required.
-
-For native Discord Events, Pep needs **Create Events**, **Manage Events** and access to the chosen voice channel. Without these permissions, the Pep session and RSVP post still work and show a management warning. Sync retries run in the existing background worker. Restart-safe IDs, delivery reconciliation and revision checks preserve one post/event and prevent stale saves overwriting newer edits.
-
-Session regression tests exercise the Discord lifecycle with simulated Discord responses, authenticated HTTP access, role restrictions, deadlines, DST, crash reconciliation, template updates and native-event permission failures. Public session creation is reserved for management; tests do not create fake club fixtures or publish articles.
-
-Four-fixture sports articles now use connected newspaper paragraphs and a story-led opening rather than a compressed results list. The factual recovery outline is only a scaffold; copy editing must develop the narrative and integrate recognition with its supporting figures. Deterministic review rejects mostly isolated statistical paragraphs. Existing source checks, bounded editorial revisions and publication approval remain in place.
+Changing an optional photo re-renders the media without calling the article writer again. Results, award selection or statistics changes still require a fresh fact check. Generation failures preserve selections. Production bot controls exclude practices/scrims/test classifications; manager-confirmed official MPL and cup records are the only new article sources. Source EA “league”/“friendly” labels never determine competition classification automatically.

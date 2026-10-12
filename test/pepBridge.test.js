@@ -28,10 +28,21 @@ test('cup cards accompany the same private report without public posting', async
   const interaction = {user:{id:'42'},editReply:async value => {delivered=value;}};
   const fetchImpl=async url => {
     const isCover=String(url).includes('/covers/');
-    return {ok:true,json:async()=>({version:1,report_id:7,status:'draft',article:'Cup sample',matches:[],cover_count:2}),arrayBuffer:async()=>Buffer.from(isCover?'PNG sample':'')};
+    return {ok:true,json:async()=>({version:1,report_id:7,status:'draft',article:'Cup sample',matches:[],competition_context:{event:{report_type:'Cup'}},cover_count:2}),arrayBuffer:async()=>Buffer.from(isCover?'PNG sample':'')};
   };
   await sendReview(interaction,7,'42',{url:'https://example.test',token:'test',fetchImpl});
   assert.equal(delivered.files.length,3);
   assert.equal(delivered.files[1].name,'RT_Cup_7_1.png');
   assert.equal(delivered.files[2].name,'RT_Cup_7_2.png');
+});
+
+
+test('weekly approved media cards use the same private bridge', async () => {
+  let delivered;
+  await sendReview({user:{id:'owner'},editReply:async r=>{delivered=r;}},7,'owner',{
+    ...options,fetchImpl:async url=>({ok:true,json:async()=>({...report,cover_count:2}),arrayBuffer:async()=>Buffer.from('approved template')})
+  });
+  assert.equal(delivered.files.length,3);
+  assert.equal(delivered.files[1].name,'RT_Media_7_1.png');
+  assert.deepEqual(delivered.allowedMentions,{parse:[]});
 });

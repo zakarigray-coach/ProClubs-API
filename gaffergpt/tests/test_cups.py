@@ -151,6 +151,6 @@ class CupViewTests(unittest.IsolatedAsyncioTestCase):
                 report=bot.db.open_report('2026-10-12','2026-10-19',42,KEY)
                 configure_report(bot.db,report['report_id'],KEY)
                 view=ReportView(bot,report['report_id'])
-                self.assertTrue(any(getattr(c,'placeholder',None)=='Competition / Report Type' for c in view.children))
+                self.assertFalse(any(getattr(c,'placeholder',None)=='Competition / Report Type' for c in view.children))
                 self.assertTrue(any(getattr(c,'label',None)=='Cup Competition Details' for c in view.children))
             finally:await bot.close()

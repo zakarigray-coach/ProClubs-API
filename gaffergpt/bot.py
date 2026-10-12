@@ -28,7 +28,6 @@ from .article_writer import SportsWriter, check_finished_prose, check_feature_qu
 from .weekly_intake import save_submission, save_photo, content as report_content
 from .scheduler import WeeklyScheduler, week_window
 from .session_reviews import SessionReviews
-from .session_planner import SessionService, RSVPView, register_sessions
 from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
@@ -163,6 +162,14 @@ class MatchSelect(discord.ui.Select):
         await interaction.response.edit_message(content=view.bot.report_summary(view.report_id),view=ReportView(view.bot,view.report_id,view.page))
 
 
+async def report_attachments(db,report_id,article):
+    from .article_layout import media_pages
+    pages=await asyncio.to_thread(media_pages,db,report_id)
+    files=[discord.File(io.BytesIO(data),filename=f'RT_Media_{report_id}_{i+1}.png') for i,data in enumerate(pages)]
+    files.append(discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt'))
+    return files
+
+
 def player_photo_button(bot,report_id,context):
     async def request_photo(interaction):
         if interaction.user.id!=bot.config.owner_id:
@@ -184,6 +191,7 @@ class RecapConfirmView(ManagedView):
                     await interaction.response.send_message('This preview has already been used. Send your recap again to change it.',ephemeral=True); return
                 try:
                     existing=report_content(bot.db,report_id)
+                    assert_recap_lines(bot.db,report_id,saved['lines'])
                     save_submission(bot.db,report_id,interaction.user.id,bot.config.guild_id,'\n'.join(saved['lines']),existing.get('notes',''),saved.get('player_name') or existing.get('player_name',''),saved.get('player_evidence') or existing.get('player_evidence',''))
                     matches=bot.db.period_matches(bot.db.report(report_id)['week_start'],bot.db.report(report_id)['week_end'],True)
                     wanted=set(saved['lines'])
@@ -192,6 +200,7 @@ class RecapConfirmView(ManagedView):
                     if workbook:
                         save_excel_statistics(bot.db,workbook,[m for m in matches if m['match_id'] in ids])
                     bot.db.replace_page_selection(report_id,[m['match_id'] for m in matches],ids)
+                    assert_recap_scope(bot.db,report_id)
                     bot.db.confirm_report(report_id)
                 except ValueError as error:
                     await interaction.response.send_message(str(error),ephemeral=True); return
@@ -199,6 +208,7 @@ class RecapConfirmView(ManagedView):
                 await interaction.response.defer(ephemeral=True)
                 try:
                     article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                    files=await report_attachments(bot.db,report_id,article)
                 except ReportHold as error:
                     saved['used']=False;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
                     await interaction.followup.send(str(error),ephemeral=True)
@@ -209,9 +219,6 @@ class RecapConfirmView(ManagedView):
                     await interaction.followup.send('The sports writer could not finish. Your results are saved. Tap Confirm Results & Draft again to retry.',ephemeral=True)
                     return
                 owner=await bot.fetch_user(bot.config.owner_id)
-                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
-                from .cup_cover import report_covers
-                files.extend(discord.File(io.BytesIO(data),filename=f'RT_Cup_{report_id}_{i+1}.png') for i,data in enumerate(report_covers(bot.db,report_id)))
                 if existing.get('photo'):
                     files.append(discord.File(io.BytesIO(existing['photo']),filename=f'Featured_Player_{report_id}.{existing["photo_extension"]}'))
                 await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
@@ -228,7 +235,7 @@ class RecapConfirmView(ManagedView):
         async def setup(interaction):
             await interaction.response.send_message(bot.report_summary(report_id),view=ReportView(bot,report_id),ephemeral=True)
         self.add_item(player_photo_button(bot,report_id,f'preview:{request_id}'))
-        self.add_item(Action('Competition / Report Setup',f'pep:recapsetup:{request_id}',setup))
+        self.add_item(Action('Choose Matches / Report Details',f'pep:recapsetup:{request_id}',setup))
 
 
 class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes'):
@@ -251,33 +258,11 @@ class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes
 
     async def on_submit(self, interaction):
         try:
+            assert_recap_lines(self.bot.db,self.report_id,[line for line in str(self.results).splitlines() if line.strip()])
             count=save_submission(self.bot.db,self.report_id,interaction.user.id,self.bot.config.guild_id,str(self.results),str(self.notes),str(self.player),str(self.evidence))
         except ValueError as error:
             await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.send_message(f'Saved {count} new results. Choose the matches below, then Generate Report.\n'+self.bot.report_summary(self.report_id),view=ReportView(self.bot,self.report_id),ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
-
-
-class CompetitionSelect(discord.ui.Select):
-    def __init__(self, view):
-        self.parent_view=view
-        super().__init__(placeholder='Competition / Report Type',custom_id=f'pep:competition:{view.report_id}',row=0,
-            options=[discord.SelectOption(label=label,value=value) for label,value in [('MPL League','mpl-league'),('Cup / Tournament','mpl-pre-season-cup-2026'),('Practice / Friendly','practice')]])
-
-    async def callback(self,interaction):
-        view=self.parent_view;bot=view.bot
-        if interaction.user.id!=bot.config.owner_id:
-            await interaction.response.send_message('Coach chooses the report competition.',ephemeral=True);return
-        old=bot.db.report(view.report_id);key=self.values[0]
-        start,end=old['week_start'],old['week_end']
-        selected_event=bot.db.one('SELECT * FROM competitions WHERE competition_key=?',(key,))
-        if selected_event['report_type']=='Cup' and selected_event['event_start']:
-            from .scheduler import ET
-            start=datetime.fromisoformat(selected_event['event_start']).replace(tzinfo=ET).astimezone(timezone.utc).isoformat()
-            end=(datetime.fromisoformat(selected_event['event_end'] or selected_event['event_start']).replace(tzinfo=ET)+timedelta(days=1)).astimezone(timezone.utc).isoformat()
-        report=bot.db.open_report(start,end,old['owner_id'],key)
-        if not report_event(bot.db,report['report_id']):configure_report(bot.db,report['report_id'],key)
-        bot.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
-        await interaction.response.edit_message(content=bot.report_summary(report['report_id']),view=ReportView(bot,report['report_id']))
 
 
 class CupEventModal(discord.ui.Modal,title='Cup competition setup'):
@@ -354,7 +339,7 @@ class CupMatchModal(discord.ui.Modal,title='Cup fixture details — unknown is f
         try:
             import re
             event=report_event(self.bot.db,self.report_id)
-            if not event or event['report_type']!='Cup':raise ValueError('Choose Cup / Tournament first.')
+            if not event or event['report_type']!='Cup':raise ValueError('Start this cup with /cupreport first.')
             mid=int(str(self.match_id));match=self.bot.db.match(mid);report=self.bot.db.report(self.report_id)
             if not match or not report['week_start']<=match['played_at']<report['week_end']:raise ValueError('Choose a match in this reporting period.')
             stage=(str(self.stage).split('|')+[''])[:2];tie=(str(self.tie).split('|')+[''])[:2]
@@ -370,6 +355,29 @@ class CupMatchModal(discord.ui.Modal,title='Cup fixture details — unknown is f
         await interaction.response.send_message('Cup details saved. This fixture stays out of MPL league totals.\n'+self.bot.report_summary(self.report_id),view=ReportView(self.bot,self.report_id),ephemeral=True)
 
 
+def eligible_recap_matches(db,report_id):
+    report=db.report(report_id);event=report_event(db,report_id)
+    cup=event and event['report_type']=='Cup'
+    rows=db.period_matches(report['week_start'],report['week_end'],True)
+    if cup:return [m for m in rows if m['match_type']=='Cup' and m['competition']==event['name']]
+    return [m for m in rows if m['match_type']=='Official' and (not m['competition'] or 'MPL' in m['competition'].upper())]
+
+
+def assert_recap_scope(db,report_id):
+    allowed={m['match_id'] for m in eligible_recap_matches(db,report_id)}
+    selected=db.selected(report_id)
+    if not selected or any(m['match_id'] not in allowed for m in selected):
+        raise ValueError('Choose eligible MPL or selected-cup matches. Practice, scrim and test records stay saved but are excluded from new articles.')
+
+
+def assert_recap_lines(db,report_id,lines):
+    event=report_event(db,report_id);cup=event and event['report_type']=='Cup'
+    for line in lines:
+        parts=line.split('|');kind=parts[1].strip() if len(parts)==4 else ''
+        if (cup and kind not in ('Cup','Cup Home','Cup Away')) or (not cup and kind not in ('Official Home','Official Away')):
+            raise ValueError('This report accepts only '+('cup matches' if cup else 'official MPL matches')+'. Practices, scrims and tests will not be included.')
+
+
 class ReportView(ManagedView):
     def __init__(self, bot, report_id, page=0):
         super().__init__(bot)
@@ -377,46 +385,44 @@ class ReportView(ManagedView):
         report=bot.db.report(report_id)
         if not report or report['status'] in ('skipped','approved'):
             return
-        self.add_item(CompetitionSelect(self))
         event=report_event(bot.db,report_id)
         eligible=bot.db.period_matches(report['week_start'],report['week_end'],True)
         if event:
-            kind={'League':'Official','Cup':'Cup','Practice':'Practice'}[event['report_type']]
+            kind='Cup' if event['report_type']=='Cup' else 'Official'
             eligible=[m for m in eligible if m['match_type']==kind and (kind!='Cup' or m['competition']==event['name'])]
         else:
-            eligible=[m for m in eligible if m['match_type']!='Cup']
+            eligible=[m for m in eligible if m['match_type']=='Official' and (not m['competition'] or 'MPL' in m['competition'].upper())]
         # 20 per page keeps both menus under Discord's 25-option limit.
         total=max(1,(len(eligible)+19)//20)
         self.page=min(max(page,0),total-1)
         page_matches=eligible[self.page*20:(self.page+1)*20]
         self.has_official=any(m['match_type']=='Official' for m in page_matches)
         selected={m['match_id'] for m in bot.db.selected(report_id)}
-        for kind in ('Official','Cup','Practice'):
+        for kind in ('Official','Cup'):
             rows=[m for m in page_matches if m['match_type']==kind]
             if rows:
                 self.add_item(MatchSelect(self,rows,kind,selected))
-        action_row=4 if not event and any(m['match_type']=='Official' for m in page_matches) and any(m['match_type']=='Practice' for m in page_matches) else 2
+        action_row=2
         async def generate(interaction):
             if interaction.user.id!=bot.config.owner_id:
                 await interaction.response.send_message('Coach must confirm the article selections.',ephemeral=True); return
             try:
+                assert_recap_scope(bot.db,report_id)
                 bot.db.confirm_report(report_id)
             except ValueError as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
             await interaction.response.defer(ephemeral=True)
             try:
                 article=await asyncio.to_thread(bot.reporter.generate,report_id)
+                files=await report_attachments(bot.db,report_id,article)
             except ReportHold as error:
                 await interaction.followup.send(str(error),ephemeral=True)
                 return
             except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
                 log.warning('Weekly sports writer unavailable; confirmed selections retained.')
-                await interaction.followup.send('The sports writer could not finish. Your selections are saved. Try Generate Report again.',ephemeral=True)
+                await interaction.followup.send('The draft could not be completed. Your selections are saved. Try Generate Report again.',ephemeral=True)
                 return
             owner=await bot.fetch_user(bot.config.owner_id)
-            files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt')]
-            from .cup_cover import report_covers
-            files.extend(discord.File(io.BytesIO(data),filename=f'RT_Cup_{report_id}_{i+1}.png') for i,data in enumerate(report_covers(bot.db,report_id)))
             supplied=report_content(bot.db,report_id)
             if supplied.get('photo'):
                 files.append(discord.File(io.BytesIO(supplied['photo']),filename=f'Featured_Player_{report_id}.{supplied["photo_extension"]}'))
@@ -424,9 +430,6 @@ class ReportView(ManagedView):
                 files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
             bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
             await interaction.followup.send('Draft sent to Coach for review.',ephemeral=True)
-        async def development(interaction):
-            bot.db.execute("UPDATE weekly_reports SET include_development=1-include_development,status='selecting',article=NULL,observations=NULL WHERE report_id=?",(report_id,))
-            await interaction.response.edit_message(content=bot.report_summary(report_id),view=ReportView(bot,report_id,self.page))
         async def remind(interaction):
             if interaction.user.id!=bot.config.owner_id:
                 await interaction.response.send_message('Only Coach can schedule his reminder.',ephemeral=True); return
@@ -460,7 +463,6 @@ class ReportView(ManagedView):
             self.add_item(Action('Classify / Edit Cup Match',f'pep:cupmatch:{report_id}',cup_match,row=4))
         self.add_item(Action('Add Results / Notes',f'pep:facts:{report_id}',add_facts,row=4))
         self.add_item(Action('Generate Report',f'gaffer:generate:{report_id}',generate,discord.ButtonStyle.primary,row=action_row))
-        self.add_item(Action('Training Ground: '+('ON' if report['include_development'] else 'OFF'),f'gaffer:development:{report_id}',development,row=action_row))
         self.add_item(Action('Review Unknown Matches',f'gaffer:unknown:{report_id}',review,row=action_row))
         self.add_item(Action('Remind Me Later',f'gaffer:remind:{report_id}',remind,row=3))
         self.add_item(Action('Skip This Week',f'gaffer:skip:{report_id}',skip,row=3))
@@ -564,9 +566,7 @@ class GafferBot(discord.Client):
         self.worker=None
         self.notebook_worker=None
         self.media_runner=None
-        self.sessions=SessionService(self)
         self.register_commands()
-        register_sessions(self)
 
     def manager(self, interaction):
         if interaction.user.id==self.config.owner_id:
@@ -575,10 +575,7 @@ class GafferBot(discord.Client):
 
     async def setup_hook(self):
         if self.config.reporter_secret:
-            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port,self)
-        for planned in self.sessions.store.list():
-            if planned['message_id']:
-                self.add_view(RSVPView(self.sessions,planned['session_id']),message_id=int(planned['message_id']))
+            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
         for batch in self.db.rows('SELECT batch_id FROM session_reviews WHERE message_id IS NOT NULL'):
             self.add_view(SessionReviewView(self,batch['batch_id']))
         for m in self.db.rows('SELECT match_id FROM matches'):
@@ -655,7 +652,6 @@ class GafferBot(discord.Client):
                 await self.scheduler.tick_tests(now)
                 await self.recover_recaps()
                 await self.pending_reviews()
-                await self.sessions.tick()
             except Exception as error:
                 log.error('Background check failed: %s',type(error).__name__)
             await asyncio.sleep(30)
@@ -666,10 +662,6 @@ class GafferBot(discord.Client):
 
     async def on_ready(self):
         log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
-        guild=self.get_guild(self.config.guild_id)
-        permissions=guild.me.guild_permissions if guild and guild.me else None
-        if permissions:
-            log.info('Session Planner ready; native_create_events=%s native_manage_events=%s',permissions.create_events,permissions.manage_events)
         request=os.getenv('PEP_REPORT_REWRITE_REQUEST','')
         if request and not getattr(self,'rewrite_running',False) and not self.db.setting('report_rewrite:'+request):
             self.rewrite_running=True
@@ -694,7 +686,7 @@ class GafferBot(discord.Client):
                 from .recheck_article import ReviewedDraftRecheck
                 self.db.confirm_report(report_id)
                 article=await asyncio.to_thread(Reporter(self.db,writer=ReviewedDraftRecheck(self.db,report_id)).generate,report_id)
-            elif request.endswith((':deliver',':savedpreview')):
+            elif request.endswith((':deliver',':savedpreview',':sampledeliver')):
                 saved=self.db.report(report_id)
                 if saved['status'] not in ('draft','confirmed') or not saved['article']:raise ValueError('No reviewed draft available.')
                 article=saved['article']
@@ -722,9 +714,16 @@ class GafferBot(discord.Client):
                 self.db.set_setting('report_rewrite:'+request,'complete')
                 return
             owner=await self.fetch_user(self.config.owner_id)
-            await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
-                files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Draft.txt')],
-                view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
+            if request.endswith(':sampledeliver'):
+                from .article_layout import media_pages
+                pages=await asyncio.to_thread(media_pages,self.db,report_id,sample=True)
+                files=[discord.File(io.BytesIO(data),filename=f'RT_Media_Sample_{index+1}.png') for index,data in enumerate(pages)]
+                files.append(discord.File(io.BytesIO(article.encode()),filename='RT_Media_Sample_Article.txt'))
+                await owner.send('RT MEDIA — PRIVATE EXAMPLE. Final deployment checks passed. This uses the saved four-match practice test, not MPL league results. The approved layout and full article are attached. Nothing has been published.',files=files,allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
+                    files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Draft.txt')],
+                    view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
             self.db.set_setting('report_rewrite:'+request,'complete')
             log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))
         except Exception as error:
@@ -887,10 +886,10 @@ class GafferBot(discord.Client):
             save_photo(self.db,report_id,message.author.id,await attachment.read())
             self.db.set_setting('weekly_photo_awaiting','')
             if was_draft:
-                self.db.confirm_report(report_id)
-                article=await asyncio.to_thread(self.reporter.generate,report_id)
+                article=self.db.report(report_id)['article']
+                files=await report_attachments(self.db,report_id,article)
                 saved=report_content(self.db,report_id)
-                await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}.txt'),discord.File(io.BytesIO(saved['photo']),filename=f'Player_of_the_Week_{report_id}.{saved["photo_extension"]}')],view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+                await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=files,view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
             else:
                 await message.reply('Player photo saved. Tap Confirm Results & Draft on the recap preview to include it with your article.',mention_author=False)
         except (ValueError,RuntimeError,aiohttp.ClientError) as error:
@@ -934,12 +933,22 @@ class GafferBot(discord.Client):
                 if event:
                     parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']],competition=event)
                 else:
-                    parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']])
+                    parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']],competition={'name':'MPL League','report_type':'League'})
             if parsed['questions']:
                 await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+('\nReply with those details; I have kept your Excel data, so no need to upload it again.' if cached else '\nPlease resend the complete recap with those details. Nothing imported yet.'),mention_author=False); return
+            # Only include this workflow's confirmed class; never convert EA friendlies into league games.
+            cup=event and event['report_type']=='Cup'
+            wanted_types=('Cup','Cup Home','Cup Away') if cup else ('Official Home','Official Away')
+            original_lines=parsed['lines']
+            parsed['lines']=[line for line in original_lines if len(line.split('|'))==4 and line.split('|')[1].strip() in wanted_types]
+            excluded=len(original_lines)-len(parsed['lines'])
+            if not parsed['lines']:
+                await message.reply('No eligible '+('cup' if cup else 'MPL')+' matches were found. Practice, scrim and test results are excluded. Nothing imported.',mention_author=False)
+                return
             self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'excel_source':cached,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
             recommendation=(f'\n\nSuggested Player of the Week: {parsed["player_name"]} — {parsed["player_evidence"]}\nConfirming approves this suggestion. Send corrections to choose someone else.' if parsed.get('player_name') else '\n\nNo Player of the Week suggestion: the submitted stats do not support a comparison.')
             preview='\n'.join(parsed['lines'])
+            if excluded:preview+=f'\n{excluded} practice/scrim or other-competition results excluded.'
             if cached:
                 players=records(cached,'Players')
                 preview+='\n\nEXCEL PLAYER STATS READ\n'+'\n'.join(f"{p.get('Player','Unknown')}: {p.get('Appearances','?')} appearances, {p.get('Goals','?')} goals, {p.get('Assists','?')} assists, {p.get('Average rating','?')} average rating" for p in players)
@@ -955,24 +964,18 @@ class GafferBot(discord.Client):
 
     def report_summary(self, report_id):
         report=self.db.report(report_id)
-        rows=self.db.period_matches(report['week_start'],report['week_end'],True)
-        selected={m['match_id'] for m in self.db.selected(report_id)}
-        unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
-        lines=['Morning Coach. It’s time for your Birmingham City weekly recap. Reply to this DM with your weekly league recap as an Excel (.xlsx) file, text or a photo. Include dates and home/away. I’ll show the results for you to confirm, then send your article draft. For tactical advice while waiting, start your message with Tactics:.','Week: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).']
         event=report_event(self.db,report_id)
-        if event:lines[0]='Choose the selected fixtures for '+event['name']+'. Unknown cup stages and venue are fine. Add Results / Notes accepts date | Cup | opponent | score for cups.'
-        for kind,title in [('Official','MPL LEAGUE MATCHES'),('Cup','CUP / TOURNAMENT MATCHES'),('Practice','PRACTICE / DEVELOPMENT (OPTIONAL)')]:
-            if event and kind!={'League':'Official','Cup':'Cup','Practice':'Practice'}[event['report_type']]:continue
-            lines+=['',title]
-            group=[m for m in rows if m['match_type']==kind]
-            lines.extend(('☑' if m['match_id'] in selected else '☐')+f" #{m['match_id']} {match_label(m)}" for m in group[:4])
-            if len(group)>4:
-                lines.append(f'{len(group)-4} more available in the paged selection menus.')
-            if not group:
-                lines.append('No classified matches available.')
-        lines+=['',f'Training Ground section: {"ON" if report["include_development"] else "OFF"}.']
-        if unknown:
-            lines.append(f'⚠ {unknown} matches still need classification. Use Review Unknown Matches.')
+        cup=event and event['report_type']=='Cup'
+        rows=eligible_recap_matches(self.db,report_id)
+        selected={m['match_id'] for m in self.db.selected(report_id)}
+        title=event['name'] if cup else 'MPL Birmingham City weekly recap'
+        lines=['Morning Coach. '+title+'.', 'Send the match recap as Excel (.xlsx), text or a photo, or choose saved matches below. I will prepare a private draft after you confirm your selection.',
+               'Period: '+report['week_start'][:10]+' to '+report['week_end'][:10]+' (end exclusive).', '', 'CUP / TOURNAMENT MATCHES' if cup else 'MPL LEAGUE MATCHES']
+        lines.extend(('☑' if m['match_id'] in selected else '☐')+f" #{m['match_id']} {match_label(m)}" for m in rows[:4])
+        if len(rows)>4:lines.append(f'{len(rows)-4} more available in the selection menus.')
+        if not rows:lines.append('No classified matches available.')
+        unknown=sum(m['match_type']=='Unknown' for m in self.db.period_matches(report['week_start'],report['week_end']))
+        if unknown:lines.append(f'⚠ {unknown} matches still need classification. Use Review Unknown Matches.')
         lines.append('Selections are saved as you choose. Generate Report confirms them and sends a private draft.')
         return '\n'.join(lines)[:1900]
 
@@ -1173,6 +1176,36 @@ class GafferBot(discord.Client):
             except ValueError as error:
                 await interaction.followup.send(str(error),ephemeral=True); return
             await interaction.followup.send('Photo saved. Generate the report again to receive it with the private draft.',ephemeral=True)
+
+        @self.tree.command(name='cupreport',description='Select a cup or tournament run for an RT Media article')
+        @app_commands.check(authorized)
+        async def cupreport(interaction,competition:str='The Minglewood Cup',start_date:str='',end_date:str=''):
+            await interaction.response.defer(ephemeral=True)
+            try:
+                from .scheduler import ET
+                from datetime import date
+                event=self.db.one("SELECT * FROM competitions WHERE report_type='Cup' AND name=?",(competition,))
+                if not event:
+                    if not start_date or not end_date:raise ValueError('For a new cup, enter its name, start date and end date (YYYY-MM-DD).')
+                    first=date.fromisoformat(start_date);last=date.fromisoformat(end_date)
+                    if last<first or not competition.strip() or len(competition)>160:raise ValueError('Use a competition name of 1–160 characters and an ordered date range.')
+                    key='cup:'+digest({'name':competition,'start':start_date})[:20]
+                    self.db.execute("INSERT OR IGNORE INTO competitions(competition_key,name,report_type,event_start,event_end) VALUES (?,?,'Cup',?,?)",(key,competition,first.isoformat(),last.isoformat()))
+                    event=self.db.one('SELECT * FROM competitions WHERE competition_key=?',(key,))
+                a=date.fromisoformat(start_date or event['event_start'])
+                z=date.fromisoformat(end_date or event['event_end'] or a.isoformat())
+                if z<a:raise ValueError('End date must not precede the start.')
+                start=datetime.combine(a,datetime.min.time(),ET).astimezone(timezone.utc).isoformat()
+                end=datetime.combine(z+timedelta(days=1),datetime.min.time(),ET).astimezone(timezone.utc).isoformat()
+                report=self.db.open_report(start,end,self.config.owner_id,event['competition_key'])
+                if not report_event(self.db,report['report_id']):configure_report(self.db,report['report_id'],event['competition_key'])
+                self.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
+                await interaction.followup.send(self.report_summary(report['report_id']),view=ReportView(self,report['report_id']),ephemeral=True)
+            except (ValueError,TypeError) as error:await interaction.followup.send(str(error),ephemeral=True)
+
+        @cupreport.autocomplete('competition')
+        async def cup_names(interaction,current):
+            return [app_commands.Choice(name=e['name'][:100],value=e['name']) for e in self.db.rows("SELECT name FROM competitions WHERE report_type='Cup' ORDER BY event_start DESC") if current.casefold() in e['name'].casefold() and len(e['name'])<=100][:25]
 
         @self.tree.command(name='weeklyreport',description='Select exactly which matches belong in a weekly draft')
         @app_commands.check(authorized)

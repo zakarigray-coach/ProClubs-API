@@ -424,6 +424,9 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('has not been published',article)
 
     async def test_confirmed_article_sent_privately_for_review(self):
+        from unittest.mock import patch,AsyncMock
+        media_patch=patch('gaffergpt.bot.report_attachments',AsyncMock(return_value=[]))
+        media_patch.start();self.addCleanup(media_patch.stop)
         bot=GafferBot(Config('test',42,30,database_path=self.path))
         mid=self.add()[0]; self.db.classify(mid,'Official','Home',42);rid=self.report([mid])
         owner=SimpleNamespace(send=AsyncMock())
@@ -485,7 +488,7 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(view.is_persistent())
         self.assertTrue(ReviewView(bot,a).is_persistent());self.assertTrue(DraftView(bot,rid).is_persistent())
         summary=bot.report_summary(rid)
-        self.assertIn('MPL LEAGUE MATCHES',summary);self.assertIn('PRACTICE / DEVELOPMENT',summary)
+        self.assertIn('MPL LEAGUE MATCHES',summary);self.assertNotIn('PRACTICE / DEVELOPMENT',summary)
         self.assertIn('1 matches still need classification',summary)
         self.assertFalse(bot.manager(SimpleNamespace(user=SimpleNamespace(id=999,roles=[]),guild_id=30)))
         self.assertTrue(bot.manager(SimpleNamespace(user=SimpleNamespace(id=42),guild_id=None)))

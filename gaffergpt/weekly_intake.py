@@ -86,4 +86,4 @@ def save_photo(db, report_id, actor, data):
     with db.connect() as conn:
         conn.execute(CONTENT_SCHEMA)
         conn.execute('INSERT INTO weekly_report_content(report_id,photo,photo_extension) VALUES(?,?,?) ON CONFLICT(report_id) DO UPDATE SET photo=excluded.photo,photo_extension=excluded.photo_extension',(report_id,data,extension))
-        conn.execute("UPDATE weekly_reports SET status='selecting',article=NULL,observations=NULL WHERE report_id=?",(report_id,))
+        # A photo does not change the verified football facts or require another AI call.
