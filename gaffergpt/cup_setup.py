@@ -175,6 +175,7 @@ async def setup_cup(guild, db, *, now=None, poster_path=POSTER, lock=None):
     return record
 
 async def run_cup_setup(bot):
+    await run_cup_gameplan(bot)
     cleanup_request=os.getenv('PEP_CUP_CLEANUP_REQUEST')
     cleanup_key='cup_cleanup:'+CUP_ID+':remove-link-previews-v1'
     if cleanup_request==CUP_ID and not bot.db.setting(cleanup_key):
@@ -208,3 +209,50 @@ async def run_cup_setup(bot):
     except Exception as error:
         log.exception('PEP_CUP_SETUP_FAILED: %s', str(error))
     finally: bot.cup_setup_running = False
+
+async def run_cup_gameplan(bot):
+    """Coach-authorized one-time rundown and role ping in the existing cup thread."""
+    if os.getenv('PEP_CUP_GAMEPLAN_REQUEST') != CUP_ID:
+        return
+    action_key = 'cup_gameplan:' + CUP_ID + ':v1'
+    try:
+        async with bot.cup_availability_lock:
+            record = load(bot.db)
+            expected_guild = 1524828767426707587
+            expected_thread = 1559595763015876752
+            expected_role = 1549476136893812866
+            if (record.get('guild_id'), record.get('forum_post_id'), record.get('player_role_id')) != (expected_guild, expected_thread, expected_role):
+                raise ValueError('Cup destination does not match the approved Birmingham thread and role.')
+            thread = await bot.fetch_channel(expected_thread)
+            if thread.id != expected_thread or thread.guild.id != expected_guild or thread.name != TITLE:
+                raise ValueError('Fetched thread does not match the approved cup destination.')
+            if thread.archived:
+                await thread.edit(archived=False)
+            footer = '\n\nPep • Birmingham Tactical Coach 🔵 | Keep Right On'
+            messages = ['<@&1549476136893812866>\n**TONIGHT’S GAME PLAN — MIDDLESBROUGH**\n\nBoys, here’s the rundown for Middlesbrough tonight. They’re unbeaten in their last four, so don’t underestimate them. Their key guys from the recent stats:\n\n• **ThorfinnKenobi:** 4 assists in 7 games. Close his forward passing lanes and don’t give him time to pick a pass.\n• **JohnD151049:** leading scorer with 4 goals. Track his runs and the return ball. Don’t let him pull both CBs out.\n• **AGU1J7 and Idias4977:** both contributed in their recent wins. Watch their runs into the box while we’re focused on JohnD.\n• **eduardo1200rs:** plays GK or midfield, so confirm where he starts. If he’s in goal, he recorded 16 saves in their last four. Get wide and look for a teammate in the box. Make the keeper change position before we shoot.\n\n**OUR PLAN — 4-2-3-1**\n\nGive each other passing options, use quick give-and-go passes, and switch sides when it gets crowded. Their recent tackle success was low, so look to pass around defenders when they commit.\n\nBuild through the CBs and midfield. If the forward pass isn’t there, recycle it—don’t force it. Only one fullback pushes at a time, with midfield protecting the middle.\n\nPress together, stay on your feet, and track runners. Their stats came from partial squads, so we’ll adjust to the lineup they bring tonight.\n\nStay patient, communicate, and make our chances count. Keep Right On.\n\nPep • Birmingham Tactical Coach 🔵 | Keep Right On']
+            state = json.loads(bot.db.setting(action_key) or '{}')
+            ids = state.setdefault('message_ids', {})
+            # Recover a send accepted by Discord before the local receipt was saved.
+            history = [m async for m in thread.history(limit=200)]
+            for index, content in enumerate(messages):
+                key = str(index)
+                if key in ids:
+                    message = await thread.fetch_message(ids[key])
+                else:
+                    message = next((m for m in history if m.author.id == bot.user.id and m.content == content), None)
+                    if message is None:
+                        allowed = (discord.AllowedMentions(roles=[discord.Object(id=expected_role)], users=False, everyone=False, replied_user=False)
+                                   if index == 0 else discord.AllowedMentions.none())
+                        message = await thread.send(content=content, allowed_mentions=allowed)
+                    ids[key] = message.id
+                    bot.db.set_setting(action_key, json.dumps(state))
+                verified = await thread.fetch_message(message.id)
+                if verified.author.id != bot.user.id or verified.content != content:
+                    raise ValueError('Posted game plan verification failed; no further messages were sent.')
+            state['status'] = 'complete'
+            bot.db.set_setting(action_key, json.dumps(state))
+            log.info('PEP_CUP_GAMEPLAN_RESULT %s', json.dumps(dict(status='complete', thread_id=thread.id,
+                message_ids=[ids[str(i)] for i in range(len(messages))], player_role_id=expected_role,
+                forum_post_url=f'https://discord.com/channels/{expected_guild}/{thread.id}')))
+    except Exception as error:
+        log.exception('PEP_CUP_GAMEPLAN_FAILED: %s', str(error))
