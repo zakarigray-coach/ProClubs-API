@@ -89,7 +89,6 @@ const forwardingSigningPackages = new Set();
 const DATA_DIRECTORY = process.env.RT_DATA_DIR || (process.env.RAILWAY_ENVIRONMENT ? '/data' : path.join(__dirname, '.data'));
 const stateStore = new StateStore(path.join(DATA_DIRECTORY, 'rt-football-media-state.json'));
 const serverAuditor = createServerAuditor({ stateStore });
-const { runCupSetup, handleCupAvailability } = require('./cupSetup');
 const quoteMinutesOverride = Number(process.env.QUOTE_WAIT_MINUTES);
 const QUOTE_WAIT_MS = Number.isFinite(quoteMinutesOverride) && quoteMinutesOverride > 0
   ? Math.max(2, quoteMinutesOverride) * 60 * 1000
@@ -1461,7 +1460,6 @@ async function startBot() {
   }
   client.once('clientReady', async () => {
     console.log('RT Football Media logged in as ' + client.user.tag);
-    await runCupSetup(client, stateStore);
     try {
       await setupMplLeagueNewsFeed(client);
     } catch (error) {
@@ -2866,9 +2864,6 @@ async function startBot() {
       return interaction.reply({content:'This retired dual-club control is disabled. Use the current Birmingham workflow.',flags:MessageFlags.Ephemeral});
     }
     if (await serverAuditor.handleInteraction(interaction)) return;
-    if (interaction.isButton() && interaction.customId.startsWith('cup_availability:')) {
-      return handleCupAvailability(interaction, stateStore);
-    }
     if (interaction.isButton() && interaction.customId.startsWith('match_availability:')) {
       return handleAvailability(interaction, stateStore);
     }

@@ -33,6 +33,7 @@ from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
 from .excel_intake import read_excel
 from .excel_stats import player_totals, save_excel_statistics, imported_statistics, stats_text, records
+from .cup_setup import CupAvailabilityView, run_cup_setup, load as load_cup_setup
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -560,6 +561,7 @@ class GafferBot(discord.Client):
         intents=discord.Intents.default(); intents.message_content=True
         super().__init__(intents=intents,allowed_mentions=discord.AllowedMentions.none())
         self.config=config; self.db=Database(config.database_path)
+        self.cup_availability_lock=asyncio.Lock()
         reset_request=os.getenv('PEP_RECAP_RESET_REQUEST','')
         if reset_request:
             report_id,request=reset_request.split(':',1)
@@ -591,6 +593,9 @@ class GafferBot(discord.Client):
         return interaction.guild_id==self.config.guild_id and bool(set(self.config.management_role_ids)&{r.id for r in getattr(interaction.user,'roles',[])})
 
     async def setup_hook(self):
+        cup_setup=load_cup_setup(self.db)
+        if cup_setup.get('starter_message_id'):
+            self.add_view(CupAvailabilityView(self.db,self.cup_availability_lock),message_id=cup_setup['starter_message_id'])
         if self.config.reporter_secret:
             self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
         for batch in self.db.rows('SELECT batch_id FROM session_reviews WHERE message_id IS NOT NULL'):
@@ -679,6 +684,7 @@ class GafferBot(discord.Client):
 
     async def on_ready(self):
         log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
+        await run_cup_setup(self)
         request=os.getenv('PEP_REPORT_REWRITE_REQUEST','')
         if request and not getattr(self,'rewrite_running',False) and not self.db.setting('report_rewrite:'+request):
             self.rewrite_running=True
