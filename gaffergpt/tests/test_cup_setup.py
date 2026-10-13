@@ -45,7 +45,7 @@ class CupSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record['status'],'complete');self.assertEqual(len(self.posts),1)
         self.assertIn('8:00 PM ET',self.message.content);self.assertIn('8:30 PM ET',self.message.content)
         self.assertIn('10:00 PM ET',self.message.content);self.assertIn('Single elimination',self.message.content)
-        self.assertIn('<#20>',self.message.content);self.assertIn('/events/99/200',self.message.content)
+        self.assertIn('<#20>',self.message.content);self.assertNotIn('https://discord.com/',self.message.content)
         self.assertEqual([b.label for b in self.message.view.children],['YES — Available','NO — Unavailable'])
         self.assertEqual(self.event_data['start_time'].isoformat(),'2026-10-14T02:00:00+00:00')
         self.assertEqual([r.id for r in self.sent[0]['allowed_mentions'].roles],[30])

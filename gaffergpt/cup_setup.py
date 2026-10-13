@@ -35,7 +35,6 @@ def body(record):
     def group(status):
         names = [re.sub(r'[@*_`~<>\r\n]', '', v['name']) for v in votes if v['status'] == status]
         return f"{len(names)} — " + (', '.join(names) or 'None yet')
-    event = f"📅 **[Discord Event](https://discord.com/events/{record['guild_id']}/{record['event_id']})**\n" if record.get('event_id') else ''
     return ("🏆 **MINGLEWOOD CUP — ROUND 1**\n**Middlesbrough vs Birmingham City — Away**\n"
             "**Single elimination**\n\n📅 Tuesday, October 13, 2026\n⚽ **Kickoff: 10:00 PM ET**\n"
             "🎮 **Be online by 8:00 PM ET**\n🚨 **ABSOLUTELY NO LATER THAN 8:30 PM ET**\n\n"
@@ -43,7 +42,7 @@ def body(record):
             "Your latest selection replaces your previous response. Tell management here if you will be late or need to leave early.\n\n"
             f"✅ YES: {group('yes')}\n❌ NO: {group('no')}\n\n**LINEUP**\n"
             "Coach will post the confirmed lineup in this thread once availability is collected.\n\n"
-            f"📺 **Watch live:** <#{record['live_channel_id']}>\nLive stream and match updates will be in Live Games.\n{event}\n"
+            f"📺 **Watch live:** <#{record['live_channel_id']}>\nLive stream and match updates will be in Live Games.\n\n"
             "**Pep • Birmingham Tactical Coach 🔵 | Keep Right On**")
 
 def save_availability(db, user_id, name, role_ids, status, guild_id, channel_id, *, now=None):
@@ -176,6 +175,26 @@ async def setup_cup(guild, db, *, now=None, poster_path=POSTER, lock=None):
     return record
 
 async def run_cup_setup(bot):
+    cleanup_request=os.getenv('PEP_CUP_CLEANUP_REQUEST')
+    cleanup_key='cup_cleanup:'+CUP_ID+':remove-link-previews-v1'
+    if cleanup_request==CUP_ID and not bot.db.setting(cleanup_key):
+        try:
+            record=load(bot.db)
+            channel=await bot.fetch_channel(record['forum_post_id'])
+            async with bot.cup_availability_lock:
+                message=await channel.fetch_message(record['starter_message_id'])
+                await message.edit(content=body(load(bot.db)),view=CupAvailabilityView(bot.db,bot.cup_availability_lock),
+                    embeds=[],suppress=True,allowed_mentions=discord.AllowedMentions.none())
+                verified=await channel.fetch_message(record['starter_message_id'])
+                if verified.embeds or 'https://discord.com/' in verified.content:
+                    raise ValueError('Discord link previews are still present after the edit.')
+                if not verified.attachments or not verified.components:
+                    raise ValueError('Poster or availability buttons are missing after the edit.')
+                bot.db.set_setting(cleanup_key,'complete')
+                log.info('PEP_CUP_CLEANUP_RESULT %s',json.dumps(dict(status='complete',message_id=verified.id,
+                    embed_count=len(verified.embeds),poster_count=len(verified.attachments),button_rows=len(verified.components))))
+        except Exception as error:
+            log.exception('PEP_CUP_CLEANUP_FAILED: %s',str(error))
     if os.getenv('PEP_CUP_SETUP_REQUEST') != CUP_ID or getattr(bot, 'cup_setup_running', False): return
     bot.cup_setup_running = True
     try:
