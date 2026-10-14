@@ -497,15 +497,15 @@ class DraftView(ManagedView):
                 await interaction.response.send_message('Only Coach can publish.',ephemeral=True); return
             await interaction.response.defer(ephemeral=True)
             try:
-                ids,fresh=await publish_report(bot.db,report_id,bot.config.rt_media_token,bot.config.publish_channel_id)
+                _,fresh,where=await publish_report(bot.db,report_id,bot.config.rt_media_token,bot.config.publish_channel_id)
             except (PublishError,ReportHold,ValueError) as error:
                 await interaction.followup.send(str(error),ephemeral=True); return
             except (aiohttp.ClientError,asyncio.TimeoutError):
                 await interaction.followup.send('Discord could not be reached. Tap Publish again; anything already posted will not be repeated.',ephemeral=True); return
-            link=f'https://discord.com/channels/{bot.config.guild_id}/{bot.config.publish_channel_id}/{ids[0]}'
+            link=f'https://discord.com/channels/{bot.config.guild_id}/{where}'
             await interaction.followup.send(('Published by RT Football Media: ' if fresh else 'Already published, nothing was posted again: ')+link,ephemeral=True)
         self.add_item(Action('Approve Draft (save only)',f'gaffer:approve:{report_id}',approve,discord.ButtonStyle.success))
-        self.add_item(Action('Publish to MPL Announcements',f'rt:publish:{report_id}',publish,discord.ButtonStyle.danger))
+        self.add_item(Action('Publish to RT Football Media',f'rt:publish:{report_id}',publish,discord.ButtonStyle.danger))
         self.add_item(Action('Change Selection',f'gaffer:change:{report_id}',change))
 
 

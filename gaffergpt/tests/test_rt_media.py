@@ -27,7 +27,7 @@ class RTMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.rt.db,self.pep.db)
         self.assertFalse(self.rt.intents.message_content);self.assertFalse(self.rt.intents.members)
         view=DraftView(self.rt,self.report)
-        self.assertIn('Publish to MPL Announcements',[c.label for c in view.children])
+        self.assertIn('Publish to RT Football Media',[c.label for c in view.children])
         self.assertTrue(self.rt.manager(SimpleNamespace(user=SimpleNamespace(id=42),guild_id=None)))
         self.assertFalse(self.rt.manager(SimpleNamespace(user=SimpleNamespace(id=7,roles=[]),guild_id=30)))
 

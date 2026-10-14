@@ -13,7 +13,7 @@ Nothing is published without Coach's approval, and AI runs only when Coach asks 
 2. Pep shows the results it read and recommends Player of the Week, with a runner-up when the stats support one.
 3. Coach corrects anything, optionally picks a different player or attaches a photo, then taps **Approve & Send to RT Media**.
 4. RT Football Media DMs the private draft: cover image, article text, and controls.
-5. Coach taps **Approve Draft**, then **Publish to MPL Announcements**. A report can only be published once.
+5. Coach taps **Approve Draft**, then **Publish to RT Football Media**. The article goes up as its own post in the `rt-football-media` forum. A report can only be published once.
 
 Cup and tournament matches never mix into the league recap. Start a cup edition with `/cupreport`.
 
@@ -50,7 +50,7 @@ Set these as Railway variables. Never put a token or key in GitHub or Discord. `
 | --- | --- |
 | `GAFFER_DISCORD_TOKEN` | Pep's bot token |
 | `RT_MEDIA_DISCORD_TOKEN` | RT Football Media's bot token. Without it, Pep delivers drafts itself and publishing is off |
-| `RT_MEDIA_PUBLISH_CHANNEL_ID` | Channel the approved recap is posted to |
+| `RT_MEDIA_PUBLISH_CHANNEL_ID` | Channel the approved article is posted to. A forum channel gets one post per article, titled with the headline; a text channel gets plain messages |
 | `OWNER_DISCORD_USER_ID` | Coach's Discord user ID |
 | `GAFFER_GUILD_ID` | The club server ID |
 | `GAFFER_MANAGEMENT_ROLE_IDS` | Optional comma-separated role IDs allowed to use the commands |
