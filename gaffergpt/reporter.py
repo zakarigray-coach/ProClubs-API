@@ -105,7 +105,7 @@ class Reporter:
             # Include the reporting period so recurring result patterns have distinct headlines.
             factual_subheadline=title
             title=editorial_headline(editorial,report['week_start'])
-            lines=['RT FOOTBALL MEDIA',title,factual_subheadline,"By Raine | RT Football Media",'DRAFT — awaiting Coach review',
+            lines=['RT FOOTBALL MEDIA',title,factual_subheadline,f"By {editorial['reporter']} | RT Football Media",'DRAFT — awaiting Coach review',
                    f"Reporting period: {report['week_start']} to {report['week_end']} (end exclusive).",
                    'Coverage is limited to the matches selected by management.','',editorial_lead(editorial,summary),'']
             if official:
@@ -165,7 +165,7 @@ class Reporter:
             if self.writer:
                 recent=[{'title':r['title'],'lead':(r['article'] or '')[:900]} for r in conn.execute(
                     "SELECT title,article FROM weekly_reports WHERE report_id<>? AND article IS NOT NULL ORDER BY report_id DESC LIMIT 6",(report_id,))]
-                packet={'period':period_label(report),'reporter':'Raine','style':editorial['style'],
+                packet={'period':period_label(report),'reporter':editorial['reporter'],'style':editorial['style'],
                         'matches':[{k:m.get(k) for k in ('played_at','opponent','birmingham_score','opponent_score','match_type','venue','competition')} for m in matches
                                    if m['match_type'] in ('Official','Cup') or report['include_development']],
                         'observations':observations,'management':{k:supplied[k] for k in ('notes','player_name','player_evidence')} if supplied else None,'recent_articles':recent}
@@ -201,7 +201,7 @@ class Reporter:
                     raise ValueError('Management notes or award selection changed during writing; report held for fresh verification.')
                 if current['status']!='confirmed' or current_matches!=matches or current_stats!=statistics or current['include_development']!=report['include_development'] or snapshot(self.db,report_id)!=packet.get('competition_context'):
                     raise ValueError('Report facts changed during writing; regenerate using the latest selections.')
-                article='\n'.join(['RT FOOTBALL MEDIA',title,"By Raine | RT Football Media",
+                article='\n'.join(['RT FOOTBALL MEDIA',title,f"By {editorial['reporter']} | RT Football Media",
                                    period_label(report),'DRAFT — awaiting Coach review','',body])
             observations['editorial']={key:editorial[key] for key in ('reporter','opening','style')}
             conn.execute("UPDATE weekly_reports SET title=?,article=?,observations=?,status='draft' WHERE report_id=?",(title,article,json.dumps(observations),report_id))

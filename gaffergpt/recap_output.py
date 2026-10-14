@@ -70,7 +70,8 @@ def checked_outputs(db, report_id, sample=False):
              'player_of_the_week':{'name':player,'award_label':event.get('award_label','Cup Standout') if kind=='Cup' else 'Player of the Week',
                  'photo_reference':f'/reports/{report_id}/photo' if supplied.get('photo') else None,'statistics':stats},
              'missing_information':([] if player else ['Player of the Week selection'])+([] if len(stats)==3 else ['Fewer than three verified player statistics'])}
-    article='\n\n'.join([report['title'],'By Raine | RT Football Media',period_label(report),
+    editorial=db.one('SELECT reporter FROM report_editorial WHERE report_id=?',(report_id,)) or {'reporter':'Raine'}
+    article='\n\n'.join([report['title'],f"By {editorial['reporter']} | RT Football Media",period_label(report),
         'APPROVED' if report['status']=='approved' else 'DRAFT — awaiting Coach review',body,FOOTER])
     discord_chunks(article)  # Validate before sending any cover or text.
     return payload,article

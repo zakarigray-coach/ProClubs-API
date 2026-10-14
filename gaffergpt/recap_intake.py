@@ -25,8 +25,10 @@ Only transcribe facts visible in the supplied material. MPL Birmingham is Birmin
 Do not infer home/away from club order, or official status from EA League/Friendly labels.
 The owner is submitting their weekly league recap, but practice entries may also appear.
 Do not infer missing dates from the reporting window. Never invent facts, quotes or statistics.
-Also return recommended_player and player_evidence, both strings or null.
-Suggest Player of the Week only when explicit player statistics for this submitted week support a comparison.
+Also return recommended_player, player_evidence, runner_up and runner_up_evidence, each a string or null.
+Recommend Player of the Week only when explicit player statistics for this submitted week support a comparison.
+Weigh goals, assists, rating, consistency across the matches, defensive and goalkeeper contribution, minutes and overall impact.
+Do not simply pick the leading scorer. Name a runner-up when a second player has a supported case; otherwise leave both runner-up fields null.
 Use only the supplied player names and numerical statistics in player_evidence; label the choice a suggestion.
 Do not treat a single-match rating as a weekly rating, invent totals or assume missing stats are zero.
 If the recap has no usable player comparison, leave both null.
@@ -41,8 +43,9 @@ RESULT_PROPERTIES={
 OUTPUT_SCHEMA={'type':'object','additionalProperties':False,'properties':{
     'results':{'type':'array','items':{'type':'object','additionalProperties':False,'properties':RESULT_PROPERTIES,'required':list(RESULT_PROPERTIES)}},
     'questions':{'type':'array','items':{'type':'string'}},
-    'recommended_player':{'type':['string','null']},'player_evidence':{'type':['string','null']}
-},'required':['results','questions','recommended_player','player_evidence']}
+    'recommended_player':{'type':['string','null']},'player_evidence':{'type':['string','null']},
+    'runner_up':{'type':['string','null']},'runner_up_evidence':{'type':['string','null']}
+},'required':['results','questions','recommended_player','player_evidence','runner_up','runner_up_evidence']}
 
 class RecapReader:
     def __init__(self, coach): self.coach=coach
@@ -88,4 +91,8 @@ def validate_extraction(result):
     player=result.get('recommended_player');evidence=result.get('player_evidence')
     if not (isinstance(player,str) and isinstance(evidence,str) and player.strip() and evidence.strip()):
         player=evidence=''
-    return {'lines':lines,'questions':list(dict.fromkeys(questions))[:5], 'player_name':player[:100],'player_evidence':evidence[:500]}
+    second=result.get('runner_up');case=result.get('runner_up_evidence')
+    if not (player and isinstance(second,str) and isinstance(case,str) and second.strip() and case.strip() and second.strip()!=player.strip()):
+        second=case=''
+    return {'lines':lines,'questions':list(dict.fromkeys(questions))[:5], 'player_name':player[:100],'player_evidence':evidence[:500],
+            'runner_up':second[:100],'runner_up_evidence':case[:500]}

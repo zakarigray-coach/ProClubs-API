@@ -189,7 +189,7 @@ class RecapConfirmView(ManagedView):
                 except (RuntimeError,ValueError,aiohttp.ClientError,asyncio.TimeoutError):
                     saved['used']=False;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
                     log.warning('Weekly sports writer unavailable; confirmed facts retained.')
-                    await interaction.followup.send('The sports writer could not finish. Your results are saved. Tap Confirm Results & Draft again to retry.',ephemeral=True)
+                    await interaction.followup.send('The sports writer could not finish. Your results are saved. Tap Approve & Send to RT Media again to retry.',ephemeral=True)
                     return
                 owner=await bot.fetch_user(bot.config.owner_id)
                 if existing.get('photo'):
@@ -201,7 +201,12 @@ class RecapConfirmView(ManagedView):
                 bot.db.set_setting(f'weekly_excel:{report_id}','')
                 bot.db.set_setting(f'weekly_excel_context:{report_id}','')
                 await interaction.followup.send('Your private article draft is ready.',ephemeral=True)
-        self.add_item(Action('Confirm Results & Draft',f'pep:recapconfirm:{request_id}',confirm,discord.ButtonStyle.success))
+        self.add_item(Action('Approve & Send to RT Media',f'pep:recapconfirm:{request_id}',confirm,discord.ButtonStyle.success))
+        async def choose_player(interaction):
+            if interaction.user.id!=bot.config.owner_id:
+                await interaction.response.send_message('Only Coach can choose the award.',ephemeral=True); return
+            await interaction.response.send_modal(AwardChoiceModal(bot,request_id))
+        self.add_item(Action('Choose Different Player',f'pep:recapaward:{request_id}',choose_player))
         async def change(interaction):
             bot.db.set_setting('weekly_dm_awaiting',str(report_id))
             await interaction.response.send_message('Reply to Pep with the corrected recap text or photo. No new results have been saved by this button.',ephemeral=True)
@@ -210,6 +215,22 @@ class RecapConfirmView(ManagedView):
             await interaction.response.send_message(bot.report_summary(report_id),view=ReportView(bot,report_id),ephemeral=True)
         self.add_item(player_photo_button(bot,report_id,f'preview:{request_id}'))
         self.add_item(Action('Choose Matches / Report Details',f'pep:recapsetup:{request_id}',setup))
+
+
+class AwardChoiceModal(discord.ui.Modal,title='Choose the featured player'):
+    player=discord.ui.TextInput(label='Player name',max_length=100)
+    evidence=discord.ui.TextInput(label='Why? Use verified facts only',style=discord.TextStyle.paragraph,max_length=500)
+
+    def __init__(self,bot,request_id):
+        super().__init__();self.bot=bot;self.request_id=request_id
+
+    async def on_submit(self,interaction):
+        key=f'recap_preview:{self.request_id}';saved=json.loads(self.bot.db.setting(key,'{}'))
+        if not saved or saved.get('used'):
+            await interaction.response.send_message('This preview has already been used. Send your recap again to change it.',ephemeral=True);return
+        saved['player_name']=str(self.player).strip();saved['player_evidence']=str(self.evidence).strip()
+        self.bot.db.set_setting(key,json.dumps(saved))
+        await interaction.response.send_message(f"Featured player set to {saved['player_name']}. Approve when the results are right.",ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
 
 
 class WeeklyFactsModal(discord.ui.Modal, title='Weekly results and article notes'):
@@ -671,7 +692,7 @@ class GafferBot(discord.Client):
                 await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=files,view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
                 await send_checked_article(message.channel,self.db,report_id)
             else:
-                await message.reply('Player photo saved. Tap Confirm Results & Draft on the recap preview to include it with your article.',mention_author=False)
+                await message.reply('Player photo saved. Tap Approve & Send to RT Media on the recap preview to include it with your article.',mention_author=False)
         except (ValueError,RuntimeError,aiohttp.ClientError) as error:
             await message.reply('Could not attach that photo. '+(str(error) if isinstance(error,ValueError) else 'Please try again.'),mention_author=False)
 
@@ -726,7 +747,15 @@ class GafferBot(discord.Client):
                 await message.reply('No eligible '+('cup' if cup else 'MPL')+' matches were found. Practice, scrim and test results are excluded. Nothing imported.',mention_author=False)
                 return
             self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'excel_source':cached,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
-            recommendation=(f'\n\nSuggested Player of the Week: {parsed["player_name"]} — {parsed["player_evidence"]}\nConfirming approves this suggestion. Send corrections to choose someone else.' if parsed.get('player_name') else '\n\nNo Player of the Week suggestion: the submitted stats do not support a comparison.')
+            award='Cup Standout' if cup else 'Player of the Week'
+            if parsed.get('player_name'):
+                recommendation=f'\n\nPep recommends {award}: {parsed["player_name"]} — {parsed["player_evidence"]}'
+                if parsed.get('runner_up'):recommendation+=f'\nRunner-up: {parsed["runner_up"]} — {parsed["runner_up_evidence"]}'
+                recommendation+='\nApproving accepts this pick. Use Choose Different Player to change it.'
+            else:
+                recommendation=f'\n\nNo {award} recommendation: the submitted stats do not support a comparison. Use Choose Different Player to name one.'
+            if not cup and len(parsed['lines'])!=4:
+                recommendation+=f'\n⚠ This recap has {len(parsed["lines"])} league matches. A normal MPL week is four.'
             preview='\n'.join(parsed['lines'])
             if excluded:preview+=f'\n{excluded} practice/scrim or other-competition results excluded.'
             if cached:

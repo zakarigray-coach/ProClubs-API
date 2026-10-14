@@ -69,7 +69,7 @@ class PhotoAndAwardTests(DMWorkflowTests):
     async def test_player_suggestion_confirmed_and_photo_attached(self):
         self.bot.recap_reader.extract.return_value={'lines':['2026-10-15 | Official Home | Chelsea | 3-1'],'questions':[],'player_name':'Zak','player_evidence':'Suggestion: 2 assists in the submitted week.'}
         message=self.message();await self.bot.on_message(message)
-        self.assertIn('Suggested Player of the Week: Zak',message.reply.call_args.args[0])
+        self.assertIn('Pep recommends Player of the Week: Zak',message.reply.call_args.args[0]);self.assertIn('1 league matches. A normal MPL week is four',message.reply.call_args.args[0])
         view=message.reply.call_args.kwargs['view']
         interaction=SimpleNamespace(user=SimpleNamespace(id=1),response=SimpleNamespace(send_message=AsyncMock(),defer=AsyncMock()),followup=SimpleNamespace(send=AsyncMock()))
         await view.children[2].callback(interaction)
@@ -90,3 +90,13 @@ class PracticeClarificationRegressionTests(unittest.TestCase):
         for date,score in [('2026-10-07',None),('2026-99-99',2)]:
             result=validate_extraction({'results':[{'date':date,'type':'Practice','opponent':'Chelsea','birmingham_score':score,'opponent_score':2}],'questions':[]})
             self.assertTrue(result['questions']);self.assertEqual(result['lines'],[])
+
+
+class RunnerUpTests(unittest.TestCase):
+    def test_runner_up_needs_a_winner_and_a_different_name(self):
+        from gaffergpt.recap_intake import validate_extraction
+        row={'date':'2026-10-15','type':'Official Home','opponent':'Chelsea','birmingham_score':3,'opponent_score':1}
+        base={'results':[row],'questions':[],'recommended_player':'Zak','player_evidence':'2 goals','runner_up':'Tru','runner_up_evidence':'8.4 rating'}
+        self.assertEqual(validate_extraction(base)['runner_up'],'Tru')
+        self.assertEqual(validate_extraction(dict(base,runner_up='Zak'))['runner_up'],'')
+        self.assertEqual(validate_extraction(dict(base,recommended_player=None))['runner_up'],'')

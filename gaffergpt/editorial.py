@@ -1,7 +1,7 @@
 """Factual reporter voices with durable rotation and recent-opening exclusion."""
 STYLES = {
-    'Raine': '50% composed correspondent, 35% thoughtful analyst, 15% club storyteller',
-    'Teagan': '50% energetic matchday reporter, 35% lightly witty columnist, 15% bold sports desk',
+    'Raine': 'matchday and league recap reporter: energetic and football-focused; results, key moments, momentum, standout players and tactical patterns; critical when Birmingham play poorly',
+    'Teagan': 'feature and personality reporter: more storytelling and character, slightly warmer and more conversational; professional and football-focused, never gimmicky',
 }
 OPENINGS = {
  'Raine': [
