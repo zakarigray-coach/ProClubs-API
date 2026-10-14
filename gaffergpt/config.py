@@ -10,8 +10,6 @@ class Config:
     guild_id: int
     management_role_ids: tuple[int,...] = ()
     database_path: str = 'gaffergpt.db'
-    reporter_secret: str = ''
-    reporter_port: int = 8080
     rt_media_token: str = ''
     publish_channel_id: int = 0
 
@@ -25,5 +23,4 @@ class Config:
         return cls(token,owner,guild,
                    tuple(int(x.strip()) for x in os.getenv('GAFFER_MANAGEMENT_ROLE_IDS','').split(',') if x.strip()),
                    os.getenv('GAFFER_DATABASE_PATH',str(Path(__file__).resolve().parents[1]/'gaffergpt.db')),
-                   os.getenv('PEP_REPORTER_TOKEN',''),int(os.getenv('PEP_REPORTER_PORT','8080')),
                    os.getenv('RT_MEDIA_DISCORD_TOKEN',''),int(os.getenv('RT_MEDIA_PUBLISH_CHANNEL_ID','0')))

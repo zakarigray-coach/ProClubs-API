@@ -5,19 +5,6 @@ class OutputTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp=fixtures.MVPTests.asyncSetUp
     asyncTearDown=fixtures.MVPTests.asyncTearDown
     league=fixtures.MVPTests.league
-    async def test_cover_is_single_and_payload_uses_same_verified_record(self):
-        from gaffergpt.reporter import Reporter
-        from gaffergpt.article_layout import media_pages
-        from gaffergpt.media_api import report_payload
-        rid=self.league();Reporter(self.db,writer=self.writer).generate(rid)
-        self.assertEqual(len(media_pages(self.db,rid)),1)
-        payload=report_payload(self.db,rid)
-        self.assertEqual(payload['cover_payload']['record'],{'wins':1,'draws':1,'losses':0})
-        self.assertEqual(payload['cover_payload']['goals'],{'scored':5,'conceded':3})
-        self.assertEqual(payload['cover_payload']['player_of_the_week']['statistics'],[])
-        self.assertIn('By Raine | RT Football Media',payload['discord_article'])
-        self.assertTrue(payload['discord_article'].endswith('RT Football Media • MPL Birmingham City'))
-
 class PureOutputTests(unittest.TestCase):
     def test_dynamic_stats_only_use_complete_verified_facts(self):
         from gaffergpt.recap_output import select_player_stats

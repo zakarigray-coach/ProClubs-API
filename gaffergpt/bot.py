@@ -13,7 +13,6 @@ import discord
 from discord import app_commands
 from .config import Config
 from .notebook import notebook, daily_backup
-from .media_api import start_api
 from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
 from .competitions import report_event, configure_report, set_match_details
@@ -522,7 +521,6 @@ class GafferBot(discord.Client):
         self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key) if self.coach else None)
         self.tree=app_commands.CommandTree(self)
         self.worker=None
-        self.media_runner=None
         self.rt_media=None
         self.register_commands()
 
@@ -539,8 +537,6 @@ class GafferBot(discord.Client):
         cup_setup=load_cup_setup(self.db)
         if cup_setup.get('starter_message_id'):
             self.add_view(CupAvailabilityView(self.db,self.cup_availability_lock),message_id=cup_setup['starter_message_id'])
-        if self.config.reporter_secret:
-            self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
         for m in self.db.rows('SELECT match_id FROM matches'):
             self.add_view(ReviewView(self,m['match_id']))
         for report in self.db.rows("SELECT * FROM weekly_reports WHERE status!='skipped'"):
@@ -580,8 +576,6 @@ class GafferBot(discord.Client):
     async def close(self):
         if self.worker:
             self.worker.cancel()
-        if self.media_runner:
-            await self.media_runner.cleanup()
         if self.rt_media and not self.rt_media.is_closed():
             await self.rt_media.close()
         await super().close()
