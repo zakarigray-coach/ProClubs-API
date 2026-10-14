@@ -9,9 +9,8 @@ from unittest.mock import AsyncMock, patch
 from gaffergpt.database import Database
 from gaffergpt.parser import parse_recap,parse_registration,is_match_recap
 from gaffergpt.reporter import Reporter
-from gaffergpt.scheduler import WeeklyScheduler,week_window,friday_due
+from gaffergpt.scheduler import week_window
 from gaffergpt.config import Config
-from gaffergpt.feedback import player_feedback
 from gaffergpt.analysis import FactualGaffer, direction, tracking_text
 from gaffergpt.bot import GafferBot,ReportView,ReviewView,DraftView
 
@@ -33,28 +32,6 @@ class Delivery:
 
 
 class FoundationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_paused_listener_ignores_menus_and_match_embeds(self):
-        import discord
-        bot=GafferBot(Config('test',42,30,recap_channel_id=20,source_bot_id=99,database_path=self.path))
-        message=SimpleNamespace(id=10,guild=SimpleNamespace(id=30),channel=SimpleNamespace(id=20),
-            author=SimpleNamespace(id=99),created_at=NOW,content='<@42>, select a Club for Automode:',embeds=[])
-        try:
-            await bot.ingest_message(message)
-            message.content='<@42>, select a Club to view members for:'
-            await bot.ingest_message(message)
-            message.content='Automode enabled!'
-            await bot.ingest_message(message)
-            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
-            message.content=''; message.embeds=[discord.Embed(description='MPL Birmingham 1-3 AMADNESS FC')]
-            await bot.ingest_message(message); await bot.ingest_message(message)
-            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
-            message.id=11; message.content='MPL Birmingham 2-1 Chelsea'
-            message.embeds=[discord.Embed(description=message.content)]
-            await bot.ingest_message(message)
-            self.assertEqual(bot.db.rows('SELECT * FROM matches'),[])
-        finally:
-            await bot.close()
-
     def test_recap_detection_preserves_partial_data(self):
         self.assertTrue(is_match_recap('PLAYER STATS\nStats unavailable'))
         self.assertTrue(is_match_recap('Opponent: Chelsea'))
@@ -83,8 +60,6 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.path=str(Path(self.tmp.name)/'gaffergpt.db')
         self.db=Database(self.path)
-        self.delivery=Delivery()
-        self.scheduler=WeeklyScheduler(self.db,42,self.delivery)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -96,20 +71,6 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         r=self.db.open_report(*week_window(NOW),42)
         self.db.replace_page_selection(r['report_id'],ids,ids)
         return r['report_id']
-
-    async def test_owner_seed_does_not_override_or_restore_removed_link(self):
-        config=Config('fake',42,30,database_path=self.path,owner_player_name='DaddyGray10420')
-        bot=GafferBot(config)
-        self.assertEqual(bot.db.player_link(42)['player_name'],'DaddyGray10420')
-        bot.db.link_player(42,'coach','Corrected',42)
-        await bot.close()
-        bot=GafferBot(config)
-        self.assertEqual(bot.db.player_link(42)['player_name'],'Corrected')
-        bot.db.unlink_player(42)
-        await bot.close()
-        bot=GafferBot(config)
-        self.assertIsNone(bot.db.player_link(42))
-        await bot.close()
 
     def test_link_preserves_registration_and_restart(self):
         self.db.register_player(42,'coach','CAM','Playmaker','Attack')
@@ -141,53 +102,8 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 self.db.link_player(42,'coach',name,42)
 
-    async def test_link_commands_scope_and_permission(self):
-        bot=GafferBot(Config('fake',42,30,database_path=self.path))
-        interaction=SimpleNamespace(guild_id=30,user=SimpleNamespace(id=43,name='player',roles=[]),response=SimpleNamespace(send_message=AsyncMock()))
-        command=bot.tree.get_command('linkplayer')
-        self.assertTrue(await command.checks[0](interaction))
-        await command.callback(interaction,'DaddyGray10420')
-        self.assertEqual(bot.db.player_link(43)['player_name'],'DaddyGray10420')
-        with self.assertRaises(Exception):
-            await bot.tree.get_command('setplayerlink').checks[0](interaction)
-        interaction.guild_id=99
-        with self.assertRaises(Exception):
-            await command.checks[0](interaction)
-        await bot.close()
-
     def stats_text(self,score='MPL BIRMINGHAM 1-3 AMADNESS FC'):
         return score+'\nMatch Type: League Match\nPLAYER STATS\nDaddyGray10420 — Attacking Magician\nRAT: 6.4 | GLS: - | SHT: 1 | AST: - | 2AST: 1\nPAS: 14/19 | POS: 3/3 | TKL: 2/9\nOther Player — Midfield Boss\nRAT: 7.5 | PAS: 9/10\nTEAM STATS\nFINAL SCORE\nMPL Birmingham 1\nAmadness FC 3'
-
-    def test_stats_import_link_feedback_classification_and_dedupe(self):
-        self.db.link_player(42,'coach','daddygray10420',42)
-        ids=self.add(text=self.stats_text())
-        mid=ids[0]
-        self.assertEqual(self.db.match(mid)['birmingham_score'],1)
-        self.assertEqual(self.db.match(mid)['match_type'],'Unknown')
-        self.assertIn('no player stats',player_feedback(self.db,42))
-        self.db.classify(mid,'Practice','Unknown',42)
-        feedback=player_feedback(self.db,42)
-        self.assertIn('14/19',feedback)
-        self.assertIn('73.7%',feedback)
-        self.assertNotIn('7.5',feedback)
-        self.assertNotIn('Goals:',feedback)
-        count=len(self.db.rows('SELECT * FROM match_statistics'))
-        self.assertEqual(self.add(text=self.stats_text()),[])
-        self.assertEqual(len(self.db.rows('SELECT * FROM match_statistics')),count)
-        self.assertEqual(self.db.official_record()['played'],0)
-        self.db.classify(mid,'Ignored','Unknown',42)
-        self.assertIn('no player stats',player_feedback(self.db,42))
-
-    def test_feedback_separates_official_practice_and_no_link(self):
-        self.assertIn('/linkplayer',player_feedback(self.db,42))
-        self.db.link_player(42,'coach','DaddyGray10420',42)
-        for message,kind in [('1','Practice'),('2','Official')]:
-            mid=self.add(message,text=self.stats_text())[0]
-            self.db.classify(mid,kind,'Home',42)
-        feedback=player_feedback(self.db,42)
-        self.assertIn('OFFICIAL: 1',feedback)
-        self.assertIn('PRACTICE: 1',feedback)
-        self.assertEqual(self.db.official_record()['played'],1)
 
     def test_ambiguous_multimatch_stats_not_assigned(self):
         text=self.stats_text('MPL Birmingham 1-3 Amadness FC\nAmadness FC 2-2 MPL Birmingham')
@@ -263,54 +179,6 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         row=self.db.match(mid)
         self.assertIsNone(row['birmingham_score']); self.assertEqual(row['opponent'],'Chelsea')
         self.assertEqual(row['match_type'],'Unknown')
-
-    async def test_friday_correct_time_and_once(self):
-        await self.scheduler.tick(NOW-timedelta(minutes=1)); self.assertEqual(len(self.delivery.calls),0)
-        await self.scheduler.tick(NOW); await self.scheduler.tick(NOW+timedelta(seconds=30))
-        self.assertEqual(len(self.delivery.calls),1)
-
-    def test_dst_times(self):
-        winter=datetime(2026,1,9,13,tzinfo=UTC); summer=datetime(2026,7,10,12,tzinfo=UTC)
-        self.assertEqual(friday_due(week_window(winter)[0]),winter)
-        self.assertEqual(friday_due(week_window(summer)[0]),summer)
-
-    async def test_missed_friday_restart(self):
-        self.scheduler.seed(NOW-timedelta(days=1))
-        restarted=WeeklyScheduler(Database(self.path),42,self.delivery)
-        await restarted.tick(NOW+timedelta(hours=3));await restarted.tick(NOW+timedelta(hours=4))
-        self.assertEqual(len(self.delivery.calls),1)
-
-    async def test_crash_after_discord_acceptance_reconciles(self):
-        self.scheduler.seed(NOW)
-        job=self.db.rows('SELECT * FROM weekly_jobs')[0]
-        self.delivery.messages[job['job_key']+':prompt']=123
-        self.db.execute("UPDATE weekly_jobs SET state='sending',lease_until=?",((NOW-timedelta(seconds=1)).isoformat(),))
-        await self.scheduler.tick(NOW)
-        self.assertEqual(self.delivery.calls,[])
-        self.assertEqual(self.db.rows('SELECT * FROM weekly_jobs')[0]['state'],'sent')
-
-    async def test_delivery_failure_retries(self):
-        self.delivery.fail=True;await self.scheduler.tick(NOW)
-        self.delivery.fail=False;await self.scheduler.tick(NOW+timedelta(minutes=6))
-        self.assertEqual(len(self.delivery.calls),1)
-
-    async def test_skip_respected_after_restart(self):
-        self.scheduler.seed(NOW)
-        rid=self.db.rows('SELECT * FROM weekly_jobs')[0]['report_id']
-        self.scheduler.skip(rid)
-        await WeeklyScheduler(Database(self.path),42,self.delivery).tick(NOW+timedelta(hours=1))
-        self.assertEqual(self.delivery.calls,[])
-        self.assertEqual(self.db.report(rid)['status'],'skipped')
-
-    async def test_reminder_one_report_and_one_delivery(self):
-        await self.scheduler.tick(NOW)
-        rid=self.db.rows('SELECT * FROM weekly_jobs')[0]['report_id']
-        self.scheduler.remind(rid,NOW,minutes=1)
-        await self.scheduler.tick(NOW+timedelta(seconds=59))
-        self.assertEqual(len(self.delivery.calls),1)
-        await self.scheduler.tick(NOW+timedelta(minutes=1));await self.scheduler.tick(NOW+timedelta(minutes=2))
-        self.assertEqual(len(self.delivery.calls),2)
-        self.assertEqual(len(self.db.rows('SELECT * FROM weekly_reports')),1)
 
     def test_generate_only_after_confirmation_no_publish(self):
         mid=self.add()[0]; self.db.classify(mid,'Official','Home',42);rid=self.report([mid])
@@ -445,15 +313,6 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(self.db.report(rid)['draft_sent_at'])
         await bot.close()
 
-    async def test_shortened_schedule_before_production(self):
-        self.scheduler.schedule_test(NOW)
-        await self.scheduler.tick_tests(NOW+timedelta(seconds=59))
-        self.assertEqual(self.delivery.calls,[])
-        await self.scheduler.tick_tests(NOW+timedelta(minutes=1))
-        await self.scheduler.tick_tests(NOW+timedelta(minutes=2))
-        self.assertEqual(len(self.delivery.calls),1)
-        self.assertTrue(self.delivery.calls[0][1].startswith('test:'))
-
     async def test_paged_selection_keeps_previous_pages(self):
         ids=[]
         for i in range(31):
@@ -467,46 +326,10 @@ class FoundationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ReportView(bot,rid,1).is_persistent())
         await bot.close()
 
-    def test_pep_recap_flag_takes_precedence(self):
-        base={'GAFFER_DISCORD_TOKEN':'test','OWNER_DISCORD_USER_ID':'42','GAFFER_GUILD_ID':'30'}
-        with patch.dict('os.environ',{**base,'PEP_FRIDAY_RECAP':'true'},clear=True):
-            self.assertTrue(Config.load().schedule_enabled)
-        with patch.dict('os.environ',{**base,'PEP_FRIDAY_RECAP':'false','GAFFER_FRIDAY_ENABLED':'true'},clear=True):
-            self.assertFalse(Config.load().schedule_enabled)
-        with patch.dict('os.environ',base,clear=True):
-            self.assertFalse(Config.load().schedule_enabled)
-
     def test_registration(self):
         self.assertEqual(parse_registration('Pep, register me as a Striker with Advanced Forward role'),('Striker','Advanced Forward',None))
         self.assertEqual(parse_registration('Gaffer, register me as a Striker with Advanced Forward role'),('Striker','Advanced Forward',None))
         self.assertEqual(parse_registration('Gaffer, register me as a Striker with Advanced Forward role with Attack focus'),('Striker','Advanced Forward','Attack'))
-
-    async def test_discord_views_commands_permissions_and_groups(self):
-        bot=GafferBot(Config('test',42,30,database_path=self.path))
-        a=self.add('1')[0];b=self.add('2')[0];self.add('3')
-        self.db.classify(a,'Official','Home',42);self.db.classify(b,'Practice','Unknown',42)
-        rid=self.report([a,b])
-        view=ReportView(bot,rid)
-        self.assertTrue(view.is_persistent())
-        self.assertTrue(ReviewView(bot,a).is_persistent());self.assertTrue(DraftView(bot,rid).is_persistent())
-        summary=bot.report_summary(rid)
-        self.assertIn('MPL LEAGUE MATCHES',summary);self.assertNotIn('PRACTICE / DEVELOPMENT',summary)
-        self.assertIn('1 matches still need classification',summary)
-        self.assertFalse(bot.manager(SimpleNamespace(user=SimpleNamespace(id=999,roles=[]),guild_id=30)))
-        self.assertTrue(bot.manager(SimpleNamespace(user=SimpleNamespace(id=42),guild_id=None)))
-        commands={c.name for c in bot.tree.get_commands()}
-        self.assertIn('configurepep',commands)
-        self.assertNotIn('configuregaffer',commands)
-        self.assertTrue({'status','matches','reviewmatches','match','weeklyreport','testweeklydm'}<=commands)
-        await bot.close()
-
-    async def test_paused_listener_does_not_import_even_configured_source(self):
-        bot=GafferBot(Config('test',42,30,recap_channel_id=20,source_bot_id=99,database_path=self.path))
-        msg=SimpleNamespace(id=1,guild=SimpleNamespace(id=30),channel=SimpleNamespace(id=20),author=SimpleNamespace(id=98),created_at=NOW,content='Birmingham City 2–1 Chelsea')
-        await bot.ingest_message(msg);self.assertEqual(self.db.rows('SELECT * FROM matches'),[])
-        msg.author.id=99;await bot.ingest_message(msg);await bot.ingest_message(msg)
-        self.assertEqual(len(self.db.rows('SELECT * FROM matches')),0)
-        await bot.close()
 
     async def test_empty_week_dm_summary(self):
         bot=GafferBot(Config('test',42,30,database_path=self.path))

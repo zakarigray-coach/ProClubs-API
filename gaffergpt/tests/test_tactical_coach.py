@@ -56,25 +56,12 @@ class ProviderTests(unittest.TestCase):
 class CoachingWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.bot=GafferBot(Config('test',1,2,database_path=str(Path(self.temp.name)/'pep.db'),schedule_enabled=True))
+        self.bot=GafferBot(Config('test',1,2,database_path=str(Path(self.temp.name)/'pep.db')))
         self.bot.coach=SimpleNamespace(model='test-provider',advise=AsyncMock(return_value='Keep one midfielder covering the center.'))
 
     async def asyncTearDown(self):
         await self.bot.close()
         self.temp.cleanup()
-
-    async def test_owner_dm_receives_advice_without_creating_matches(self):
-        msg=SimpleNamespace(guild=None,id=10,content='PCT says our passing is poor.',
-              author=SimpleNamespace(id=1,bot=False),reply=AsyncMock(),channel=SimpleNamespace())
-        class Typing:
-            async def __aenter__(self): pass
-            async def __aexit__(self,*args): pass
-        msg.channel.typing=lambda:Typing()
-        await self.bot.on_message(msg)
-        self.assertEqual(msg.reply.await_count,1)
-        self.assertEqual(len(self.bot.db.rows('SELECT * FROM coaching_notes')),1)
-        self.assertEqual(self.bot.db.rows('SELECT * FROM matches'),[])
-        self.assertTrue(self.bot.config.schedule_enabled)
 
     async def test_other_users_and_bots_cannot_trigger_owner_dm_ai(self):
         for user,bot in [(9,False),(1,True)]:
@@ -95,14 +82,6 @@ class CoachingWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('AI coaching is temporarily unavailable',reply)
         self.assertIn('practical library',reply)
         self.assertEqual(self.bot.db.official_record()['played'],0)
-
-    async def test_automatic_collection_and_classification_are_paused(self):
-        await self.bot.ingest_message(SimpleNamespace())
-        await self.bot.recover_recaps()
-        self.assertFalse(await self.bot.pending_reviews(force=True))
-        self.assertEqual(self.bot.db.rows('SELECT * FROM matches'),[])
-        self.assertIsNotNone(self.bot.tree.get_command('tacticaladvice'))
-        self.assertIsNotNone(self.bot.tree.get_command('weeklyreport'))
 
     async def test_empty_request_rejected_before_paid_call(self):
         with self.assertRaises(ValueError):

@@ -5,9 +5,7 @@ import io
 import json
 import logging
 import math
-import os
-from .recap_reset import reset_recap
-from .report_verification import ReportHold, digest, validate_final
+from .report_verification import ReportHold, digest
 from .report_audit import assert_current
 import sys
 from datetime import datetime, timezone, timedelta
@@ -15,24 +13,19 @@ import discord
 from discord import app_commands
 from .config import Config
 from .notebook import notebook, daily_backup
-from .google_notebook import GoogleNotebook
 from .media_api import start_api
-from .feedback import player_feedback
 from .analysis import FactualGaffer, tracking_text
 from .database import Database, utcnow
 from .competitions import report_event, configure_report, set_match_details
-from .parser import parse_recap, parse_registration, is_match_recap, is_setup_prompt
-from .recap_check import readable_message, inspect_league_stats
 from .reporter import Reporter, match_label
-from .article_writer import SportsWriter, check_finished_prose, check_feature_quality, feature_facts
+from .article_writer import SportsWriter
 from .weekly_intake import save_submission, save_photo, content as report_content
-from .scheduler import WeeklyScheduler, week_window
-from .session_reviews import SessionReviews
+from .scheduler import week_window
 from .tactical_coach import PracticalCoach
 from .coaching_ai import OpenAICoach
 from .recap_intake import RecapReader
 from .excel_intake import read_excel
-from .excel_stats import player_totals, save_excel_statistics, imported_statistics, stats_text, records
+from .excel_stats import save_excel_statistics, stats_text, records
 from .cup_setup import CupAvailabilityView, run_cup_setup, load as load_cup_setup
 from .publisher import PublishError, publish_report
 
@@ -87,67 +80,6 @@ class ReviewView(ManagedView):
                 bot.db.classify(match_id,k,v,interaction.user.id)
                 await interaction.response.edit_message(content=f'Match #{match_id}: {match_label(bot.db.match(match_id))}\nClassified as {k}.',view=self)
             self.add_item(Action(label,f'gaffer:classify:{match_id}:{kind}:{venue}',choose))
-
-
-class SessionMatchView(ManagedView):
-    def __init__(self, bot, batch_id, page=0):
-        super().__init__(bot)
-        rows=bot.session_reviews.matches(batch_id)
-        total=max(1,(len(rows)+19)//20)
-        page=min(max(page,0),total-1)
-        matches=rows[page*20:(page+1)*20]
-        if matches:
-            menu=discord.ui.Select(placeholder='Choose a match to review',
-                custom_id=f'pep:session-select:{batch_id}:{page}',
-                options=[discord.SelectOption(label=f"#{m['match_id']} {match_label(m)} [{m['match_type']}]"[:100],value=str(m['match_id'])) for m in matches])
-            async def choose(interaction):
-                mid=int(menu.values[0]); m=bot.db.match(mid)
-                await interaction.response.send_message(f"Match #{mid}: {match_label(m)}",view=ReviewView(bot,mid),ephemeral=True)
-            menu.callback=choose
-            self.add_item(menu)
-        for label,target in [('Previous',page-1),('Next',page+1)]:
-            if 0<=target<total:
-                async def move(interaction,p=target):
-                    await interaction.response.edit_message(content=f'Session matches — page {p+1}',view=SessionMatchView(bot,batch_id,p))
-                self.add_item(Action(label,f'pep:session-page:{batch_id}:{page}:{target}',move))
-
-
-class SessionReviewView(ManagedView):
-    def __init__(self, bot, batch_id):
-        super().__init__(bot)
-        async def review(interaction):
-            await interaction.response.send_message('Choose a session match. Saved classifications are shown in the menu.',
-                view=SessionMatchView(bot,batch_id),ephemeral=True)
-        self.add_item(Action('Review Session Matches',f'pep:session-review:{batch_id}',review))
-
-
-class SessionDelivery:
-    def __init__(self, bot):
-        self.bot=bot
-
-    async def channel(self):
-        owner=await self.bot.fetch_user(self.bot.config.owner_id)
-        return owner.dm_channel or await owner.create_dm()
-
-    async def find(self, marker, created_at):
-        channel=await self.channel()
-        async for message in channel.history(limit=None,after=datetime.fromisoformat(created_at)):
-            if message.author.id==self.bot.user.id and any(has_marker(e,marker) for e in message.embeds):
-                return message.id
-        return None
-
-    async def send(self, batch_id, marker):
-        rows=self.bot.session_reviews.matches(batch_id)
-        lines=[f"Session ready for review: {len(rows)} saved matches.",
-               'Choose each match below. Nothing counts as official or practice until classified.','']
-        lines.extend(f"#{m['match_id']} {match_label(m)}" for m in rows[:10])
-        if len(rows)>10:
-            lines.append('All remaining matches are available in the paged review menu.')
-        embed=discord.Embed(title='PEP — SESSION REVIEW',description='\n'.join(lines)[:3900])
-        embed.set_footer(text=branded_footer(marker))
-        channel=await self.channel()
-        message=await channel.send(embed=embed,view=SessionReviewView(self.bot,batch_id),allowed_mentions=discord.AllowedMentions.none())
-        return message.id
 
 
 class MatchSelect(discord.ui.Select):
@@ -449,16 +381,6 @@ class ReportView(ManagedView):
             await send_checked_article(owner,bot.db,report_id)
             bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
             await interaction.followup.send('Draft sent to Coach for review.',ephemeral=True)
-        async def remind(interaction):
-            if interaction.user.id!=bot.config.owner_id:
-                await interaction.response.send_message('Only Coach can schedule his reminder.',ephemeral=True); return
-            bot.scheduler.remind(report_id,datetime.now(timezone.utc))
-            await interaction.response.send_message('I’ll remind you in one hour.',ephemeral=True)
-        async def skip(interaction):
-            if interaction.user.id!=bot.config.owner_id:
-                await interaction.response.send_message('Only Coach can skip the week.',ephemeral=True); return
-            bot.scheduler.skip(report_id)
-            await interaction.response.edit_message(content='This week is skipped. Your match records remain saved.',view=None)
         async def review(interaction):
             await interaction.response.defer(ephemeral=True)
             unknown=[m for m in bot.db.period_matches(report['week_start'],report['week_end']) if m['match_type']=='Unknown']
@@ -483,8 +405,6 @@ class ReportView(ManagedView):
         self.add_item(Action('Add Results / Notes',f'pep:facts:{report_id}',add_facts,row=4))
         self.add_item(Action('Generate Report',f'gaffer:generate:{report_id}',generate,discord.ButtonStyle.primary,row=action_row))
         self.add_item(Action('Review Unknown Matches',f'gaffer:unknown:{report_id}',review,row=action_row))
-        self.add_item(Action('Remind Me Later',f'gaffer:remind:{report_id}',remind,row=3))
-        self.add_item(Action('Skip This Week',f'gaffer:skip:{report_id}',skip,row=3))
         for label,target in [('Previous Page',self.page-1),('Next Page',self.page+1)]:
             if 0<=target<total:
                 async def move(interaction,p=target):
@@ -545,59 +465,18 @@ class DraftView(ManagedView):
         self.add_item(Action('Change Selection',f'gaffer:change:{report_id}',change))
 
 
-class DiscordDelivery:
-    def __init__(self, bot):
-        self.bot=bot
-
-    async def channel(self):
-        owner=await self.bot.fetch_user(self.bot.config.owner_id)
-        return owner.dm_channel or await owner.create_dm()
-
-    async def find(self, marker):
-        channel=await self.channel()
-        # Do not impose a small history cap: crash recovery must find older sends.
-        async for message in channel.history(limit=None,after=datetime.fromisoformat(self.bot.db.setting('scheduler_first_week'))):
-            if message.author.id==self.bot.user.id and any(has_marker(e,marker) for e in message.embeds):
-                return message.id
-        return None
-
-    async def send(self, report_id, marker):
-        channel=await self.channel()
-        embed=discord.Embed(title='PEP — WEEKLY RECAP',description=self.bot.report_summary(report_id))
-        embed.set_footer(text=branded_footer(marker))
-        message=await channel.send(embed=embed,view=ReportView(self.bot,report_id),allowed_mentions=discord.AllowedMentions.none())
-        self.bot.db.set_setting('weekly_dm_awaiting',str(report_id))
-        return message.id
-
-
 class GafferBot(discord.Client):
     def __init__(self, config):
         intents=discord.Intents.default(); intents.message_content=True
         super().__init__(intents=intents,allowed_mentions=discord.AllowedMentions.none())
         self.config=config; self.db=Database(config.database_path)
         self.cup_availability_lock=asyncio.Lock()
-        reset_request=os.getenv('PEP_RECAP_RESET_REQUEST','')
-        if reset_request:
-            report_id,request=reset_request.split(':',1)
-            if reset_recap(self.db,int(report_id),config.owner_id,request):
-                log.info('Owner-requested recap reset completed; report=%s',report_id)
-        # Optional first-run owner link; never overwrite a later correction.
-        if config.owner_player_name and not self.db.player_link(config.owner_id) and not self.db.setting('owner_link_seeded'):
-            try:
-                self.db.link_player(config.owner_id,'Coach',config.owner_player_name,config.owner_id)
-                self.db.set_setting('owner_link_seeded','true')
-            except ValueError:
-                log.warning('Owner player link needs management correction.')
-        self.session_reviews=SessionReviews(self.db,config.session_quiet_minutes)
-        self.session_review_lock=asyncio.Lock()
         self.coach=OpenAICoach.from_environment()
         self.coaching_lock=asyncio.Lock()
         self.recap_reader=RecapReader(self.coach) if self.coach else None
         self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key) if self.coach else None)
         self.tree=app_commands.CommandTree(self)
-        self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None
-        self.notebook_worker=None
         self.media_runner=None
         self.register_commands()
 
@@ -612,8 +491,6 @@ class GafferBot(discord.Client):
             self.add_view(CupAvailabilityView(self.db,self.cup_availability_lock),message_id=cup_setup['starter_message_id'])
         if self.config.reporter_secret:
             self.media_runner=await start_api(self.db,self.config.reporter_secret,self.config.reporter_port)
-        for batch in self.db.rows('SELECT batch_id FROM session_reviews WHERE message_id IS NOT NULL'):
-            self.add_view(SessionReviewView(self,batch['batch_id']))
         for m in self.db.rows('SELECT match_id FROM matches'):
             self.add_view(ReviewView(self,m['match_id']))
         for report in self.db.rows("SELECT * FROM weekly_reports WHERE status!='skipped'"):
@@ -629,197 +506,33 @@ class GafferBot(discord.Client):
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         self.worker=asyncio.create_task(self.work())
-        try:
-            mirror=GoogleNotebook.from_environment(self.db)
-            if mirror:
-                self.notebook_worker=asyncio.create_task(mirror.run(self))
-        except Exception as error:
-            log.error('Pep notebook setup failed: %s',type(error).__name__)
 
     async def work(self):
         await self.wait_until_ready()
-        if self.coach and self.db.setting('tactical_ai_smoke:v1')!='passed':
-            try:
-                sample=await self.coach.advise('Synthetic connection test only: forced passes and vulnerability to counterattacks. Give one club coaching priority.','4-2-3-1')
-                self.db.set_setting('tactical_ai_smoke:v1','passed')
-                log.info('Tactical AI connection test passed; model=%s response_chars=%s',self.coach.model,len(sample))
-            except Exception as error:
-                log.error('Tactical AI connection test failed: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
-        if self.recap_reader and self.db.setting('recap_reader_smoke:v1')!='passed':
-            try:
-                check=await self.recap_reader.extract('Synthetic connectivity test: 2026-10-15, Official Home, Birmingham City 3-1 Chelsea.',[],['2026-10-12','2026-10-19'])
-                if len(check['lines'])!=1 or check['questions']:
-                    raise ValueError('Recap reader could not extract test facts')
-                self.db.set_setting('recap_reader_smoke:v1','passed')
-                log.info('Weekly recap reader connection verified; no match data imported')
-            except Exception as error:
-                log.error('Weekly recap reader check failed: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
-        # One requested compatibility check; does not import or classify anything.
-        if not self.db.setting('league_stats_check:v1'):
-            try:
-                check=await inspect_league_stats(self)
-                self.db.set_setting('league_stats_check:v1',json.dumps(check))
-                log.info('League stats channel check: %s',json.dumps(check['channels']))
-                for recap in check['recaps']:
-                    log.info('League stats public recap check: %s',json.dumps(recap))
-                if not check['recaps']:
-                    log.info('League stats check: no readable club bot recaps in the last 30 messages')
-            except Exception as error:
-                log.error('League stats check failed: %s',type(error).__name__)
-        try:
-            channel,_=self.recap_config()
-            ignored=self.db.ignore_setup_prompts(channel,self.config.guild_id,self.config.owner_id)
-            if ignored:
-                log.info('Ignored %s historical OurProClubs setup prompts; raw records retained',len(ignored))
-            await self.refresh_footers()
-        except Exception as error:
-            log.error('Existing footer refresh failed: %s',type(error).__name__)
         while not self.is_closed():
             try:
                 try:
                     await asyncio.to_thread(daily_backup,self.db)
                 except Exception as error:
                     log.error('Daily backup failed: %s',type(error).__name__)
-                # Always seed persisted jobs; production delivery remains gated.
-                now=datetime.now(timezone.utc)
-                self.scheduler.seed(now)
-                if self.config.schedule_enabled:
-                    await self.scheduler.tick(now)
-                await self.scheduler.tick_tests(now)
-                await self.recover_recaps()
-                await self.pending_reviews()
             except Exception as error:
                 log.error('Background check failed: %s',type(error).__name__)
-            await asyncio.sleep(30)
+            await asyncio.sleep(3600)
 
     async def on_error(self, event_method, *args, **kwargs):
         error=sys.exc_info()[1]
         log.error('Discord event %s failed: %s',event_method,type(error).__name__)
 
     async def on_ready(self):
-        log.info('Pep connected; guild=%s schedule=%s',self.config.guild_id,self.config.schedule_enabled)
+        log.info('Pep connected; guild=%s',self.config.guild_id)
         await run_cup_setup(self)
-        request=os.getenv('PEP_REPORT_REWRITE_REQUEST','')
-        if request and not getattr(self,'rewrite_running',False) and not self.db.setting('report_rewrite:'+request):
-            self.rewrite_running=True
-            asyncio.create_task(self.rewrite_verified_report(request))
-
-    async def rewrite_verified_report(self,request):
-        try:
-            report_id=int(request.split(':',1)[0])
-            if request.endswith(':inspect'):
-                audits=self.db.rows("SELECT state,source_hash,attempts,error FROM report_generation_audit WHERE report_id=? ORDER BY audit_id DESC LIMIT 1",(report_id,))
-                log.info('Owner-requested held article diagnostics: %s',json.dumps(audits,ensure_ascii=False))
-                self.db.set_setting('report_rewrite:'+request,'complete')
-                return
-            selected=self.db.selected(report_id)
-            if len(selected)!=4:raise ValueError('Four-match test requires exactly four selections.')
-            stats=self.db.rows('SELECT s.* FROM match_statistics s JOIN report_matches r USING(match_id) WHERE r.report_id=?',(report_id,))
-            diagnostic=player_totals(stats)
-            for player in diagnostic:
-                if player['player'] in ('DaddyGray10420','TraapxLit'):
-                    log.info('Four-match fact audit: player=%s dribbles=%s appearances=%s',player['player'],player.get('dribbles_completed'),player['appearances'])
-            if request.endswith(':recheck'):
-                from .recheck_article import ReviewedDraftRecheck
-                self.db.confirm_report(report_id)
-                article=await asyncio.to_thread(Reporter(self.db,writer=ReviewedDraftRecheck(self.db,report_id)).generate,report_id)
-            elif request.endswith((':deliver',':savedpreview',':sampledeliver')):
-                saved=self.db.report(report_id)
-                if saved['status'] not in ('draft','confirmed') or not saved['article']:raise ValueError('No reviewed draft available.')
-                article=saved['article']
-                audits=self.db.rows("SELECT * FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
-                checked={'title':saved['title'],'body':article.split('\n\n',1)[1].strip()}
-                if not audits or audits[0]['article_hash']!=digest(checked):
-                    raise ValueError('Saved draft has no matching completed verification. Generate it through the reporting workflow first.')
-                sheet=json.loads(audits[0]['fact_sheet'])
-                assert_current(self.db,report_id,sheet)
-                proof=json.loads(audits[0]['verification'])
-                validate_final(checked,sheet,proof['evidence'])
-                check_feature_quality(checked,{'management':report_content(self.db,report_id),'observations':{'player_statistics':{kind:group['players'] for kind,group in sheet['groups'].items()}}})
-                if saved['status']=='confirmed':
-                    self.db.execute("UPDATE weekly_reports SET status='draft' WHERE report_id=? AND status='confirmed' AND article=?",(report_id,article))
-
-            else:
-                self.db.confirm_report(report_id)
-                article=await asyncio.to_thread(self.reporter.generate,report_id)
-            if request.endswith((':preview',':savedpreview')):
-                audit=self.db.one("SELECT fact_sheet,verification FROM report_generation_audit WHERE report_id=? AND state='passed' ORDER BY audit_id DESC LIMIT 1",(report_id,))
-                if not audit:raise ValueError('No completed verification record is available for this draft.')
-                sheet=json.loads(audit['fact_sheet'])
-                persisted_proof=json.loads(audit['verification'])
-                log.info('Owner-requested editorial preview: %s',json.dumps({'article':article,'sources':{'source_hash':sheet['source_hash'],'fixtures':sheet['fixtures'],'groups':sheet['groups'],'warnings':sheet['warnings']},'verification':persisted_proof},ensure_ascii=False))
-                self.db.set_setting('report_rewrite:'+request,'complete')
-                return
-            owner=await self.fetch_user(self.config.owner_id)
-            if request.endswith(':sampledeliver'):
-                from .article_layout import media_pages
-                pages=await asyncio.to_thread(media_pages,self.db,report_id,sample=True)
-                files=[discord.File(io.BytesIO(data),filename=f'RT_Media_Sample_{index+1}.png') for index,data in enumerate(pages)]
-                files.append(discord.File(io.BytesIO(article.encode()),filename='RT_Media_Sample_Article.txt'))
-                await owner.send('RT MEDIA — PRIVATE EXAMPLE. Final deployment checks passed. This uses the saved four-match practice test, not MPL league results. The approved layout and full article are attached. Nothing has been published.',files=files,allowed_mentions=discord.AllowedMentions.none())
-            else:
-                await owner.send('Corrected four-match test draft — fact-bound figures and sports desk edit. Review only; nothing published.',
-                    files=[discord.File(io.BytesIO(article.encode()),filename=f'RT_Report_{report_id}_Draft.txt')],
-                    view=DraftView(self,report_id),allowed_mentions=discord.AllowedMentions.none())
-            await send_checked_article(owner,self.db,report_id,sample=request.endswith(':sampledeliver'))
-            self.db.set_setting('report_rewrite:'+request,'complete')
-            log.info('Verified four-match rewrite completed; report=%s words=%s',report_id,len(article.split()))
-        except Exception as error:
-            self.db.set_setting('report_rewrite:'+request,'held')
-            log.error('Verified rewrite failed: %s',str(error) if isinstance(error,(ValueError,RuntimeError)) else type(error).__name__)
-        finally:self.rewrite_running=False
 
     async def close(self):
-        if self.notebook_worker:
-            self.notebook_worker.cancel()
         if self.worker:
             self.worker.cancel()
         if self.media_runner:
             await self.media_runner.cleanup()
         await super().close()
-
-    def recap_config(self):
-        channel=int(self.db.setting('recap_channel',self.config.recap_channel_id))
-        author=int(self.db.setting('recap_author',self.config.source_bot_id))
-        return channel,author
-
-    async def ingest_message(self,message):
-        # Preserve existing records; automatic collection is paused.
-        return
-
-    async def recover_recaps(self):
-        return
-
-    async def pending_reviews(self, force=False):
-        return False
-
-    async def refresh_footers(self):
-        owner=await self.fetch_user(self.config.owner_id)
-        channel=owner.dm_channel or await owner.create_dm()
-        ids={r['review_message_id'] for r in self.db.rows('SELECT review_message_id FROM matches WHERE review_message_id IS NOT NULL')}
-        ids.update(r['message_id'] for r in self.db.rows('SELECT message_id FROM weekly_jobs WHERE message_id IS NOT NULL'))
-        setup_ids={r['review_message_id'] for r in self.db.rows("SELECT review_message_id,raw_recap FROM matches WHERE match_type='Ignored' AND review_message_id IS NOT NULL") if is_setup_prompt(r['raw_recap'])}
-        for message_id in ids:
-            try:
-                message=await channel.fetch_message(int(message_id))
-                if message.author.id!=self.user.id:
-                    continue
-                changed=False
-                archived=message_id in setup_ids
-                for embed in message.embeds:
-                    if archived and embed.description!='Ignored — this was an OurProClubs setup menu, not a match recap. No club statistics were counted.':
-                        embed.description='Ignored — this was an OurProClubs setup menu, not a match recap. No club statistics were counted.'
-                        changed=True
-                    old=embed.footer.text if embed.footer else None
-                    if old and not old.startswith(PEP_FOOTER+'\n'):
-                        embed.set_footer(text=branded_footer(old));changed=True
-                if changed or (archived and message.components):
-                    if archived:
-                        await message.edit(embeds=message.embeds,view=None)
-                    else:
-                        await message.edit(embeds=message.embeds)
-            except discord.HTTPException:
-                continue
 
     async def coaching_advice(self, user_id, request_id, analysis, formation=''):
         analysis=analysis.strip()
@@ -906,13 +619,6 @@ class GafferBot(discord.Client):
             if len(advice)>3900:
                 kwargs['file']=discord.File(io.BytesIO(advice.encode()),filename='pep-tactical-advice.txt')
             await message.reply(**kwargs)
-            return
-        if message.guild.id!=self.config.guild_id:
-            return
-        parsed=parse_registration(message.content)
-        if parsed:
-            self.db.register_player(message.author.id,message.author.name,*parsed)
-            await message.reply(f'Saved your preferred position: {parsed[0]}; role: {parsed[1]}.',mention_author=False)
 
     async def attach_weekly_photo(self,message,report_id):
         attachment=message.attachments[0]
@@ -926,7 +632,6 @@ class GafferBot(discord.Client):
             if was_draft:
                 article=self.db.report(report_id)['article']
                 files=await report_attachments(self.db,report_id,article)
-                saved=report_content(self.db,report_id)
                 await message.reply(f'Updated private draft #{report_id} with your selected player photo. Nothing published.',files=files,view=DraftView(self,report_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
                 await send_checked_article(message.channel,self.db,report_id)
             else:
@@ -1024,11 +729,6 @@ class GafferBot(discord.Client):
                 raise app_commands.CheckFailure('Management only.')
             return True
 
-        async def player_server(interaction):
-            if interaction.guild_id!=self.config.guild_id:
-                raise app_commands.CheckFailure('Use player commands in the club server.')
-            return True
-
         @self.tree.command(name='tacticaladvice',description='Paste PCT analysis for private club tactical advice')
         @app_commands.check(authorized)
         @app_commands.describe(analysis='Paste PCT’s written findings and your observations',formation='Optional: the formation you used')
@@ -1042,54 +742,6 @@ class GafferBot(discord.Client):
             if len(advice)>3900:
                 kwargs['file']=discord.File(io.BytesIO(advice.encode()),filename='pep-tactical-advice.txt')
             await interaction.followup.send(**kwargs)
-
-        @self.tree.command(name='linkplayer',description='Connect your Discord account to your exact OurProClubs player name')
-        @app_commands.check(player_server)
-        async def linkplayer(interaction,player_name:str):
-            try:
-                link=self.db.link_player(interaction.user.id,interaction.user.name,player_name,interaction.user.id)
-                text=f"Linked you to **{discord.utils.escape_markdown(link['player_name'])}**. This is your supplied stats name; it does not grant server roles. Use /myplayer to check it."
-            except ValueError as error:
-                text=str(error)
-            await interaction.response.send_message(text,ephemeral=True)
-
-        @self.tree.command(name='myfeedback',description='Get private coaching feedback from your classified match stats')
-        @app_commands.check(player_server)
-        async def myfeedback(interaction):
-            text=player_feedback(self.db,interaction.user.id)
-            if len(text)<=1900:
-                await interaction.response.send_message(text,ephemeral=True)
-            else:
-                await interaction.response.send_message('Your private player feedback:',file=discord.File(io.BytesIO(text.encode()),filename='pep-player-feedback.txt'),ephemeral=True)
-
-        @self.tree.command(name='myplayer',description='Check which stats name is linked to you')
-        @app_commands.check(player_server)
-        async def myplayer(interaction):
-            link=self.db.player_link(interaction.user.id)
-            text=f"Your stats name: **{discord.utils.escape_markdown(link['player_name'])}**. Use /linkplayer to correct it or /unlinkplayer to remove it." if link else 'No player name linked yet. Use /linkplayer with your exact name from OurProClubs.'
-            await interaction.response.send_message(text,ephemeral=True)
-
-        @self.tree.command(name='unlinkplayer',description='Remove your player-name link without deleting match stats')
-        @app_commands.check(player_server)
-        async def unlinkplayer(interaction):
-            self.db.unlink_player(interaction.user.id)
-            await interaction.response.send_message('Your player link is removed. Saved match stats remain safe.',ephemeral=True)
-
-        @self.tree.command(name='setplayerlink',description='Management: correct or remove a member’s stats-name link')
-        @app_commands.check(authorized)
-        async def setplayerlink(interaction,member:discord.Member,player_name:str=''):
-            if member.guild.id!=self.config.guild_id or member.bot:
-                await interaction.response.send_message('Choose a player in this club server.',ephemeral=True); return
-            try:
-                if player_name:
-                    link=self.db.link_player(member.id,member.name,player_name,interaction.user.id)
-                    text=f"Saved {discord.utils.escape_markdown(member.display_name)} → {discord.utils.escape_markdown(link['player_name'])}."
-                else:
-                    self.db.unlink_player(member.id)
-                    text='Removed the link. Match stats remain saved.'
-            except ValueError as error:
-                text=str(error)
-            await interaction.response.send_message(text,ephemeral=True)
 
         @self.tree.command(name='notebook',description='Owner: download Pep’s Notebook for Excel or Google Sheets')
         @app_commands.check(authorized)
@@ -1132,33 +784,13 @@ class GafferBot(discord.Client):
         @app_commands.check(authorized)
         async def status(interaction):
             unknown=self.db.one("SELECT COUNT(*) AS n FROM matches WHERE match_type='Unknown'")['n']
-            await interaction.response.send_message(f'Pep is online in tactical coaching mode. Automatic match imports and review DMs are paused. {unknown} saved Unknown matches remain. Friday reminders: {"enabled" if self.config.schedule_enabled else "test mode"}.',ephemeral=True)
-
-        @self.tree.command(name='configurepep',description='Choose the OurProClubs text recap channel and source bot')
-        @app_commands.check(authorized)
-        async def configure(interaction,channel:discord.TextChannel,source_bot:discord.Member):
-            if interaction.user.id!=self.config.owner_id:
-                await interaction.response.send_message('Only Coach can change the listener settings.',ephemeral=True); return
-            if channel.guild.id!=self.config.guild_id or not source_bot.bot:
-                await interaction.response.send_message('Choose a channel in this server and the actual OurProClubs bot.',ephemeral=True); return
-            self.db.set_setting('recap_channel',channel.id); self.db.set_setting('recap_author',source_bot.id)
-            if self.db.setting(f'cursor:{channel.id}') is None:
-                self.db.set_setting(f'cursor:{channel.id}',discord.utils.time_snowflake(datetime.now(timezone.utc)))
-            await interaction.response.send_message('Source settings saved. Automatic match imports are paused. Paste analysis into /tacticaladvice or DM Pep.',ephemeral=True)
+            await interaction.response.send_message(f'Pep is online. AI runs only when you ask. {unknown} saved matches are still unclassified.',ephemeral=True)
 
         @self.tree.command(name='matches',description='List recent saved matches and their classifications')
         @app_commands.check(authorized)
         async def matches(interaction):
             rows=self.db.rows('SELECT * FROM matches ORDER BY played_at DESC,match_id DESC LIMIT 15')
             await interaction.response.send_message('\n'.join(f"#{m['match_id']} {match_label(m)} [{m['match_type']}]" for m in rows)[:1900] or 'No matches saved yet.',ephemeral=True)
-
-        @self.tree.command(name='endsession',description='Management: finish this recap session and request one review DM')
-        @app_commands.check(authorized)
-        async def endsession(interaction):
-            await interaction.response.defer(ephemeral=True)
-            await self.recover_recaps()
-            sent=await self.pending_reviews(force=True)
-            await interaction.followup.send('Session review sent to Coach.' if sent else 'Automatic session reviews are paused. Use /tacticaladvice or DM Pep with PCT’s analysis.',ephemeral=True)
 
         @self.tree.command(name='reviewmatches',description='Review the next ten unclassified matches')
         @app_commands.check(authorized)
@@ -1276,18 +908,6 @@ class GafferBot(discord.Client):
         async def officialrecord(interaction):
             r=self.db.official_record()
             await interaction.response.send_message(f"Official record: {r['wins']} wins, {r['draws']} draws, {r['losses']} losses. {r['played']} matches with verified scores.",ephemeral=True)
-
-        @self.tree.command(name='testweeklydm',description='Owner-only: test weekly DM delivery without enabling Friday jobs')
-        @app_commands.check(authorized)
-        async def testweeklydm(interaction):
-            if interaction.user.id!=self.config.owner_id:
-                await interaction.response.send_message('Only Coach can run this test.',ephemeral=True); return
-            await interaction.response.defer(ephemeral=True)
-            now=datetime.now(timezone.utc)
-            self.scheduler.seed(now)
-            report=self.db.open_report(*week_window(now),self.config.owner_id)
-            self.scheduler.schedule_test(now)
-            await interaction.followup.send('One-minute scheduler test queued. The DM should arrive within 90 seconds. Friday scheduling remains disabled unless PEP_FRIDAY_RECAP is true.',ephemeral=True)
 
         @self.tree.error
         async def command_error(interaction,error):

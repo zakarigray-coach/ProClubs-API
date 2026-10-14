@@ -8,15 +8,10 @@ class Config:
     token: str
     owner_id: int
     guild_id: int
-    recap_channel_id: int = 0
-    source_bot_id: int = 0
     management_role_ids: tuple[int,...] = ()
     database_path: str = 'gaffergpt.db'
-    schedule_enabled: bool = False
-    owner_player_name: str = ''
     reporter_secret: str = ''
     reporter_port: int = 8080
-    session_quiet_minutes: int = 60
     rt_media_token: str = ''
     publish_channel_id: int = 0
 
@@ -27,12 +22,8 @@ class Config:
         guild=int(os.getenv('GAFFER_GUILD_ID','0'))
         if not token or not owner or not guild:
             raise ValueError('Set GAFFER_DISCORD_TOKEN, OWNER_DISCORD_USER_ID and GAFFER_GUILD_ID in Railway.')
-        return cls(token,owner,guild,int(os.getenv('OURPROCLUBS_CHANNEL_ID','0')),
-                   int(os.getenv('OURPROCLUBS_BOT_ID','0')),
+        return cls(token,owner,guild,
                    tuple(int(x.strip()) for x in os.getenv('GAFFER_MANAGEMENT_ROLE_IDS','').split(',') if x.strip()),
                    os.getenv('GAFFER_DATABASE_PATH',str(Path(__file__).resolve().parents[1]/'gaffergpt.db')),
-                   os.getenv('PEP_FRIDAY_RECAP',os.getenv('GAFFER_FRIDAY_ENABLED','false')).lower()=='true',
-                   os.getenv('PEP_OWNER_PLAYER_NAME',''),
                    os.getenv('PEP_REPORTER_TOKEN',''),int(os.getenv('PEP_REPORTER_PORT','8080')),
-                   max(30,int(os.getenv('PEP_SESSION_IDLE_MINUTES','60'))),
                    os.getenv('RT_MEDIA_DISCORD_TOKEN',''),int(os.getenv('RT_MEDIA_PUBLISH_CHANNEL_ID','0')))
