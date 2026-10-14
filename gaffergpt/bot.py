@@ -191,16 +191,16 @@ class RecapConfirmView(ManagedView):
                     log.warning('Weekly sports writer unavailable; confirmed facts retained.')
                     await interaction.followup.send('The sports writer could not finish. Your results are saved. Tap Approve & Send to RT Media again to retry.',ephemeral=True)
                     return
-                owner=await bot.fetch_user(bot.config.owner_id)
+                desk=bot.media_desk();owner=await desk.fetch_user(bot.config.owner_id)
                 if existing.get('photo'):
                     files.append(discord.File(io.BytesIO(existing['photo']),filename=f'Featured_Player_{report_id}.{existing["photo_extension"]}'))
-                await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+                await owner.send(content=f'Weekly draft #{report_id} — review only. Nothing published.',files=files,view=DraftView(desk,report_id),allowed_mentions=discord.AllowedMentions.none())
                 await send_checked_article(owner,bot.db,report_id)
                 bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
                 bot.db.set_setting('weekly_dm_awaiting','')
                 bot.db.set_setting(f'weekly_excel:{report_id}','')
                 bot.db.set_setting(f'weekly_excel_context:{report_id}','')
-                await interaction.followup.send('Your private article draft is ready.',ephemeral=True)
+                await interaction.followup.send('Sent to RT Football Media. Your private draft is in your DMs.',ephemeral=True)
         self.add_item(Action('Approve & Send to RT Media',f'pep:recapconfirm:{request_id}',confirm,discord.ButtonStyle.success))
         async def choose_player(interaction):
             if interaction.user.id!=bot.config.owner_id:
@@ -417,12 +417,12 @@ class ReportView(ManagedView):
                 log.warning('Weekly sports writer unavailable; confirmed selections retained.')
                 await interaction.followup.send('The draft could not be completed. Your selections are saved. Try Generate Report again.',ephemeral=True)
                 return
-            owner=await bot.fetch_user(bot.config.owner_id)
+            desk=bot.media_desk();owner=await desk.fetch_user(bot.config.owner_id)
             supplied=report_content(bot.db,report_id)
             if supplied.get('photo'):
                 files.append(discord.File(io.BytesIO(supplied['photo']),filename=f'Featured_Player_{report_id}.{supplied["photo_extension"]}'))
             await owner.send(content=f'RT Football Media draft #{report_id} — review only. Nothing has been published.',
-                files=files,view=DraftView(bot,report_id),allowed_mentions=discord.AllowedMentions.none())
+                files=files,view=DraftView(desk,report_id),allowed_mentions=discord.AllowedMentions.none())
             await send_checked_article(owner,bot.db,report_id)
             bot.db.execute('UPDATE weekly_reports SET draft_sent_at=? WHERE report_id=?',(utcnow(),report_id))
             await interaction.followup.send('Draft sent to Coach for review.',ephemeral=True)
@@ -523,7 +523,12 @@ class GafferBot(discord.Client):
         self.tree=app_commands.CommandTree(self)
         self.worker=None
         self.media_runner=None
+        self.rt_media=None
         self.register_commands()
+
+    def media_desk(self):
+        """Drafts and approvals go out under RT Media's identity when that bot is connected."""
+        return self.rt_media if self.rt_media and self.rt_media.is_ready() else self
 
     def manager(self, interaction):
         if interaction.user.id==self.config.owner_id:
@@ -577,6 +582,8 @@ class GafferBot(discord.Client):
             self.worker.cancel()
         if self.media_runner:
             await self.media_runner.cleanup()
+        if self.rt_media and not self.rt_media.is_closed():
+            await self.rt_media.close()
         await super().close()
 
     def saved_formation(self):
@@ -984,10 +991,27 @@ class GafferBot(discord.Client):
                 await interaction.response.send_message(text,ephemeral=True)
 
 
+async def run_rt_media(pep):
+    # A newsroom login problem must not take the tactical coach offline.
+    try:
+        await pep.rt_media.start(pep.config.rt_media_token)
+    except Exception as error:
+        log.error('RT Football Media could not connect: %s',type(error).__name__)
+
+
+async def run(config):
+    pep=GafferBot(config)
+    async with pep:
+        if config.rt_media_token:
+            from .rt_media import RTMediaBot
+            pep.rt_media=RTMediaBot(pep)
+            asyncio.create_task(run_rt_media(pep))
+        await pep.start(config.token)
+
+
 def main():
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(name)s %(message)s')
-    config=Config.load()
-    GafferBot(config).run(config.token,log_handler=None)
+    asyncio.run(run(Config.load()))
 
 
 if __name__=='__main__':
