@@ -5,6 +5,7 @@ his approval and publishes. It shares Pep's database and makes no football decis
 """
 import logging
 import discord
+from discord import app_commands
 from .bot import DraftView, GafferBot
 
 log=logging.getLogger('rt_media')
@@ -27,6 +28,13 @@ class RTMediaBot(discord.Client):
     async def setup_hook(self):
         for report in self.db.rows("SELECT report_id FROM weekly_reports WHERE status!='skipped'"):
             self.add_view(DraftView(self,report['report_id']))
+        # RT Media has no slash commands; syncing an empty list clears the retired bot's old ones.
+        try:
+            tree=app_commands.CommandTree(self)
+            await tree.sync(guild=discord.Object(id=self.config.guild_id))
+            await tree.sync()
+        except discord.HTTPException as error:
+            log.warning('Could not clear old RT Media commands: %s',type(error).__name__)
 
     async def on_ready(self):
         log.info('RT Football Media connected as %s',self.user)
