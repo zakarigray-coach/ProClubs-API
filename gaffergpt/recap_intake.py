@@ -13,6 +13,7 @@ Use explicit UTC timestamps converted to America/New_York dates. Include only ma
 Weekly player totals may cover practices as well as official games: state that scope in the award suggestion.
 Use Coach explicit classifications (including all practice) when provided; never use EA league labels as official status.
 A Coach statement that all matches are practices is final input: apply Practice to every match without asking again.
+The latest explicit Coach correction resolves conflicting dates or venues in earlier text and images. Apply it to the retained recap; do not ask again for a date Coach has just confirmed. Screenshot timestamps may use a different timezone from Coach's match date.
 Practice does NOT require home/away: leave venue unknown and do not ask to confirm null home/away.
 The result preview is the confirmation step. Do not request an additional confirmation of already supplied facts.
 questions must be empty when every match has a date, type, opponent and both scores.

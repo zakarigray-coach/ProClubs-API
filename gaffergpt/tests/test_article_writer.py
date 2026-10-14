@@ -50,6 +50,43 @@ class SportsArticleTests(unittest.TestCase):
         self.assertEqual(packet['observations']['player_statistics']['Practice'][0]['goals_conceded'],10)
 
 class FinishedArticleTests(unittest.TestCase):
+    def test_short_results_only_article_does_not_require_padding(self):
+        from gaffergpt.article_writer import check_finished_prose
+        article={'title':'Birmingham win away before home defeat','body':
+            'Birmingham City recorded two contrasting results. They beat Middlesbrough 1-0 away and lost 0-4 at home to Everton. '
+            'The results left Birmingham with one win and one defeat. The away victory and home loss provided contrasting scorelines.'}
+        self.assertLess(len(article['body'].split()),40)
+        check_finished_prose(article,{'results':'Middlesbrough 1-0, Everton 0-4'})
+
+    def test_selected_match_date_passes_but_invented_date_is_held(self):
+        import json
+        from gaffergpt.tests.test_report_verification import fixture
+        matches=[fixture(1,'Official','Middlesbrough',1,0),fixture(2,'Official','Everton',0,4)]
+        for match in matches:match.update(played_at='2026-10-14T16:00:00+00:00',date_source='management-date')
+        matches[0]['venue']='Away'
+        packet={'matches':matches,'statistics':[]}
+        for day in (14,15):
+            with self.subTest(day=day):
+                sentences={
+                    'Middlesbrough':f'Birmingham City beat Middlesbrough 1-0 in an official away match on {day} October.',
+                    'Everton':f'Birmingham City lost 0-4 at home to Everton in an official match on {day} October.'}
+                article={'title':'Birmingham record contrasting official results','body':'\n\n'.join(sentences.values())}
+                class Writer(SportsWriter):
+                    async def advise(self,analysis,formation=''):
+                        request=json.loads(analysis)
+                        if request.get('desk_task')=='audit_finished_article':return json.dumps({'title':'PASS','body':''})
+                        if request.get('desk_task')=='locate_final_claims':
+                            return json.dumps({'claims':[{'fact_id':key,'quote':sentences[fact['subject']]}
+                                for key,fact in request['fact_sheet']['facts'].items() if fact['kind'] in ('fixture','date')],'unsupported':[]})
+                        return json.dumps(article)
+                writer=Writer('test')
+                if day==14:
+                    self.assertEqual(writer.write(packet),(article['title'],article['body']))
+                    self.assertIsNotNone(writer.last_verification)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'three revision attempts'):writer.write(packet)
+                    self.assertIsNone(writer.last_verification)
+
     def test_known_broken_grammar_is_rejected(self):
         from gaffergpt.article_writer import check_finished_prose
         for broken in ('one goals and one assists across one practice appearances',

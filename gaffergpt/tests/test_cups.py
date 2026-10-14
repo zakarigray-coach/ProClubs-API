@@ -69,6 +69,46 @@ class CupTests(unittest.TestCase):
         for body in ('Birmingham advanced from the cup.', 'Birmingham were champions.', 'Test Player was Player of the Tournament.'):
             with self.assertRaises(ValueError):validate_final({'title':'Birmingham cup report','body':body},sheet,{'claims':[],'unsupported':[]})
 
+    def test_two_match_elimination_accepts_equivalent_wording(self):
+        a=self.add('2-1',opponent='Test First')
+        b=self.add('0-2',opponent='Test Second')
+        configure_report(self.db,self.report['report_id'],KEY,'Eliminated','Coach confirms elimination after the second fixture.')
+        sheet=build_fact_sheet(self.packet([a,b]))
+        outcome_id=next(k for k,f in sheet['facts'].items() if f['metric']=='confirmed_outcome')
+        for body in ('Birmingham were eliminated from the cup.', 'Birmingham were knocked out of the cup.', 'Birmingham faced a cup exit.'):
+            with self.subTest(body=body):
+                validate_final({'title':'Birmingham cup report','body':body},sheet,
+                    {'claims':[{'fact_id':outcome_id,'quote':body}],'unsupported':[]})
+        self.assertEqual(sheet['groups']['Cup']['summary']['matches'],2)
+        self.assertEqual(self.db.official_record()['played'],0)
+        for body in ('Birmingham advanced from the cup.', 'Birmingham were champions.'):
+            with self.subTest(conflicting=body),self.assertRaises(ValueError):
+                validate_final({'title':'Birmingham cup report','body':body},sheet,
+                    {'claims':[{'fact_id':outcome_id,'quote':body}],'unsupported':[]})
+
+    def test_equivalent_progression_wording_still_needs_confirmation(self):
+        sheet=build_fact_sheet(self.packet([self.add()]))
+        for body in ('Birmingham were knocked out of the cup.', 'Birmingham faced a cup exit.',
+                     'Birmingham progressed from the cup.', 'Birmingham qualified from the cup.',
+                     'Birmingham lifted the cup.', 'Birmingham won the tournament.'):
+            with self.subTest(body=body),self.assertRaises(ValueError):
+                validate_final({'title':'Birmingham cup report','body':body},sheet,{'claims':[],'unsupported':[]})
+
+    def test_other_confirmed_outcomes_accept_equivalent_wording(self):
+        mid=self.add('2-1',stage='Final')
+        for outcome,bodies in (
+            ('Advanced',('Birmingham advanced from the cup.', 'Birmingham progressed from the cup.', 'Birmingham qualified from the cup.')),
+            ('Champions',('Birmingham were champions.', 'Birmingham lifted the cup.', 'Birmingham won the tournament.')),
+            ('Still competing',('Birmingham are still competing in the cup.',)),
+        ):
+            configure_report(self.db,self.report['report_id'],KEY,outcome,'Coach confirms the supplied outcome.')
+            sheet=build_fact_sheet(self.packet([mid]))
+            outcome_id=next(k for k,f in sheet['facts'].items() if f['metric']=='confirmed_outcome')
+            for body in bodies:
+                with self.subTest(outcome=outcome,body=body):
+                    validate_final({'title':'Birmingham cup report','body':body},sheet,
+                        {'claims':[{'fact_id':outcome_id,'quote':body}],'unsupported':[]})
+
     def test_invalid_shootout_or_extra_time_rejected(self):
         with self.assertRaises(ValueError):self.add('2-1',penalties_for=5,penalties_against=4)
         with self.assertRaises(ValueError):self.add('1-1',extra_time_for=2,extra_time_against=1)

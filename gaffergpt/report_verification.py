@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from .excel_stats import player_totals
+from .cup_verification import OUTCOME_PATTERNS, cover_event_claim
 
 
 class ReportHold(ValueError):
@@ -220,8 +221,7 @@ def validate_final(article,sheet,evidence):
     if evidence.get('unsupported'):raise ValueError('Unsupported final claims: '+'; '.join(evidence['unsupported'])[:700])
     event=(sheet.get('competition_context') or {}).get('event',{})
     if event.get('report_type')=='Cup':
-        outcomes={'Advanced':r'\b(?:advanced|progressed|qualified)\b','Eliminated':r'\b(?:eliminated|knocked out|cup exit)\b','Champions':r'\b(?:champions|lifted the (?:cup|trophy)|won the (?:cup|tournament))\b'}
-        for outcome,pattern in outcomes.items():
+        for outcome,pattern in OUTCOME_PATTERNS.items():
             if re.search(pattern,text,re.I) and event.get('outcome')!=outcome:
                 raise ValueError('Cup progression or trophy claim lacks matching confirmed outcome.')
         if re.search(r'player of the tournament',text,re.I) and (event.get('award_label')!='Player of the Tournament' or not event.get('award_scope')):
@@ -307,7 +307,6 @@ def validate_final(article,sheet,evidence):
             if scope and scope!=fact['classification']:raise ValueError('Comparison mixes practice and competitive results.')
             if len(sheet['groups'])>1 and not scope:raise ValueError('Comparison requires an explicit practice or competitive scope.')
         elif kind=='event':
-            from .cup_verification import cover_event_claim
             covered.update(cover_event_claim(fact,quote,start,candidates,sheet))
         elif kind=='period':
             if not re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{4}-\d{2}-\d{2}',quote):continue

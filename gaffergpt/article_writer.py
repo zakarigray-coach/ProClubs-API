@@ -186,6 +186,8 @@ class SportsWriter(OpenAICoach):
         brief['verified_facts']=feature_facts(clean)
         if clean.get('period'):brief['verified_facts']['report_period']=clean['period']
         brief['fixtures']=sheet['fixtures']
+        dates=[f"{fact['subject']}: {fact['value']}" for fact in sheet['facts'].values() if fact['kind']=='date']
+        if dates:brief['verified_facts']['fixture_dates']='; '.join(dates)
         event=(clean.get('competition_context') or {}).get('event',{})
         if event.get('report_type')=='Cup':
             brief['competition_context']=clean['competition_context']
@@ -340,7 +342,7 @@ def check_feature_quality(article,packet):
 
 def check_finished_prose(article,facts):
     title,body=article.get('title',''),article.get('body','')
-    if not title.strip() or len(body.split())<40:
+    if not title.strip() or len(body.split())<20:
         raise ValueError('Return a complete headline and developed article')
     if re.search(r'\b\d+[–-]\d+[–-]\d+\b',body):raise ValueError('Spell out wins, draws and defeats; remove the compact record notation.')
     if '[[' in title+body or ']]' in title+body:
