@@ -53,6 +53,11 @@ class ProviderTests(unittest.TestCase):
             OpenAICoach.extract({'status':'incomplete','output':payload['output']})
 
 
+class AsyncContext:
+    async def __aenter__(self):return self
+    async def __aexit__(self,*args):return False
+
+
 class CoachingWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory()
@@ -62,6 +67,47 @@ class CoachingWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.bot.close()
         self.temp.cleanup()
+
+    def dm(self,text,attachments=()):
+        channel=SimpleNamespace(typing=lambda:AsyncContext())
+        return SimpleNamespace(id=77,guild=None,author=SimpleNamespace(id=1,bot=False),content=text,attachments=list(attachments),channel=channel,reply=AsyncMock())
+
+    async def test_live_question_uses_saved_formation_and_five_part_format(self):
+        from gaffergpt.coaching_ai import INSTRUCTIONS
+        for heading in ('Problem detected','Immediate adjustment','Formation / role change','Passing sequence','What to watch next'):
+            self.assertIn(heading,INSTRUCTIONS)
+        self.bot.db.execute("INSERT INTO squad_tactics(tactic_name,formation,build_up_style,defensive_depth) VALUES ('League','4-2-3-1','Balanced',55)")
+        message=self.dm('Their LM is killing us down our right side. What should we change?')
+        await self.bot.on_message(message)
+        args=self.bot.coach.advise.await_args.args
+        self.assertIn('4-2-3-1',args[1]);self.assertEqual(args[2],[])
+        message.reply.assert_awaited_once()
+
+    async def test_question_reaches_pep_while_a_recap_is_open(self):
+        report=self.bot.db.open_report('2026-10-12T04:00:00+00:00','2026-10-19T04:00:00+00:00',1)
+        self.bot.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
+        self.bot.read_weekly_dm=AsyncMock()
+        await self.bot.on_message(self.dm('We cannot get the ball through midfield. What adjustment would you make?'))
+        self.bot.read_weekly_dm.assert_not_awaited();self.bot.coach.advise.assert_awaited_once()
+        await self.bot.on_message(self.dm('2026-10-15 Official Home Chelsea 3-1'))
+        self.bot.read_weekly_dm.assert_awaited_once()
+
+    async def test_screenshot_is_passed_to_the_model_and_video_is_declined(self):
+        png=bytes([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A])+b'rest'
+        shot=SimpleNamespace(size=len(png),read=AsyncMock(return_value=png),filename='heatmap.png')
+        await self.bot.on_message(self.dm('',[shot]))
+        self.assertEqual(self.bot.coach.advise.await_args.args[2],[(png,'image/png')])
+        self.bot.coach.advise.reset_mock()
+        clip=SimpleNamespace(size=10,read=AsyncMock(return_value=bytes(4)+b'ftypmp42'),filename='clip.mp4')
+        message=self.dm('What do you see?',[clip])
+        await self.bot.on_message(message)
+        self.bot.coach.advise.assert_not_awaited()
+        self.assertIn('Video clips are not supported yet',message.reply.await_args.args[0])
+
+    async def test_retired_commands_are_gone_and_core_commands_remain(self):
+        commands={c.name for c in self.bot.tree.get_commands()}
+        self.assertTrue({'tacticaladvice','tactic','weeklyreport','cupreport','status','backup'}<=commands)
+        self.assertFalse({'linkplayer','myfeedback','setplayerlink','configurepep','endsession','testweeklydm'}&commands)
 
     async def test_other_users_and_bots_cannot_trigger_owner_dm_ai(self):
         for user,bot in [(9,False),(1,True)]:

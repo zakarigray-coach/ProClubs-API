@@ -99,7 +99,7 @@ class SportsWriter(OpenAICoach):
     @property
     def last_verification(self):return getattr(self._local,'verification',None)
 
-    def payload(self, analysis, formation=''):
+    def payload(self, analysis, formation='', images=()):
         task=json.loads(analysis).get('desk_task')
         instructions=INSTRUCTIONS
         if task=='audit_finished_article':

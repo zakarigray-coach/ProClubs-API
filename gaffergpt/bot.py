@@ -119,6 +119,30 @@ async def send_checked_article(target,db,report_id,sample=False):
     await send_article_text(target,article)
 
 
+def image_mime(data):
+    if data[:8]==bytes([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]):return 'image/png'
+    if data[:3]==bytes([0xFF,0xD8,0xFF]):return 'image/jpeg'
+    if data[:4]==b'RIFF' and data[8:12]==b'WEBP':return 'image/webp'
+    return None
+
+
+async def coaching_images(message):
+    """Screenshots attached to a coaching DM, passed to the model as supplied evidence."""
+    attachments=getattr(message,'attachments',[])
+    if len(attachments)>4:
+        raise ValueError('Send up to four screenshots at a time.')
+    images=[]
+    for attachment in attachments:
+        if attachment.size>8*1024*1024:
+            raise ValueError('Each screenshot must be 8 MB or smaller.')
+        data=await attachment.read()
+        mime=image_mime(data)
+        if not mime:
+            raise ValueError('I can read PNG, JPEG or WebP screenshots. Video clips are not supported yet; send a screenshot instead.')
+        images.append((data,mime))
+    return images
+
+
 def player_photo_button(bot,report_id,context):
     async def request_photo(interaction):
         if interaction.user.id!=bot.config.owner_id:
@@ -534,10 +558,18 @@ class GafferBot(discord.Client):
             await self.media_runner.cleanup()
         await super().close()
 
-    async def coaching_advice(self, user_id, request_id, analysis, formation=''):
-        analysis=analysis.strip()
+    def saved_formation(self):
+        tactic=self.db.one('SELECT * FROM squad_tactics ORDER BY rowid DESC LIMIT 1')
+        if not tactic:
+            return ''
+        notes=f"; {tactic['custom_instructions']}" if tactic['custom_instructions'] else ''
+        return f"{tactic['formation']} ({tactic['tactic_name']}; build-up {tactic['build_up_style']}; depth {tactic['defensive_depth']}{notes})"
+
+    async def coaching_advice(self, user_id, request_id, analysis, formation='', images=()):
+        analysis=analysis.strip() or ('Analyse the attached screenshot.' if images else '')
         if not analysis or len(analysis)>12000:
-            raise ValueError('Paste PCT’s analysis as text, up to 12,000 characters.')
+            raise ValueError('Send your question or analysis as text, up to 12,000 characters.')
+        formation=formation or self.saved_formation()
         async with self.coaching_lock:
             saved=self.db.one('SELECT advice FROM coaching_notes WHERE request_id=?',(str(request_id),))
             if saved:
@@ -545,7 +577,7 @@ class GafferBot(discord.Client):
             provider='practical-library'
             if self.coach:
                 try:
-                    advice=await self.coach.advise(analysis,formation)
+                    advice=await self.coach.advise(analysis,formation,images)
                     provider=self.coach.model
                 except Exception as error:
                     log.error('Tactical AI unavailable: %s',str(error) if isinstance(error,RuntimeError) else type(error).__name__)
@@ -607,14 +639,18 @@ class GafferBot(discord.Client):
                 await message.reply('Send this week’s league recap text or photo, with dates and home/away. I’ll check the results with you, then prepare a private draft.',mention_author=False); return
             pending=self.db.setting('weekly_dm_awaiting','')
             report=self.db.report(int(pending)) if pending.isdigit() else None
-            if report and report['status'] not in ('approved','skipped') and not message.content.lower().startswith(('tactics:', 'coaching:')):
+            # A plain question is a coaching request even while a recap is open.
+            question=message.content.strip().endswith('?') and not getattr(message,'attachments',[])
+            if report and report['status'] not in ('approved','skipped') and not question and not message.content.lower().startswith(('tactics:', 'coaching:')):
                 await self.read_weekly_dm(message,report)
                 return
-            if not message.content.strip():
-                await message.reply('Paste PCT’s written analysis as text. Screenshots and links alone are not read yet.',mention_author=False)
+            try:
+                images=await coaching_images(message)
+                async with message.channel.typing():
+                    advice=await self.coaching_advice(message.author.id,message.id,message.content,images=images)
+            except ValueError as error:
+                await message.reply(str(error),mention_author=False)
                 return
-            async with message.channel.typing():
-                advice=await self.coaching_advice(message.author.id,message.id,message.content)
             kwargs={'embed':self.coaching_embed(advice),'mention_author':False}
             if len(advice)>3900:
                 kwargs['file']=discord.File(io.BytesIO(advice.encode()),filename='pep-tactical-advice.txt')
@@ -729,9 +765,9 @@ class GafferBot(discord.Client):
                 raise app_commands.CheckFailure('Management only.')
             return True
 
-        @self.tree.command(name='tacticaladvice',description='Paste PCT analysis for private club tactical advice')
+        @self.tree.command(name='tacticaladvice',description='Ask Pep a tactical question or paste your match analysis')
         @app_commands.check(authorized)
-        @app_commands.describe(analysis='Paste PCT’s written findings and your observations',formation='Optional: the formation you used')
+        @app_commands.describe(analysis='Your question, observations or pasted analysis',formation='Optional: tonight’s formation if different from the saved one')
         async def tacticaladvice(interaction,analysis:str,formation:str=''):
             await interaction.response.defer(ephemeral=True)
             try:
