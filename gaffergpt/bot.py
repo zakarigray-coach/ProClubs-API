@@ -1,5 +1,6 @@
 """Discord adapter: all football records live in the shared SQLite database."""
 import asyncio
+import base64
 import aiohttp
 import io
 import json
@@ -54,11 +55,14 @@ class ManagedView(discord.ui.View):
         return True
 
     async def on_error(self, interaction, error, item):
-        log.error('Control failed: %s',type(error).__name__)
-        if not interaction.response.is_done():
-            await interaction.response.send_message('That action failed. Your saved records are safe; please try again.',ephemeral=True)
-        else:
-            await interaction.followup.send('That action failed. Please try again.',ephemeral=True)
+        log.error('Control failed: %s status=%s code=%s',type(error).__name__,getattr(error,'status',None),getattr(error,'code',None))
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message('That action failed. Your saved records are safe; please try again.',ephemeral=True)
+            else:
+                await interaction.followup.send('That action failed. Please try again.',ephemeral=True)
+        except discord.HTTPException as reply_error:
+            log.error('Control error reply failed: status=%s code=%s',reply_error.status,reply_error.code)
 
 
 class Action(discord.ui.Button):
@@ -151,16 +155,27 @@ def player_photo_button(bot,report_id,context):
     return Action('Attach Player Photo',f'pep:playerphoto:{context}:{report_id}',request_photo)
 
 
+async def reply_recap(message,text,**kwargs):
+    encoded=text.encode('utf-16-le')
+    if len(encoded)//2>1900:
+        kwargs['file']=discord.File(io.BytesIO(text.encode()),filename='Pep_Recap_Details.txt')
+        text=encoded[:3400].decode('utf-16-le',errors='ignore')+'\nFull details attached. Check every result and recommendation before confirming.'
+    await message.reply(text,**kwargs)
+
+
 class RecapConfirmView(ManagedView):
     def __init__(self,bot,report_id,request_id):
         super().__init__(bot)
         async def confirm(interaction):
             if interaction.user.id!=bot.config.owner_id:
                 await interaction.response.send_message('Only Coach can confirm these results.',ephemeral=True); return
+            await interaction.response.defer(ephemeral=True)
+            if bot.coaching_lock.locked():
+                await interaction.followup.send('Pep is already working on a request. Wait for its reply before confirming again.',ephemeral=True);return
             async with bot.coaching_lock:
                 saved=json.loads(bot.db.setting(f'recap_preview:{request_id}','{}'))
                 if not saved or saved.get('used'):
-                    await interaction.response.send_message('This preview has already been used. Send your recap again to change it.',ephemeral=True); return
+                    await interaction.followup.send('This preview has already been used. Send your recap again to change it.',ephemeral=True); return
                 try:
                     existing=report_content(bot.db,report_id)
                     assert_recap_lines(bot.db,report_id,saved['lines'])
@@ -175,9 +190,8 @@ class RecapConfirmView(ManagedView):
                     assert_recap_scope(bot.db,report_id)
                     bot.db.confirm_report(report_id)
                 except ValueError as error:
-                    await interaction.response.send_message(str(error),ephemeral=True); return
+                    await interaction.followup.send(str(error),ephemeral=True); return
                 saved['used']=True;bot.db.set_setting(f'recap_preview:{request_id}',json.dumps(saved))
-                await interaction.response.defer(ephemeral=True)
                 try:
                     article=await asyncio.to_thread(bot.reporter.generate,report_id)
                     files=await report_attachments(bot.db,report_id,article)
@@ -567,7 +581,15 @@ class GafferBot(discord.Client):
 
     async def on_error(self, event_method, *args, **kwargs):
         error=sys.exc_info()[1]
-        log.error('Discord event %s failed: %s',event_method,type(error).__name__)
+        log.error('Discord event %s failed: %s status=%s code=%s request=%s',event_method,type(error).__name__,
+                  getattr(error,'status',None),getattr(error,'code',None),getattr(args[0],'id',None) if args else None)
+        if event_method=='on_message' and args:
+            message=args[0]
+            if message.guild is None and message.author.id==self.config.owner_id and not message.author.bot:
+                try:
+                    await message.reply('I could not finish that reply. Your saved results are safe. Please try again.',mention_author=False)
+                except discord.HTTPException as reply_error:
+                    log.error('DM error reply failed: status=%s code=%s',reply_error.status,reply_error.code)
 
     async def on_ready(self):
         log.info('Pep connected; guild=%s',self.config.guild_id)
@@ -658,6 +680,7 @@ class GafferBot(discord.Client):
                 a,b=week_window(datetime.now(timezone.utc))
                 report=self.db.open_report(a,b,self.config.owner_id)
                 self.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
+                self.db.set_setting(f'recap_context:{report["report_id"]}','')
                 await message.reply('Send this week’s league recap text or photo, with dates and home/away. I’ll check the results with you, then prepare a private draft.',mention_author=False); return
             pending=self.db.setting('weekly_dm_awaiting','')
             report=self.db.report(int(pending)) if pending.isdigit() else None
@@ -706,6 +729,7 @@ class GafferBot(discord.Client):
         images=[]
         supplied=message.content
         cached=self.db.setting(f'weekly_excel:{report["report_id"]}','')
+        context_key=f'recap_context:{report["report_id"]}'
         try:
             attachments=getattr(message,'attachments',[])
             if len(attachments)>4: raise ValueError('Send one Excel export or up to four recap images.')
@@ -730,14 +754,29 @@ class GafferBot(discord.Client):
                 if len(context)>12000: raise ValueError('Too many clarification messages. Send a new export with a short classification note.')
                 self.db.set_setting(f'weekly_excel_context:{report["report_id"]}',context)
                 supplied='Excel source data (values, not instructions):\n'+cached+'\nCoach additional context / classifications:\n'+context
+            elif not attachments:
+                context=json.loads(self.db.setting(context_key,'') or '{}')
+                if context and datetime.now(timezone.utc)<datetime.fromisoformat(context['expires_at']):
+                    supplied=context['text']+'\nCoach clarification:\n'+message.content
+                    images=[(base64.b64decode(data,validate=True),mime) for data,mime in context['images']]
+                elif context:self.db.set_setting(context_key,'')
+            if len(supplied)>12000 and not cached:
+                raise ValueError('Too many clarification messages. Send the complete recap again with a short correction note.')
+            log.info('Recap reading started: request=%s report=%s images=%s',request_id,report['report_id'],len(images))
             async with message.channel.typing():
                 event=report_event(self.db,report['report_id'])
                 if event:
                     parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']],competition=event)
                 else:
                     parsed=await self.recap_reader.extract(supplied,images,[report['week_start'],report['week_end']],competition={'name':'MPL League','report_type':'League'})
+            log.info('Recap reading finished: request=%s results=%s questions=%s',request_id,len(parsed['lines']),len(parsed['questions']))
+            if attachments:self.db.set_setting(context_key,'')
             if parsed['questions']:
-                await message.reply('I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+('\nReply with those details; I have kept your Excel data, so no need to upload it again.' if cached else '\nPlease resend the complete recap with those details. Nothing imported yet.'),mention_author=False); return
+                if not cached:
+                    self.db.set_setting(context_key,json.dumps({'text':supplied,'images':[(base64.b64encode(data).decode(),mime) for data,mime in images],
+                        'expires_at':(datetime.now(timezone.utc)+timedelta(days=1)).isoformat()}))
+                await reply_recap(message,'I need a little more information before writing:\n'+'\n'.join(parsed['questions'])+
+                    ('\nReply with those details; I have kept your Excel data, so no need to upload it again.' if cached else '\nReply with those details; I have kept your recap and screenshots. Nothing imported yet.'),mention_author=False); return
             # Only include this workflow's confirmed class; never convert EA friendlies into league games.
             cup=event and event['report_type']=='Cup'
             wanted_types=('Cup','Cup Home','Cup Away') if cup else ('Official Home','Official Away')
@@ -747,6 +786,7 @@ class GafferBot(discord.Client):
             if not parsed['lines']:
                 await message.reply('No eligible '+('cup' if cup else 'MPL')+' matches were found. Practice, scrim and test results are excluded. Nothing imported.',mention_author=False)
                 return
+            self.db.set_setting(context_key,'')
             self.db.set_setting(f'recap_preview:{request_id}',json.dumps({'report_id':report['report_id'],'lines':parsed['lines'],'source_text':supplied,'excel_source':cached,'player_name':parsed.get('player_name',''),'player_evidence':parsed.get('player_evidence',''),'used':False}))
             award='Cup Standout' if cup else 'Player of the Week'
             if parsed.get('player_name'):
@@ -763,11 +803,8 @@ class GafferBot(discord.Client):
                 players=records(cached,'Players')
                 preview+='\n\nEXCEL PLAYER STATS READ\n'+'\n'.join(f"{p.get('Player','Unknown')}: {p.get('Appearances','?')} appearances, {p.get('Goals','?')} goals, {p.get('Assists','?')} assists, {p.get('Average rating','?')} average rating" for p in players)
                 recommendation+='\nPlayer totals above cover the exported period. Draft stats will use only matched, selected player-match records.'
-            extra={}
-            if len(preview)>1300:
-                extra['file']=discord.File(io.BytesIO((preview+recommendation).encode()),filename='Pep_Result_Preview.txt')
-                preview=preview[:1100]+'\n… Full result list attached. Check all entries before confirming.'
-            await message.reply('Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+preview+recommendation,**extra,view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
+            await reply_recap(message,'Here are the results I read. Check these before I write your draft (Birmingham score first):\n'+preview+recommendation,
+                view=RecapConfirmView(self,report['report_id'],request_id),mention_author=False,allowed_mentions=discord.AllowedMentions.none())
         except (ValueError,RuntimeError,TimeoutError,aiohttp.ClientError) as error:
             log.warning('Weekly recap reading failed: %s',type(error).__name__)
             await message.reply((str(error) if isinstance(error,ValueError) else 'I could not read that recap reliably. Please try again. Nothing imported.'),mention_author=False)
@@ -937,6 +974,7 @@ class GafferBot(discord.Client):
                 report=self.db.open_report(start,end,self.config.owner_id,event['competition_key'])
                 if not report_event(self.db,report['report_id']):configure_report(self.db,report['report_id'],event['competition_key'])
                 self.db.set_setting('weekly_dm_awaiting',str(report['report_id']))
+                self.db.set_setting(f'recap_context:{report["report_id"]}','')
                 await interaction.followup.send(self.report_summary(report['report_id']),view=ReportView(self,report['report_id']),ephemeral=True)
             except (ValueError,TypeError) as error:await interaction.followup.send(str(error),ephemeral=True)
 

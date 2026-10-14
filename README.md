@@ -17,6 +17,12 @@ Nothing is published without Coach's approval, and AI runs only when Coach asks 
 
 Cup and tournament matches never mix into the league recap. Start a cup edition with `/cupreport`.
 
+Cup reports can cover a single match or a short run, including two matches ending in elimination. They do not require four matches. To report a cup exit, open **Cup Competition Details**, set the confirmed outcome to `Eliminated`, and supply Coach's confirmation of the deciding result. Until then, the outcome stays `Unknown` and the article cannot claim elimination.
+
+When Pep asks for clarification, reply with the correction. It keeps the original recap text and screenshots for up to a day, including across a restart. Coach's latest explicit date or venue correction takes precedence over conflicting screenshot details. Long questions and previews include a text attachment with the full details.
+
+The confirmation button responds immediately when Pep is busy. Wait for the current request's reply before trying again. Reports with few supplied facts can produce a short article; they still go through the same fact checks and Coach approval.
+
 ## Live-match help
 
 DM Pep a question, with up to four screenshots if useful. Pep answers in five parts: problem detected, immediate adjustment, formation or role change, passing sequence, what to watch next.

@@ -1,6 +1,12 @@
 """Cup claims use event evidence, never ordinary fixture-score references."""
 import re
 
+OUTCOME_PATTERNS = {
+    'Advanced':r'\b(?:advanced|progressed|qualified)\b',
+    'Eliminated':r'\b(?:eliminated|knocked out|cup exit)\b',
+    'Champions':r'\b(?:champions|lifted the (?:cup|trophy)|won the (?:cup|tournament))\b',
+}
+
 
 def cover_event_claim(fact,quote,start,candidates,sheet):
     metric,value=fact['metric'],fact['value'];covered=set()
@@ -15,7 +21,8 @@ def cover_event_claim(fact,quote,start,candidates,sheet):
         if not re.search(r'\bseason\b',quote,re.I):raise ValueError('Season number needs an explicit season label.')
         return {(a,b) for a,b,n in candidates if n==value}
     if metric=='confirmed_outcome':
-        if value['outcome'].lower() not in quote.lower():
+        pattern=OUTCOME_PATTERNS.get(value['outcome'],r'\b'+re.escape(value['outcome'])+r'\b')
+        if not re.search(pattern,quote,re.I):
             raise ValueError('Cup outcome must match its explicit confirmation.')
         return covered
     if metric=='event_dates':
