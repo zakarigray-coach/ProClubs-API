@@ -206,7 +206,6 @@ class RecapConfirmView(ManagedView):
             if interaction.user.id!=bot.config.owner_id:
                 await interaction.response.send_message('Only Coach can choose the award.',ephemeral=True); return
             await interaction.response.send_modal(AwardChoiceModal(bot,request_id))
-        self.add_item(Action('Choose Different Player',f'pep:recapaward:{request_id}',choose_player))
         async def change(interaction):
             bot.db.set_setting('weekly_dm_awaiting',str(report_id))
             await interaction.response.send_message('Reply to Pep with the corrected recap text or photo. No new results have been saved by this button.',ephemeral=True)
@@ -215,6 +214,7 @@ class RecapConfirmView(ManagedView):
             await interaction.response.send_message(bot.report_summary(report_id),view=ReportView(bot,report_id),ephemeral=True)
         self.add_item(player_photo_button(bot,report_id,f'preview:{request_id}'))
         self.add_item(Action('Choose Matches / Report Details',f'pep:recapsetup:{request_id}',setup))
+        self.add_item(Action('Choose Different Player',f'pep:recapaward:{request_id}',choose_player))
 
 
 class AwardChoiceModal(discord.ui.Modal,title='Choose the featured player'):
