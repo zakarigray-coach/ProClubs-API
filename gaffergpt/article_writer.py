@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from .coaching_ai import OpenAICoach
+from . import ai_settings
 from .article_facts import fact_registry
 from .report_verification import build_fact_sheet, validate_final, digest, source_identity
 
@@ -80,10 +81,11 @@ def editorial_packet(packet):
     return clean
 
 class SportsWriter(OpenAICoach):
-    def __init__(self,key,model='gpt-5-mini'):
+    job='REPORTER'
+
+    def __init__(self,key,model=None):
         super().__init__(key,model)
         self._local=threading.local()
-        self.request_timeout=180
 
     async def advise(self,analysis,formation=''):
         task=json.loads(analysis).get('desk_task','draft')
@@ -142,7 +144,7 @@ class SportsWriter(OpenAICoach):
                 'Likewise, an award fitting documented end product, notable attacking supply evidenced by assists, or a contribution being a reference point are proportionate interpretation; cite their premises, do not mark them unsupported. '
                 'Use unsupported only for a SPECIFIC unverifiable numerical value or concrete missing/conflicting premise, event, emotion, tactic, role, quotation or measurable comparison. '
                 'If no supporting fact exists, put the claim in unsupported; never invent fact IDs.',
-                'input':analysis,'max_output_tokens':8000,'reasoning':{'effort':'low'},'store':False,
+                'input':analysis,'max_output_tokens':ai_settings.output_tokens(),'reasoning':{'effort':ai_settings.effort(self.job)},'store':False,
                 'text':{'format':{'type':'json_schema','name':'final_claim_sources','strict':True,
                     'schema':{'type':'object','properties':{
                         'claims':{'type':'array','items':{'type':'object','properties':{
@@ -151,7 +153,7 @@ class SportsWriter(OpenAICoach):
                         'unsupported':{'type':'array','items':{'type':'string'}}},
                         'required':['claims','unsupported'],'additionalProperties':False}}}}
         return {'model':self.model,'instructions':instructions,'input':analysis,
-                'max_output_tokens':8000,'reasoning':{'effort':'medium' if task=='audit_finished_article' else 'low'},'store':False,
+                'max_output_tokens':ai_settings.output_tokens(),'reasoning':{'effort':ai_settings.effort(self.job)},'store':False,
                 'text':{'format':{'type':'json_schema','name':'sports_article','strict':True,
                     'schema':{'type':'object','properties':{'title':{'type':'string'},'body':{'type':'string'}},
                               'required':['title','body'],'additionalProperties':False}}}}

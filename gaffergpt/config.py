@@ -17,6 +17,8 @@ class Config:
     reporter_secret: str = ''
     reporter_port: int = 8080
     session_quiet_minutes: int = 60
+    rt_media_token: str = ''
+    publish_channel_id: int = 0
 
     @classmethod
     def load(cls):
@@ -32,4 +34,5 @@ class Config:
                    os.getenv('PEP_FRIDAY_RECAP',os.getenv('GAFFER_FRIDAY_ENABLED','false')).lower()=='true',
                    os.getenv('PEP_OWNER_PLAYER_NAME',''),
                    os.getenv('PEP_REPORTER_TOKEN',''),int(os.getenv('PEP_REPORTER_PORT','8080')),
-                   max(30,int(os.getenv('PEP_SESSION_IDLE_MINUTES','60'))))
+                   max(30,int(os.getenv('PEP_SESSION_IDLE_MINUTES','60'))),
+                   os.getenv('RT_MEDIA_DISCORD_TOKEN',''),int(os.getenv('RT_MEDIA_PUBLISH_CHANNEL_ID','0')))

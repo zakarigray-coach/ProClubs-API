@@ -1,9 +1,11 @@
 """Extract supplied recap facts for owner confirmation, without importing them."""
 import base64
 import json
+import os
 from datetime import datetime
 import aiohttp
 from .coaching_ai import OpenAICoach
+from . import ai_settings
 
 INSTRUCTIONS='''Extract Birmingham City weekly match results from the supplied text/images/Excel values.
 For Excel input, inspect all supplied worksheets: Matches, Players and Player matches.
@@ -48,9 +50,9 @@ class RecapReader:
         inputs=[{'type':'input_text','text':json.dumps({'reporting_period':period,'supplied_recap':text,'management_selected_competition':competition})}]
         for data,mime in images:
             inputs.append({'type':'input_image','image_url':f'data:{mime};base64,'+base64.b64encode(data).decode()})
-        payload={'model':self.coach.model,'instructions':INSTRUCTIONS,'input':[{'role':'user','content':inputs}],
-                 'text':{'format':{'type':'json_schema','name':'weekly_recap','strict':True,'schema':OUTPUT_SCHEMA}},'max_output_tokens':6500,'reasoning':{'effort':'low'},'store':False}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+        payload={'model':os.getenv('PEP_RECAP_MODEL') or self.coach.model,'instructions':INSTRUCTIONS,'input':[{'role':'user','content':inputs}],
+                 'text':{'format':{'type':'json_schema','name':'weekly_recap','strict':True,'schema':OUTPUT_SCHEMA}},'max_output_tokens':ai_settings.output_tokens(),'reasoning':{'effort':ai_settings.effort('RECAP')},'store':False}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ai_settings.timeout())) as session:
             async with session.post('https://api.openai.com/v1/responses',headers={'Authorization':'Bearer '+self.coach.key},json=payload) as response:
                 if response.status!=200:
                     detail=await response.json()

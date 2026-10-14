@@ -2,6 +2,7 @@
 import json
 import os
 import aiohttp
+from . import ai_settings
 
 
 INSTRUCTIONS = '''You are Pep, Birmingham City's practical EA SPORTS FC Pro Clubs tactical coach.
@@ -21,20 +22,22 @@ as possibilities. Do not publish articles or change match classifications.'''
 
 
 class OpenAICoach:
-    def __init__(self, key, model='gpt-5-mini'):
+    job='COACH'
+
+    def __init__(self, key, model=None):
         self.key=key
-        self.model=model
-        self.request_timeout=60
+        self.model=model or ai_settings.model(self.job)
+        self.request_timeout=ai_settings.timeout()
 
     @classmethod
     def from_environment(cls):
         key=os.getenv('PEP_COACH_API_KEY','')
-        return cls(key,os.getenv('PEP_COACH_MODEL','gpt-5-mini')) if key else None
+        return cls(key) if key else None
 
     def payload(self, analysis, formation=''):
         return {'model':self.model,'instructions':INSTRUCTIONS,
                 'input':json.dumps({'supplied_analysis':analysis,'supplied_formation':formation}),
-                'max_output_tokens':2000,'reasoning':{'effort':'low'},'store':False}
+                'max_output_tokens':ai_settings.output_tokens(),'reasoning':{'effort':ai_settings.effort(self.job)},'store':False}
 
     @staticmethod
     def extract(payload):

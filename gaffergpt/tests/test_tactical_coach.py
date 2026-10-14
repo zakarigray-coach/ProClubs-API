@@ -28,7 +28,21 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn('invent 10 goals',payload['instructions'])
         self.assertIn('invent 10 goals',payload['input'])
         self.assertFalse(payload['store'])
-        self.assertEqual(payload['max_output_tokens'],2000)
+        self.assertEqual(payload['max_output_tokens'],32000)
+
+    def test_model_and_effort_come_from_settings_not_code(self):
+        from unittest.mock import patch
+        from gaffergpt.article_writer import SportsWriter
+        with patch.dict('os.environ',{},clear=True):
+            payload=OpenAICoach('k').payload('x')
+            self.assertEqual((payload['model'],payload['reasoning']['effort']),('gpt-6-luna','max'))
+        with patch.dict('os.environ',{'PEP_AI_MODEL':'gpt-6-sol','PEP_AI_EFFORT':'high','PEP_COACH_EFFORT':'medium','PEP_REPORTER_MODEL':'gpt-6-luna'},clear=True):
+            self.assertEqual(OpenAICoach('k').payload('x')['reasoning']['effort'],'medium')
+            self.assertEqual(OpenAICoach('k').model,'gpt-6-sol')
+            writer=SportsWriter('k')
+            self.assertEqual((writer.model,writer.payload('{"desk_task":"draft"}')['reasoning']['effort']),('gpt-6-luna','high'))
+        with patch.dict('os.environ',{'PEP_AI_EFFORT':'maxx'},clear=True):
+            self.assertEqual(OpenAICoach('k').payload('x')['reasoning']['effort'],'max')
         self.assertNotIn('not-a-real-key',str(payload))
 
     def test_extract_does_not_treat_reasoning_or_partial_output_as_final(self):

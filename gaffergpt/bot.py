@@ -34,6 +34,7 @@ from .recap_intake import RecapReader
 from .excel_intake import read_excel
 from .excel_stats import player_totals, save_excel_statistics, imported_statistics, stats_text, records
 from .cup_setup import CupAvailabilityView, run_cup_setup, load as load_cup_setup
+from .publisher import PublishError, publish_report
 
 log=logging.getLogger('gaffergpt')
 PEP_FOOTER='Pep • Birmingham Tactical Coach 🔵 | Keep Right On'
@@ -527,7 +528,20 @@ class DraftView(ManagedView):
             await interaction.response.send_message(file=discord.File(io.BytesIO(('\n\n'.join(sections)).encode()),filename=f'RT_Statistics_{report_id}.txt'),ephemeral=True)
         self.add_item(Action('View Statistics',f'pep:statistics:{report_id}',statistics))
         self.add_item(player_photo_button(bot,report_id,'draft'))
+        async def publish(interaction):
+            if interaction.user.id!=bot.config.owner_id:
+                await interaction.response.send_message('Only Coach can publish.',ephemeral=True); return
+            await interaction.response.defer(ephemeral=True)
+            try:
+                ids,fresh=await publish_report(bot.db,report_id,bot.config.rt_media_token,bot.config.publish_channel_id)
+            except (PublishError,ReportHold,ValueError) as error:
+                await interaction.followup.send(str(error),ephemeral=True); return
+            except (aiohttp.ClientError,asyncio.TimeoutError):
+                await interaction.followup.send('Discord could not be reached. Tap Publish again; anything already posted will not be repeated.',ephemeral=True); return
+            link=f'https://discord.com/channels/{bot.config.guild_id}/{bot.config.publish_channel_id}/{ids[0]}'
+            await interaction.followup.send(('Published by RT Football Media: ' if fresh else 'Already published, nothing was posted again: ')+link,ephemeral=True)
         self.add_item(Action('Approve Draft (save only)',f'gaffer:approve:{report_id}',approve,discord.ButtonStyle.success))
+        self.add_item(Action('Publish to MPL Announcements',f'rt:publish:{report_id}',publish,discord.ButtonStyle.danger))
         self.add_item(Action('Change Selection',f'gaffer:change:{report_id}',change))
 
 
@@ -579,7 +593,7 @@ class GafferBot(discord.Client):
         self.coach=OpenAICoach.from_environment()
         self.coaching_lock=asyncio.Lock()
         self.recap_reader=RecapReader(self.coach) if self.coach else None
-        self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key,os.getenv("PEP_REPORTER_MODEL",self.coach.model)) if self.coach else None)
+        self.reporter=Reporter(self.db,writer=SportsWriter(self.coach.key) if self.coach else None)
         self.tree=app_commands.CommandTree(self)
         self.scheduler=WeeklyScheduler(self.db,config.owner_id,DiscordDelivery(self))
         self.worker=None
