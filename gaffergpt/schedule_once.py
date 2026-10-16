@@ -93,8 +93,8 @@ async def run_schedule_once(bot):
         if mode == 'stage': return
         forum_id = int(os.environ['PEP_SCHEDULE_FORUM_ID'])
         forum = next(c for c in channels if c.id == forum_id)
-        if not isinstance(forum,discord.ForumChannel) or 'schedule' not in forum.name.lower() or 'mpl' not in forum.name.lower():
-            raise ValueError('Destination must be the MPL schedule forum')
+        if not isinstance(forum,discord.ForumChannel) or forum.id != 1552369533992304660 or 'mpl-match-center' not in forum.name.lower():
+            raise ValueError('Destination must be the verified Birmingham MPL match-center forum')
         if state.get('forum_id') not in (None,forum_id): raise ValueError('Destination changed')
         if state.get('complete'):
             log.info('PEP_SCHEDULE_COMPLETE already-posted forum=%s',forum_id); return
