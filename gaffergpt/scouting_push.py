@@ -18,7 +18,7 @@ THREAD_TITLE = 'Oct 20 | Birmingham City vs Man Utd. | 10 & 10:30 PM ET'
 ACTION = 'man-utd-opposition-brief-2026-10-20-v1'
 RECEIPT_FILE = 'man-utd-opposition-brief-2026-10-20.json'
 ATTACHMENT_NAME = 'Birmingham_vs_Man_United_Opposition_Brief.jpg'
-ASSET_SHA256 = '3f36607a3f4801ca7221ec6980f0439f46cb98cc22b86b623ce7ff47eb6a78b0'
+ASSET_SHA256 = '423f5d93bbc9da05a516f13f7b0a83ceff86f939557f449d9ebdde7eec1ca515'
 MARKER = 'C&C Management | Opposition Scout | Man United | 2026-10-20'
 CONTENT = (
     '📋 **OPPOSITION SCOUT — MAN UNITED**\n'
