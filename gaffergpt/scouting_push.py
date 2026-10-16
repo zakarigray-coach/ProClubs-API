@@ -17,9 +17,8 @@ THREAD_ID = 1560710202679107745
 THREAD_TITLE = 'Oct 20 | Birmingham City vs Man Utd. | 10 & 10:30 PM ET'
 ACTION = 'man-utd-opposition-brief-2026-10-20-v1'
 RECEIPT_FILE = 'man-utd-opposition-brief-2026-10-20.json'
-ASSET_FILE = 'man_united_scout.b64'
 ATTACHMENT_NAME = 'Birmingham_vs_Man_United_Opposition_Brief.jpg'
-ASSET_SHA256 = 'befd2b4d1fc93fbcfbf37c7531ebb6e4f4b60e3507d58afeddae2df2d8929947'
+ASSET_SHA256 = '3f36607a3f4801ca7221ec6980f0439f46cb98cc22b86b623ce7ff47eb6a78b0'
 MARKER = 'C&C Management | Opposition Scout | Man United | 2026-10-20'
 CONTENT = (
     '📋 **OPPOSITION SCOUT — MAN UNITED**\n'
@@ -46,7 +45,9 @@ def _save_state(path, state):
 
 
 def _asset_bytes():
-    encoded = Path(__file__).with_name(ASSET_FILE).read_text().strip()
+    encoded = ''.join(os.getenv(f'PEP_SCOUT_IMAGE_{i}', '') for i in range(1, 8))
+    if not encoded:
+        raise ValueError('Opposition brief image variables are missing')
     data = base64.b64decode(encoded, validate=True)
     if hashlib.sha256(data).hexdigest() != ASSET_SHA256:
         raise ValueError('Opposition brief asset checksum mismatch')
