@@ -548,6 +548,8 @@ class GafferBot(discord.Client):
         return interaction.guild_id==self.config.guild_id and bool(set(self.config.management_role_ids)&{r.id for r in getattr(interaction.user,'roles',[])})
 
     async def setup_hook(self):
+        from .schedule_availability import register_availability
+        register_availability(self)
         cup_setup=load_cup_setup(self.db)
         if cup_setup.get('starter_message_id'):
             self.add_view(CupAvailabilityView(self.db,self.cup_availability_lock),message_id=cup_setup['starter_message_id'])
@@ -596,6 +598,8 @@ class GafferBot(discord.Client):
         await run_cup_setup(self)
         from .schedule_once import run_schedule_once
         await run_schedule_once(self)
+        from .schedule_availability import install_availability
+        await install_availability(self)
 
     async def close(self):
         if self.worker:
