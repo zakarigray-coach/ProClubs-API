@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo
 
 log = logging.getLogger('gaffergpt')
 GUILD_ID = 1524828767426707587
-ACTION = 'mpl-season4-2026-v1'
+ACTION = 'mpl-season4-2026-v2'
+RECEIPT_FILE = 'mpl-season4-v2-once.json'
+FORUM_ID = 1552369533992304660
 
 def make_posts():
     rows = json.loads(Path(__file__).with_name('mpl_schedule_2026.json').read_text())
@@ -25,12 +27,14 @@ def make_posts():
         if len(matches) != 2: raise ValueError('Expected two fixtures per match night')
         opponent = next(m['away'] if m['home'] == 'MPL BirminghamCity' else m['home'] for m in matches).removeprefix('MPL ')
         content = f'🔵 **BIRMINGHAM CITY — MPL SEASON 4**\n📅 **{day:%A, %B %d, %Y}**\n\n'
-        for i, m in enumerate(matches):
-            home = m['home'].removeprefix('MPL ').replace('BirminghamCity', 'Birmingham City')
-            away = m['away'].removeprefix('MPL ').replace('BirminghamCity', 'Birmingham City')
-            venue = 'HOME' if m['home'] == 'MPL BirminghamCity' else 'AWAY'
-            content += f"**10:{'00' if i == 0 else '30'} PM ET — {venue}**\n{home} vs {away}\n{m['round']} • [Official fixture](<{m['url']}>)\n\n"
-        content += 'All kickoff times are Eastern Time, confirmed by Coach.\n**Keep Right On 🔵**'
+        # Coach's Oct 16 correction supersedes the old snapshot's venue order.
+        for i in range(2):
+            home, away = ('Birmingham City', opponent) if i == 0 else (opponent, 'Birmingham City')
+            venue = 'HOME' if i == 0 else 'AWAY'
+            content += f"**10:{'00' if i == 0 else '30'} PM ET — {venue}**\n{home} vs {away}\n\n"
+        content += ('All kickoff times are Eastern Time, confirmed by Coach.\n'
+                    'Use this thread for lineups, positions, late arrivals and match coordination.\n'
+                    '**C&C Management | Keep Right On 🔵**')
         posts.append(dict(key=day.isoformat(),title=f'{day:%b %d} | Birmingham City vs {opponent} | 10 & 10:30 PM ET',content=content))
     return posts
 
@@ -75,19 +79,29 @@ async def run_schedule_once(bot):
         if not isinstance(stage, discord.TextChannel) or stage.permissions_for(guild.default_role).view_channel:
             raise ValueError('Staging must be a private text channel')
         posts = make_posts()
-        path = Path(bot.config.database_path).parent / 'mpl-season4-once.json'
+        from .schedule_availability import ScheduleAvailabilityView, PLAYER_ROLE_ID, render
+        roles = await guild.fetch_roles()
+        if not any(r.id == PLAYER_ROLE_ID and 'birmingham' in r.name.lower() for r in roles):
+            raise ValueError('Birmingham player role did not verify')
+        path = Path(bot.config.database_path).parent / RECEIPT_FILE
         state = json.loads(path.read_text()) if path.exists() else {}
         def save(key,value):
             state[key] = value
             temp = path.with_suffix('.tmp'); temp.write_text(json.dumps(state)); temp.replace(path)
         if not state.get('staged'):
+            from .notebook import daily_backup
+            import asyncio
+            await asyncio.to_thread(daily_backup,bot.db,refresh=True)
             history = [m async for m in stage.history(limit=100)]
             for p in posts:
-                content = f"**SCHEDULE TEST — {p['title']}**\n\n{p['content']}"
+                content = f"**SCHEDULE TEST V2 — {p['title']}**\n\n{render(p,{})}"
                 msg = next((m for m in history if m.author.id == bot.user.id and m.content == content),None)
-                if msg is None: msg = await stage.send(content,allowed_mentions=discord.AllowedMentions.none())
+                preview = ScheduleAvailabilityView(bot.mpl_availability_store,p,0,bot.mpl_availability_lock)
+                for button in preview.children: button.disabled=True
+                if msg is None: msg = await stage.send(content,view=preview,allowed_mentions=discord.AllowedMentions.none())
                 verified = await stage.fetch_message(msg.id)
-                if verified.content != content: raise ValueError('Private staging verification failed')
+                if verified.content != content or sum(len(r.children) for r in verified.components) != 6:
+                    raise ValueError('Private staging verification failed')
             save('staged',True)
         log.info('PEP_SCHEDULE_STAGED count=%s',len(posts))
         if mode == 'stage': return
@@ -96,8 +110,8 @@ async def run_schedule_once(bot):
         if not isinstance(forum,discord.ForumChannel) or forum.id != 1552369533992304660 or 'mpl-match-center' not in forum.name.lower():
             raise ValueError('Destination must be the verified Birmingham MPL match-center forum')
         if state.get('forum_id') not in (None,forum_id): raise ValueError('Destination changed')
-        if state.get('complete'):
-            log.info('PEP_SCHEDULE_COMPLETE already-posted forum=%s',forum_id); return
+        # Even completed runs verify destinations; the availability installer
+        # independently checks all six buttons and recovers interrupted edits.
         existing = [t for t in await guild.active_threads() if t.parent_id == forum_id]
         existing += [t async for t in forum.archived_threads(limit=None)]
         # Preflight every matching title before sending any new post.
@@ -108,7 +122,10 @@ async def run_schedule_once(bot):
                 raise ValueError('Previously posted schedule missing; refusing to recreate')
             if matches:
                 msg = await matches[0].fetch_message(matches[0].id)
-                if msg.author.id != bot.user.id or msg.content != p['content']: raise ValueError('Conflicting existing post')
+                if msg.author.id != bot.user.id or not (msg.content == p['content'] or msg.content.startswith(p['content']+'\n\n**AVAILABILITY')):
+                    raise ValueError('Conflicting existing post')
+        if state.get('complete'):
+            log.info('PEP_SCHEDULE_COMPLETE verified-existing forum=%s',forum_id); return
         save('forum_id',forum_id)
         await publish_posts(forum,posts,bot.user.id,existing,save)
         save('complete',True)

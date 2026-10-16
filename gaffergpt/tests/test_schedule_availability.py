@@ -16,8 +16,8 @@ class AvailabilityTests(unittest.TestCase):
   self.vote(1,'yes');self.vote(2,'yes');self.vote(1,'no')
   store=AvailabilityStore(self.path)
   body=render(self.post,store.responses(self.post['key']))
-  self.assertIn('YES: 1',body);self.assertIn('NO: 1',body)
-  self.assertEqual(len(store.responses(self.post['key'])),2)
+  self.assertIn('Available: 1',body);self.assertIn('Unavailable: 1',body)
+  self.assertEqual(len(store.responses(self.post['key'])['1']),2)
  def test_nights_are_independent(self):
   self.vote(1,'yes')
   self.assertEqual(self.store.responses('2026-10-22'),{})
@@ -35,4 +35,4 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
   with tempfile.TemporaryDirectory() as tmp:
    view=ScheduleAvailabilityView(AvailabilityStore(Path(tmp)/'votes.json'),make_posts()[-1],10,asyncio.Lock())
    self.assertTrue(view.is_persistent())
-   self.assertEqual([b.label for b in view.children],['YES — Available','NO — Unavailable'])
+   self.assertEqual([b.label for b in view.children],['10:00 • Available','10:00 • Maybe','10:00 • Unavailable','10:30 • Available','10:30 • Maybe','10:30 • Unavailable'])
