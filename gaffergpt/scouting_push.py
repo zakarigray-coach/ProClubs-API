@@ -48,7 +48,9 @@ def _save_state(path, state):
 def _asset_bytes():
     chunks = [os.getenv(f'PEP_SCOUT_IMAGE_{i}', '').strip() for i in range(1, 8)]
     lengths = [len(chunk) for chunk in chunks]
+    hashes = [hashlib.sha256(chunk.encode()).hexdigest() for chunk in chunks]
     log.info('PEP_SCOUT_IMAGE_LENGTHS %s total=%s mod4=%s', lengths, sum(lengths), sum(lengths) % 4)
+    log.info('PEP_SCOUT_IMAGE_HASHES %s', hashes)
     if lengths != EXPECTED_CHUNK_LENGTHS:
         raise ValueError(f'Opposition brief image chunk lengths mismatch: {lengths}')
     encoded = ''.join(chunks)
