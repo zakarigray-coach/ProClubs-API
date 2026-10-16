@@ -119,3 +119,8 @@ Coach authorized a fixed 18-fixture snapshot on October 15, 2026, correcting all
 ### Match-night availability
 
 Each existing schedule post has persistent YES/NO buttons, with named counts for both games that night. Only the verified Birmingham City player role can respond. A changed response replaces the old one; dates are independent; voting closes at the corrected first kickoff (10 PM America/New_York). Votes live in `mpl-season4-availability.json` beside the database and survive restarts. `PEP_SCHEDULE_AVAILABILITY=enable-v1` installs buttons once after private staging and destination checks. It edits existing posts without sending duplicates or mentions. Clear the trigger after installation; persistent buttons remain active.
+
+
+## Owner-requested one-time schedule deletion
+
+`PEP_SCHEDULE_DELETE=delete-mpl-season4-2026-v1` removes only the nine exact MPL schedule threads listed in `schedule_delete.py`. Before deleting, the bot verifies each forum, server, thread ID, title, post author and schedule marker. It records each deletion for restart safety. Clear the trigger after completion.
