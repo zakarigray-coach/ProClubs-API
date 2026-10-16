@@ -600,6 +600,8 @@ class GafferBot(discord.Client):
         await run_schedule_once(self)
         from .schedule_availability import install_availability
         await install_availability(self)
+        from .schedule_events import run_schedule_events
+        await run_schedule_events(self)
         from .schedule_delete import run_schedule_delete
         await run_schedule_delete(self)
 

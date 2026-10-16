@@ -124,6 +124,6 @@ Coach approved the October 16, 2026 repost and separate fixture availability. Th
 
 The receipt is `/data/mpl-season4-v2-once.json` and votes are `/data/mpl-season4-v2-availability.json`. The first staging run takes a checked database backup. Previous v1 receipts and availability are preserved. No match history, AI calls, recurring jobs, feeds, or role mentions are involved. If named counts exceed Discord's message limit, complete player lists are attached as text.
 
-Forum posts do not automatically become Discord Scheduled Events. Discord's Interested count is independent of the availability buttons.
+`PEP_SCHEDULE_EVENTS=enable-v2` creates one guild-only Scheduled Event per match night (10–11 PM America/New_York). Each Event links to its forum thread, lists both kickoffs, and receives a reciprocal link in that thread. It verifies all forum posts and availability controls first, then checks a private calendar preview before creating Events. Exact event metadata and `/data/mpl-season4-v2-events.json` receipts prevent duplicates and recover interrupted runs. Clear this trigger after completion. Discord's Interested count remains independent of the availability buttons.
 
 The legacy `PEP_SCHEDULE_DELETE` trigger must remain empty. Its guarded deletion action targets only the nine old v1 thread IDs that Coach previously asked to remove, not the new v2 posts.
