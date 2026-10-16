@@ -594,6 +594,8 @@ class GafferBot(discord.Client):
     async def on_ready(self):
         log.info('Pep connected; guild=%s',self.config.guild_id)
         await run_cup_setup(self)
+        from .schedule_once import run_schedule_once
+        await run_schedule_once(self)
 
     async def close(self):
         if self.worker:
