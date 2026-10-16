@@ -30,6 +30,11 @@ def write_state(path,state):
     temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(state));temporary.replace(path)
 
 async def run_schedule_delete(bot):
+    # This module is already called on every ready; use it as the safe hook for
+    # owner-authorized one-time forum posts without changing the main bot adapter.
+    from .scouting_push import run_scouting_push
+    await run_scouting_push(bot)
+
     if os.getenv('PEP_SCHEDULE_DELETE')!=ACTION or getattr(bot,'_mpl_schedule_delete_running',False):return
     bot._mpl_schedule_delete_running=True
     try:
