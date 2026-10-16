@@ -19,6 +19,7 @@ ACTION = 'man-utd-opposition-brief-2026-10-20-v1'
 RECEIPT_FILE = 'man-utd-opposition-brief-2026-10-20.json'
 ATTACHMENT_NAME = 'Birmingham_vs_Man_United_Opposition_Brief.jpg'
 ASSET_SHA256 = '423f5d93bbc9da05a516f13f7b0a83ceff86f939557f449d9ebdde7eec1ca515'
+EXPECTED_CHUNK_LENGTHS = [10422, 10422, 10422, 10422, 10422, 10422, 10420]
 MARKER = 'C&C Management | Opposition Scout | Man United | 2026-10-20'
 CONTENT = (
     '📋 **OPPOSITION SCOUT — MAN UNITED**\n'
@@ -45,12 +46,16 @@ def _save_state(path, state):
 
 
 def _asset_bytes():
-    encoded = ''.join(os.getenv(f'PEP_SCOUT_IMAGE_{i}', '') for i in range(1, 8))
-    if not encoded:
-        raise ValueError('Opposition brief image variables are missing')
+    chunks = [os.getenv(f'PEP_SCOUT_IMAGE_{i}', '').strip() for i in range(1, 8)]
+    lengths = [len(chunk) for chunk in chunks]
+    log.info('PEP_SCOUT_IMAGE_LENGTHS %s total=%s mod4=%s', lengths, sum(lengths), sum(lengths) % 4)
+    if lengths != EXPECTED_CHUNK_LENGTHS:
+        raise ValueError(f'Opposition brief image chunk lengths mismatch: {lengths}')
+    encoded = ''.join(chunks)
     data = base64.b64decode(encoded, validate=True)
-    if hashlib.sha256(data).hexdigest() != ASSET_SHA256:
-        raise ValueError('Opposition brief asset checksum mismatch')
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != ASSET_SHA256:
+        raise ValueError(f'Opposition brief asset checksum mismatch: {actual}')
     return data
 
 
