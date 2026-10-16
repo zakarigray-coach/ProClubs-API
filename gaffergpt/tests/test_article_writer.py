@@ -1,0 +1,205 @@
+import tempfile
+import unittest
+from pathlib import Path
+from gaffergpt.database import Database
+from gaffergpt.weekly_intake import save_submission
+from gaffergpt.reporter import Reporter
+from gaffergpt.article_writer import SportsWriter, editorial_packet
+
+class SportsArticleTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.db=Database(Path(self.tmp.name)/'db.sqlite')
+        self.rid=self.db.open_report('2026-10-05T04:00:00+00:00','2026-10-12T04:00:00+00:00','1')['report_id']
+        save_submission(self.db,self.rid,'1','guild','2026-10-06 | Practice | Chelsea | 2-1\n2026-10-07 | Practice | Arsenal | 0-3')
+        ids=[r['match_id'] for r in self.db.rows('SELECT match_id FROM matches')]
+        self.db.replace_page_selection(self.rid,ids,ids[:1]);self.db.confirm_report(self.rid)
+    def tearDown(self):self.tmp.cleanup()
+    def test_writer_gets_only_selected_facts_and_readable_dates(self):
+        class Writer:
+            def write(inner,packet):
+                self.assertEqual(len(packet['matches']),1)
+                self.assertEqual(packet['matches'][0]['opponent'],'Chelsea')
+                self.assertNotIn('match_id',packet['matches'][0])
+                self.assertIn('October 5',packet['period'])
+                return 'Blues find a training-ground lift','Birmingham beat Chelsea 2–1 in practice.'
+        article=Reporter(self.db,writer=Writer()).generate(self.rid)
+        self.assertIn('Blues find a training-ground lift',article)
+        self.assertNotIn('PLAYER STATS',article)
+        self.assertNotIn('end exclusive',article)
+        self.assertEqual(self.db.report(self.rid)['status'],'draft')
+    def test_provider_failure_preserves_confirmed_report_for_retry(self):
+        class Writer:
+            def write(self,packet):raise RuntimeError('provider unavailable')
+        with self.assertRaises(RuntimeError):Reporter(self.db,writer=Writer()).generate(self.rid)
+        self.assertEqual(self.db.report(self.rid)['status'],'confirmed')
+        self.assertFalse(self.db.report(self.rid)['article'])
+    def test_provider_uses_structured_article_output(self):
+        payload=SportsWriter('test').payload('{}')
+        self.assertEqual(payload['text']['format']['schema']['required'],['title','body'])
+        self.assertIn('350–550',payload['instructions'])
+
+    def test_legacy_outfield_conceded_stats_never_reach_writer(self):
+        packet={'observations':{'player_statistics':{'Practice':[
+            {'player':'Outfield','appearances':4,'goals_conceded':10,'clean_sheets':1,'metric_samples':{'goals_conceded':4}},
+            {'player':'Keeper','appearances':2,'goalkeeper_appearances':2,'goals_conceded':3}]}}}
+        clean=editorial_packet(packet)['observations']['player_statistics']['Practice']
+        self.assertNotIn('goals_conceded',clean[0])
+        self.assertNotIn('clean_sheets',clean[0])
+        self.assertEqual(clean[1]['goals_conceded'],3)
+        self.assertEqual(packet['observations']['player_statistics']['Practice'][0]['goals_conceded'],10)
+
+class FinishedArticleTests(unittest.TestCase):
+    def test_short_results_only_article_does_not_require_padding(self):
+        from gaffergpt.article_writer import check_finished_prose
+        article={'title':'Birmingham win away before home defeat','body':
+            'Birmingham City recorded two contrasting results. They beat Middlesbrough 1-0 away and lost 0-4 at home to Everton. '
+            'The results left Birmingham with one win and one defeat. The away victory and home loss provided contrasting scorelines.'}
+        self.assertLess(len(article['body'].split()),40)
+        check_finished_prose(article,{'results':'Middlesbrough 1-0, Everton 0-4'})
+
+    def test_selected_match_date_passes_but_invented_date_is_held(self):
+        import json
+        from gaffergpt.tests.test_report_verification import fixture
+        matches=[fixture(1,'Official','Middlesbrough',1,0),fixture(2,'Official','Everton',0,4)]
+        for match in matches:match.update(played_at='2026-10-14T16:00:00+00:00',date_source='management-date')
+        matches[0]['venue']='Away'
+        packet={'matches':matches,'statistics':[]}
+        for day in (14,15):
+            with self.subTest(day=day):
+                sentences={
+                    'Middlesbrough':f'Birmingham City beat Middlesbrough 1-0 in an official away match on {day} October.',
+                    'Everton':f'Birmingham City lost 0-4 at home to Everton in an official match on {day} October.'}
+                article={'title':'Birmingham record contrasting official results','body':'\n\n'.join(sentences.values())}
+                class Writer(SportsWriter):
+                    async def advise(self,analysis,formation=''):
+                        request=json.loads(analysis)
+                        if request.get('desk_task')=='audit_finished_article':return json.dumps({'title':'PASS','body':''})
+                        if request.get('desk_task')=='locate_final_claims':
+                            return json.dumps({'claims':[{'fact_id':key,'quote':sentences[fact['subject']]}
+                                for key,fact in request['fact_sheet']['facts'].items() if fact['kind'] in ('fixture','date')],'unsupported':[]})
+                        return json.dumps(article)
+                writer=Writer('test')
+                if day==14:
+                    self.assertEqual(writer.write(packet),(article['title'],article['body']))
+                    self.assertIsNotNone(writer.last_verification)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'three revision attempts'):writer.write(packet)
+                    self.assertIsNone(writer.last_verification)
+
+    def test_known_broken_grammar_is_rejected(self):
+        from gaffergpt.article_writer import check_finished_prose
+        for broken in ('one goals and one assists across one practice appearances',
+                       'before a commanding the win', 'Those the results'):
+            with self.assertRaises(ValueError):
+                check_finished_prose({'title':'Birmingham find goals','body':('Birmingham played practice football. '*15)+broken},{})
+
+    def test_audit_is_about_rendered_language_and_attribution(self):
+        import json
+        payload=SportsWriter('test').payload(json.dumps({'desk_task':'audit_finished_article'}))
+        self.assertIn('correct player and fixture',payload['instructions'])
+        self.assertIn('FINISHED article',payload['instructions'])
+
+    def test_failed_final_review_retries_before_returning(self):
+        import json
+        calls=[]
+        prose=('Birmingham’s practice programme brought contrasting results, with attacking contributions providing the clearest individual talking points. '
+               'The fixtures belong to the training ground rather than the competitive record. '
+               'For supporters, the immediate interest lies in those contributions; league conclusions will need competitive evidence.')
+        class Writer(SportsWriter):
+            async def advise(self,analysis,formation=''):
+                request=json.loads(analysis);calls.append(request)
+                if request.get('desk_task')=='audit_finished_article':
+                    audits=sum(c.get('desk_task')=='audit_finished_article' for c in calls)
+                    return json.dumps({'title':'FAIL' if audits==1 else 'PASS','body':'Remove repetition' if audits==1 else ''})
+                if request.get('desk_task')=='locate_final_claims':return json.dumps({'claims':[],'unsupported':[]})
+                return json.dumps({'title':'Birmingham weigh contrasting practice returns','body':prose})
+        title,body=Writer('test').write({'matches':[],'observations':{},'management':{}})
+        self.assertEqual(body,prose)
+        self.assertEqual(sum(c.get('desk_task')=='audit_finished_article' for c in calls),2)
+        self.assertEqual(calls[-1]['finished_article']['body'],prose)
+        self.assertEqual(calls[-3]['validation_feedback'],'Remove repetition')
+
+    def test_equivalent_decimal_display_does_not_reject_correct_rating(self):
+        from gaffergpt.article_writer import check_finished_prose
+        check_finished_prose({'title':'Birmingham review practice returns',
+            'body':('The training fixtures offered a useful snapshot of the club’s results. '*5)+'A player averaged 8.1.'},
+            {'rating':'A player averaged 8.10.'})
+
+class NewspaperQualityTests(unittest.TestCase):
+    def setUp(self):
+        self.packet={'matches':[], 'management':{'player_name':'TraapxLit'},
+                     'observations':{'player_statistics':{'Practice':[
+                         {'player':'TraapxLit','goals':7,'assists':2,'appearances':3,'average_rating':8.633333},
+                         {'player':'DaddyGray10420','goals':3,'assists':6,'appearances':4,'dribbles_completed':80},
+                         {'player':'Third','goals':1,'assists':0,'appearances':1},
+                         {'player':'Fourth','goals':1,'assists':0,'appearances':1}]}}}
+    def test_previous_roll_call_and_policy_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_feature_quality
+        for body in ('TraapxLit scored seven goals. A factual snapshot.',
+                     'TraapxLit scored seven goals. The week produced a non-negligible volume of goals conceded.',
+                     'TraapxLit scored seven goals. Those are the confirmed figures; any conclusions belong to the coaching staff.',
+                     'TraapxLit DaddyGray10420 Third Fourth'):
+            with self.assertRaises(ValueError):check_feature_quality({'body':body},self.packet)
+    def test_opening_must_feature_main_story(self):
+        from gaffergpt.article_writer import check_feature_quality
+        with self.assertRaises(ValueError):
+            check_feature_quality({'body':'Birmingham played four games.\n\nTraapxLit scored seven goals.'},self.packet)
+        check_feature_quality({'body':'TraapxLit scored seven goals during a mixed practice block.'},self.packet)
+    def test_story_brief_excludes_roster_and_secondary_metrics(self):
+        from gaffergpt.article_writer import feature_facts
+        facts=' '.join(feature_facts(self.packet).values())
+        self.assertIn('TraapxLit',facts);self.assertIn('DaddyGray10420',facts)
+        self.assertNotIn('Third',facts);self.assertNotIn('Fourth',facts)
+        self.assertNotIn('dribbles',facts);self.assertIn('8.63',facts)
+
+    def test_preview_repetition_and_ledger_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_feature_quality
+        for body in ('TraapxLit scored seven goals and two assists.\n\nHis seven goals earned the award.',
+                     'TraapxLit scored seven goals. The week’s ledger presents a mixture of high-scoring outings.'):
+            with self.assertRaises(ValueError):check_feature_quality({'body':body},self.packet)
+
+class PersistentWritingRulesTests(unittest.TestCase):
+    def test_generic_first_sentence_is_rejected_even_with_star_in_paragraph(self):
+        from gaffergpt.article_writer import check_feature_quality
+        packet={'management':{'player_name':'TraapxLit'},'observations':{'player_statistics':{'Practice':[{'player':'TraapxLit','goals':7}]}}}
+        with self.assertRaises(ValueError):check_feature_quality({'body':'Birmingham played a busy week. TraapxLit scored seven goals.'},packet)
+    def test_compact_record_and_policy_ending_are_rejected(self):
+        from gaffergpt.article_writer import check_finished_prose,check_feature_quality
+        with self.assertRaises(ValueError):check_finished_prose({'title':'Practice week','body':'Birmingham finished 2–1–1. '+'A training fixture offered useful football. '*10},{})
+        with self.assertRaises(ValueError):check_feature_quality({'body':'The matches ended without drawing larger conclusions.'},{})
+
+
+class SourceOutlineTests(unittest.TestCase):
+    def test_failed_thin_article_restarts_from_exact_selected_facts(self):
+        from gaffergpt.article_writer import verified_short_outline
+        from gaffergpt.report_verification import build_fact_sheet
+        from gaffergpt.tests.test_report_verification import fixture,stat
+        packet={'matches':[fixture(1,opponent='Test A',own=2,other=5),fixture(2,opponent='Test B',own=6,other=2)],
+                'statistics':[stat(1,'TraapxLit','goals',2),stat(2,'TraapxLit','goals',5)],
+                'management':{'player_name':'TraapxLit','player_evidence':'Coach confirmed'},
+                'recovery':{'article':{'title':'Wrong','body':'Invented leadership and confidence'}}}
+        outline=verified_short_outline(packet,build_fact_sheet(packet))
+        self.assertTrue(outline['body'].startswith('TraapxLit’s seven goals'))
+        self.assertIn('Test A, 2–5',outline['body']);self.assertIn('Test B, 6–2',outline['body'])
+        self.assertNotIn('leadership',outline['body']);self.assertNotIn('confidence',outline['body'])
+        self.assertEqual(outline['body'].count('seven goals'),1)
+        packet['competition_context']={'event':{'report_type':'Cup'}}
+        self.assertIsNone(verified_short_outline(packet,build_fact_sheet(dict(packet,competition_context=None))))
+
+    def test_partial_statistics_do_not_become_full_period_outline_totals(self):
+        from gaffergpt.article_writer import verified_short_outline
+        from gaffergpt.report_verification import build_fact_sheet
+        from gaffergpt.tests.test_report_verification import fixture,stat
+        packet={'matches':[fixture(1,own=3),fixture(2,own=2)],'statistics':[stat(1,'Zak','goals',3),stat(2,'Zak','rating',7)],'management':{'player_name':'Zak','player_evidence':'Confirmed'}}
+        self.assertIsNone(verified_short_outline(packet,build_fact_sheet(packet)))
+
+class NewspaperStructureTests(unittest.TestCase):
+    def test_score_and_metric_bullet_article_is_rejected_but_connected_story_passes(self):
+        from gaffergpt.article_writer import check_feature_quality
+        packet={'matches':[{}, {}, {}, {}],'observations':{'player_statistics':{}}}
+        flat='TraapxLit scored seven goals.\n\nBirmingham won two games.\n\nBirmingham drew one game.\n\nDaddyGray10420 had six assists.\n\nThe award went to TraapxLit.'
+        with self.assertRaisesRegex(ValueError,'isolated statistics'):
+            check_feature_quality({'body':flat},packet)
+        story='TraapxLit’s seven goals were the individual highlight of Birmingham City’s mixed practice results. The club finished with two wins, a draw and a defeat.\n\nThe contrasting results gave the scoring contribution its context. DaddyGray10420 also contributed six assists, alongside three goals.\n\nTraapxLit was Birmingham’s Player of the Week. The individual returns offered a brighter picture than the uneven team results.'
+        check_feature_quality({'body':story},packet)

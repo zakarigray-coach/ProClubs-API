@@ -1,0 +1,164 @@
+[
+  {
+    "id": 9238,
+    "round": "Round 1",
+    "timestamp": 1792548000,
+    "date": "Tue 20 Oct, 10:00PM EDT",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Man Utd.",
+    "url": "https://naclubsleagues.com/matches/9238"
+  },
+  {
+    "id": 9283,
+    "round": "Round 10",
+    "timestamp": 1792549800,
+    "date": "Tue 20 Oct, 10:30PM EDT",
+    "home": "MPL Man Utd.",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9283"
+  },
+  {
+    "id": 9242,
+    "round": "Round 2",
+    "timestamp": 1792720800,
+    "date": "Thu 22 Oct, 10:00PM EDT",
+    "home": "MPL Tottenham F.C.",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9242"
+  },
+  {
+    "id": 9287,
+    "round": "Round 11",
+    "timestamp": 1792722600,
+    "date": "Thu 22 Oct, 10:30PM EDT",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Tottenham F.C.",
+    "url": "https://naclubsleagues.com/matches/9287"
+  },
+  {
+    "id": 9246,
+    "round": "Round 3",
+    "timestamp": 1793152800,
+    "date": "Tue 27 Oct, 10:00PM EDT",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Man City FC",
+    "url": "https://naclubsleagues.com/matches/9246"
+  },
+  {
+    "id": 9291,
+    "round": "Round 12",
+    "timestamp": 1793154600,
+    "date": "Tue 27 Oct, 10:30PM EDT",
+    "home": "MPL Man City FC",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9291"
+  },
+  {
+    "id": 9252,
+    "round": "Round 4",
+    "timestamp": 1793325600,
+    "date": "Thu 29 Oct, 10:00PM EDT",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Everton F.C.",
+    "url": "https://naclubsleagues.com/matches/9252"
+  },
+  {
+    "id": 9297,
+    "round": "Round 13",
+    "timestamp": 1793327400,
+    "date": "Thu 29 Oct, 10:30PM EDT",
+    "home": "MPL Everton F.C.",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9297"
+  },
+  {
+    "id": 9258,
+    "round": "Round 5",
+    "timestamp": 1794362400,
+    "date": "Tue 10 Nov, 9:00PM EST",
+    "home": "MPL Middlesbrough",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9258"
+  },
+  {
+    "id": 9303,
+    "round": "Round 14",
+    "timestamp": 1794364200,
+    "date": "Tue 10 Nov, 9:30PM EST",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Middlesbrough",
+    "url": "https://naclubsleagues.com/matches/9303"
+  },
+  {
+    "id": 9264,
+    "round": "Round 6",
+    "timestamp": 1794535200,
+    "date": "Thu 12 Nov, 9:00PM EST",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Sunderland AFC",
+    "url": "https://naclubsleagues.com/matches/9264"
+  },
+  {
+    "id": 9309,
+    "round": "Round 15",
+    "timestamp": 1794537000,
+    "date": "Thu 12 Nov, 9:30PM EST",
+    "home": "MPL Sunderland AFC",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9309"
+  },
+  {
+    "id": 9270,
+    "round": "Round 7",
+    "timestamp": 1795572000,
+    "date": "Tue 24 Nov, 9:00PM EST",
+    "home": "MPL Grimsby Town",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9270"
+  },
+  {
+    "id": 9315,
+    "round": "Round 16",
+    "timestamp": 1795573800,
+    "date": "Tue 24 Nov, 9:30PM EST",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Grimsby Town",
+    "url": "https://naclubsleagues.com/matches/9315"
+  },
+  {
+    "id": 9275,
+    "round": "Round 8",
+    "timestamp": 1796176800,
+    "date": "Tue 01 Dec, 9:00PM EST",
+    "home": "MPL Brentford FC",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9275"
+  },
+  {
+    "id": 9320,
+    "round": "Round 17",
+    "timestamp": 1796178600,
+    "date": "Tue 01 Dec, 9:30PM EST",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Brentford FC",
+    "url": "https://naclubsleagues.com/matches/9320"
+  },
+  {
+    "id": 9279,
+    "round": "Round 9",
+    "timestamp": 1796349600,
+    "date": "Thu 03 Dec, 9:00PM EST",
+    "home": "MPL BirminghamCity",
+    "away": "MPL Burnley F.C.",
+    "url": "https://naclubsleagues.com/matches/9279"
+  },
+  {
+    "id": 9324,
+    "round": "Round 18",
+    "timestamp": 1796351400,
+    "date": "Thu 03 Dec, 9:30PM EST",
+    "home": "MPL Burnley F.C.",
+    "away": "MPL BirminghamCity",
+    "url": "https://naclubsleagues.com/matches/9324"
+  }
+]
