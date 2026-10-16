@@ -19,7 +19,7 @@ ACTION = 'man-utd-opposition-brief-2026-10-20-v1'
 RECEIPT_FILE = 'man-utd-opposition-brief-2026-10-20.json'
 ATTACHMENT_NAME = 'Birmingham_vs_Man_United_Opposition_Brief.jpg'
 ASSET_SHA256 = '423f5d93bbc9da05a516f13f7b0a83ceff86f939557f449d9ebdde7eec1ca515'
-EXPECTED_CHUNK_LENGTHS = [10422, 10422, 10422, 10422, 10422, 10422, 10420]
+EXPECTED_CHUNK_LENGTHS = [10422, 10422, 10422, 10422, 10422, 10422, 5210, 5210]
 MARKER = 'C&C Management | Opposition Scout | Man United | 2026-10-20'
 CONTENT = (
     '📋 **OPPOSITION SCOUT — MAN UNITED**\n'
@@ -46,7 +46,11 @@ def _save_state(path, state):
 
 
 def _asset_bytes():
-    chunks = [os.getenv(f'PEP_SCOUT_IMAGE_{i}', '').strip() for i in range(1, 8)]
+    chunks = [os.getenv(f'PEP_SCOUT_IMAGE_{i}', '').strip() for i in range(1, 7)]
+    chunks.extend([
+        os.getenv('PEP_SCOUT_IMAGE_7A', '').strip(),
+        os.getenv('PEP_SCOUT_IMAGE_7B', '').strip(),
+    ])
     lengths = [len(chunk) for chunk in chunks]
     hashes = [hashlib.sha256(chunk.encode()).hexdigest() for chunk in chunks]
     log.info('PEP_SCOUT_IMAGE_LENGTHS %s total=%s mod4=%s', lengths, sum(lengths), sum(lengths) % 4)
